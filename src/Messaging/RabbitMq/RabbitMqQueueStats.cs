@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Broker-reported queue statistics from a passive declare.</summary>
     /// <param name="MessageCount">Ready message count.</param>

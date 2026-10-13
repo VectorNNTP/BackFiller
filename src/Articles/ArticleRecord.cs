@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Canonical in-memory Vector article after one-time parse, classification, and materialization.

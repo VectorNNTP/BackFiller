@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Networking.Listeners
+namespace VectorNNTP.BackFiller.Networking.Listeners
 {
     /// <summary>One listen socket binding plan.</summary>
     /// <param name="Address">Local address to bind.</param>

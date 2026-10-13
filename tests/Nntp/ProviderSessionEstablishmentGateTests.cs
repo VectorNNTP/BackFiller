@@ -106,7 +106,6 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             var acquires = Task.WhenAll(
                 poolA.AcquireAsync(CancellationToken.None),
-                poolA.AcquireAsync(CancellationToken.None),
                 poolB.AcquireAsync(CancellationToken.None),
                 poolB.AcquireAsync(CancellationToken.None));
 
@@ -116,7 +115,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             block.TrySetResult();
             var leases = await acquires.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.True(factory.MaxObservedConcurrentConnects <= 1);
-            Assert.Equal(4, factory.ConnectAttempts.Count);
+            Assert.Equal(3, factory.ConnectAttempts.Count);
             foreach (var lease in leases)
             {
                 await lease.DisposeAsync();

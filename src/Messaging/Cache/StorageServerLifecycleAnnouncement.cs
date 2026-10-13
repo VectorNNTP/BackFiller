@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>Explicit StorageServer fleet announcement that the server is leaving selection.</summary>
     public enum StorageServerLifecycleState

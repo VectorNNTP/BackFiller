@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// VATP v1 frame types. Numeric values are stable wire assignments.

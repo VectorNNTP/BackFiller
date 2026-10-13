@@ -8,9 +8,9 @@ using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Transport.ArticleTransfer;
-using VectorNNTP.Common.Networking.Certificates;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {

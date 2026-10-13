@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Networking
+namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>
     /// Resolves configured <see cref="AcmeCloudflareOptions.BindAddress"/> entries into the eligible IP set

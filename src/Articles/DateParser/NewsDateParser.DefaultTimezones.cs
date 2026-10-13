@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <content>
     /// Built-in trailing timezone-abbreviation table used during date canonicalization.

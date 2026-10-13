@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
     /// One StorageServer fleet advertisement (heartbeat + capacity announcement).

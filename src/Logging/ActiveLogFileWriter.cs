@@ -1,7 +1,7 @@
 using Serilog.Events;
 using Serilog.Formatting;
 
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Appends formatted events to one active log file.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Cross-process exclusive lock for one certificate FQDN's issuance and promotion.

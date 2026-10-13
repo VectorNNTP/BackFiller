@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>One DNS-01 challenge to publish as a TXT record.</summary>
     /// <param name="Domain">Authorization DNS name.</param>

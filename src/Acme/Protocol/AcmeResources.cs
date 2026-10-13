@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>ACME directory document (RFC 8555 §7.1.1).</summary>
     internal sealed class AcmeDirectoryResource

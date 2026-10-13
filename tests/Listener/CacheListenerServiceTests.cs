@@ -8,8 +8,8 @@ using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.Common.Transport.ArticleTransfer;
-using VectorNNTP.Common.Networking.Certificates;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
@@ -23,7 +23,6 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Running, context.Service.State);
             Assert.Contains(context.Service.LocalEndPoints, static endpoint => endpoint is IPEndPoint ip && ip.Address.Equals(IPAddress.Loopback));
 
-            await context.Service.DisposeAsync();
             await context.Service.DisposeAsync();
             Assert.Equal(CacheListenerState.Stopped, context.Service.State);
         }

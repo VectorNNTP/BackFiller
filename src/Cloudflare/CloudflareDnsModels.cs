@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>Cloudflare DNS record type names used by this host.</summary>
     internal static class CloudflareDnsRecordTypes

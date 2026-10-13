@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Core;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Process-wide RabbitMQ connection owner: startup connect, generation-tagged replacement, and shutdown.

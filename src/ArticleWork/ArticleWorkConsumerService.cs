@@ -2,7 +2,7 @@ using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.RabbitMq;
 
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.ArticleWork
 {

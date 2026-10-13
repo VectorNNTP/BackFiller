@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Atomic filesystem helpers for ACME state (temp + replace).</summary>
     internal static class AtomicFile

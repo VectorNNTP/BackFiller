@@ -3,7 +3,7 @@ using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {

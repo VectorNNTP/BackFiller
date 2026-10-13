@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Incremental, transport-agnostic parser for VATP v1 frames.

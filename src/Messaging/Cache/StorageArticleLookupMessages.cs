@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
     /// NNTPD → StorageServer fleet article-presence lookup request ("who has article X?").

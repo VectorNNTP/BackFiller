@@ -1,11 +1,11 @@
 using System.IO.Hashing;
-using VectorNNTP.Common.Articles.DateParser;
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.Articles.Processing;
-using VectorNNTP.Common.Articles.Validation;
-using VectorNNTP.Common.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Articles.DateParser;
+using VectorNNTP.BackFiller.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Processing;
+using VectorNNTP.BackFiller.Articles.Validation;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Builds an <see cref="ArticleRecord"/> from destuffed article bytes or from a validated

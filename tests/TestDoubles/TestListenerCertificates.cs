@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging.Abstractions;
-using VectorNNTP.Common.Networking.Certificates;
+using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
 {

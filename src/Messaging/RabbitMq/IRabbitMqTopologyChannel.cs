@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Short-lived RabbitMQ channel used only to declare application topology.

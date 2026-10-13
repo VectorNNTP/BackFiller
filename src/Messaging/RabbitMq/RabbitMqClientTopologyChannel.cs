@@ -1,6 +1,6 @@
 using RabbitMQ.Client;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Adapts a RabbitMQ.Client channel to declare-only topology operations.</summary>
     internal sealed class RabbitMqClientTopologyChannel : IRabbitMqTopologyChannel

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>
     /// External account binding credentials (RFC 8555 §7.3.4). Optional; VectorNNTP registration passes null

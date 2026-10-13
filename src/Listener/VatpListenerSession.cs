@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
 namespace VectorNNTP.BackFiller.Listener
 {

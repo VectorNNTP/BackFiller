@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Builds a minimal single-question RFC 1035 DNS query.

@@ -4,16 +4,14 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.Acme;
+using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Hosting.Systemd;
 using VectorNNTP.BackFiller.Logging;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {

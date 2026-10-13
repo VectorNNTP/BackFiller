@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Acme.Protocol;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Acme.Protocol;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// ACME v2 issuer using the owned protocol client with DNS-01 via <see cref="Dns01Solver"/>.

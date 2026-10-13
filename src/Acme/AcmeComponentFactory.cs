@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Cloudflare;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Creates ACME components only when TLS is enabled so non-TLS startups never touch ACME state.

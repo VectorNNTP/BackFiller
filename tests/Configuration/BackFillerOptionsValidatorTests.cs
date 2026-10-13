@@ -2,9 +2,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Hosting;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Hosting;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
@@ -329,7 +329,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 .Build();
             var options = new BackFillerOptions();
             configuration.GetSection(BackFillerOptions.SectionName).Bind(options);
-            var rabbit = new VectorNNTP.Common.Messaging.RabbitMq.RabbitMqOptions();
+            var rabbit = new VectorNNTP.BackFiller.Messaging.RabbitMq.RabbitMqOptions();
             configuration.GetSection("RabbitMQ").Bind(rabbit);
             Assert.Null(typeof(BackFillerOptions).GetProperty("RabbitMQ"));
             Assert.Equal("canonical-user", rabbit.Username);

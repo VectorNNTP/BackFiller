@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
     /// Validates the structured VATP dial fields carried by Article Work and storage lookup.

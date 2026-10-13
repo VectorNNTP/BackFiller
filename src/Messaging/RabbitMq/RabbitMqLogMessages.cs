@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Source-generated RabbitMQ infrastructure log messages. Never includes credentials.</summary>
     internal static partial class RabbitMqLogMessages

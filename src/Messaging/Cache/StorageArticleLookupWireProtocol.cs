@@ -1,8 +1,8 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
     /// Canonical compact System.Text.Json contracts for StorageServer article-lookup v1 bodies.

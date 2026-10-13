@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Source-generated structured log messages for application service manager events.

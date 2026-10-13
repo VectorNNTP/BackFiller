@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// <see cref="IRabbitMqConnectionNameProvider"/> that evaluates a caller-supplied factory.

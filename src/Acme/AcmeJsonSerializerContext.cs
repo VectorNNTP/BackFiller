@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Source-generated JSON metadata for ACME account and DNS-01 challenge journal payloads.

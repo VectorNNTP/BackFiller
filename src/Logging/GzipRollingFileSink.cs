@@ -6,7 +6,7 @@ using Serilog.Events;
 using Serilog.Formatting;
 using Serilog.Sinks.File;
 
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Daily (or other interval) rolling file sink that gzip-compresses a file when it becomes inactive

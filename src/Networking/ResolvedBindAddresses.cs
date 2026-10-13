@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Networking
+namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>
     /// Deduplicated set of eligible IP addresses derived from configured <c>BindAddress</c> entries.

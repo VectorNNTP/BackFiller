@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.OverviewDb
+namespace VectorNNTP.BackFiller.Articles.OverviewDb
 {
     /// <summary>
     /// Decoded OverviewDB ingest handoff. Production encoding writes this shape as

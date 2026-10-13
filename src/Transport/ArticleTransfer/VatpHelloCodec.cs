@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// HELLO payload codec: magic <c>VNATP01\0</c> + big-endian <c>u32</c> maxFramePayload.

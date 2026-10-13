@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Deterministic certificate SAN set for NNTPD TLS certificates.</summary>
     internal static class CertificateIdentities

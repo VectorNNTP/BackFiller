@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Hosting
+namespace VectorNNTP.BackFiller.Hosting
 {
     /// <summary>
     /// Registers the shared NntpDB options binding used by NNTPD and BackFiller.

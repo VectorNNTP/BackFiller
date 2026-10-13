@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>Leaf certificate RSA private key used to build the ACME finalize CSR and PKCS#12.</summary>
     internal sealed class AcmeCertificateKey : IDisposable

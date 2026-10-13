@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.Processing
+namespace VectorNNTP.BackFiller.Articles.Processing
 {
     /// <summary>
     /// Byte-oriented article identity comparisons used after parse and before retain.

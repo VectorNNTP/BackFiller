@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Configuration;
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// One immutable <c>nntpsharedconfig</c> row. Values are the database values; bytes are not converted.

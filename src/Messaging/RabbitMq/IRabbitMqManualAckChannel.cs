@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Caller-owned AMQP channel for topology declaration, manual-ack consume, and settlement.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>One parsed VATP frame (header plus payload sequence).</summary>
     internal readonly record struct VatpParsedFrame(VatpFrameHeader Header, ReadOnlySequence<byte> Payload);

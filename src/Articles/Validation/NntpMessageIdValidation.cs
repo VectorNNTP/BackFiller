@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace VectorNNTP.Common.Articles.Validation
+namespace VectorNNTP.BackFiller.Articles.Validation
 {
     /// <summary>
     /// Canonical RFC 5536 §3.1.3 <c>msg-id</c> validation.

@@ -1,6 +1,6 @@
 using MySqlConnector;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// Opens logical MySQL connections from the configured NntpDB connection string.

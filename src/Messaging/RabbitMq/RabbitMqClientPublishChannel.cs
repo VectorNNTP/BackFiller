@@ -1,7 +1,7 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Exceptions;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Confirm-enabled RabbitMQ.Client publish channel for one-way handoffs.

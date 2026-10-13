@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Fixed 76-byte VATP META fields describing a CanonicalV1 ArtData buffer.

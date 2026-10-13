@@ -1,8 +1,8 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>
     /// Failure returned by an ACME certificate authority (problem document and/or HTTP status).
-    /// Distinct from the product <see cref="VectorNNTP.Common.Acme.AcmeException"/> category hierarchy.
+    /// Distinct from the product <see cref="VectorNNTP.BackFiller.Acme.AcmeException"/> category hierarchy.
     /// </summary>
     internal class AcmeCaException : Exception
     {

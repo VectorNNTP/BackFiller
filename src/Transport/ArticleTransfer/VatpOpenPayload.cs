@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// OPEN payload: 16-byte RequestId GUID + 32-byte <see cref="ArticleId"/>.

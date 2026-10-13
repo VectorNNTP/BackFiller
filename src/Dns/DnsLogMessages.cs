@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>Source-generated log messages for the owned DNS wire stack.</summary>
     internal static partial class DnsLogMessages

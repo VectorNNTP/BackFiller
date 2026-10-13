@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package vectornntp.overviewdb.v1;
 
-option csharp_namespace = "VectorNNTP.Common.Articles.OverviewDb";
+option csharp_namespace = "VectorNNTP.BackFiller.Articles.OverviewDb";
 
 // One-way NNTPD → OverviewDB ingest handoff. The article body is never included.
 // SchemaVersion must be 1. ArticleId is VectorNNTP's 32-byte BLAKE3 ArtId, not

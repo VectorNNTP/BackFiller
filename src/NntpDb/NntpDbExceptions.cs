@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>MySQL infrastructure failure that is not an authentication error.</summary>
     public sealed class NntpDbUnavailableException : Exception

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Owns server certificate lifecycle: evaluate, issue, renew, and expose validated PFX material.

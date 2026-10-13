@@ -1,7 +1,7 @@
 using Serilog;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Logging;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
 internal class Program
 {

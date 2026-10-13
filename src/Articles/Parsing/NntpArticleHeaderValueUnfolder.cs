@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.Parsing
+namespace VectorNNTP.BackFiller.Articles.Parsing
 {
     /// <summary>
     /// Bounded unfolding of folded header values for semantic validation.

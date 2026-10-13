@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
-namespace VectorNNTP.Common.Hosting
+namespace VectorNNTP.BackFiller.Hosting
 {
     /// <summary>
     /// Registers shared RabbitMQ connection infrastructure.

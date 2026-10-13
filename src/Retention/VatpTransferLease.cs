@@ -1,5 +1,5 @@
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Retention
 {

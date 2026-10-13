@@ -1,9 +1,8 @@
+using VectorNNTP.BackFiller.Acme;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Nntp;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Configuration;
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.NntpDb;
+using VectorNNTP.BackFiller.NntpDb;
 
 namespace VectorNNTP.BackFiller.Accounts
 {

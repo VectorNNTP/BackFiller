@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>Source-generated Cloudflare DNS client, reconciler, and reconciliation-service log messages.</summary>
     internal static partial class CloudflareLogMessages

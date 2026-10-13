@@ -1,6 +1,6 @@
-using VectorNNTP.Common.NntpDb;
+using VectorNNTP.BackFiller.NntpDb;
 
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>Validates <see cref="NntpDbOptions"/> at bind / startup time.</summary>
     /// <remarks>Never includes the connection string or credentials in failure messages.</remarks>

@@ -39,7 +39,7 @@ namespace VectorNNTP.BackFiller.RabbitMq
         /// Broker failures, including cancellation, propagate from the channel.
         /// </remarks>
         internal static async Task DeclareProviderEndpointAsync(
-            VectorNNTP.Common.Messaging.RabbitMq.IRabbitMqManualAckChannel channel,
+            VectorNNTP.BackFiller.Messaging.RabbitMq.IRabbitMqManualAckChannel channel,
             string backbone,
             CancellationToken cancellationToken)
         {

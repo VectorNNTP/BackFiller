@@ -5,16 +5,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.Acme;
+using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Listener;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Networking;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Core;
-using VectorNNTP.Common.Networking;
-
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
@@ -29,7 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 typeof(CloudflareDnsReconciliationService).Assembly,
                 typeof(CloudflareDnsReconciliationApplicationService).Assembly);
             Assert.Equal(
-                "VectorNNTP.Common.Cloudflare",
+                "VectorNNTP.BackFiller.Cloudflare",
                 typeof(CloudflareDnsReconciliationApplicationService).Namespace);
             Assert.Null(
                 typeof(BackFillerServiceCollectionExtensions).Assembly

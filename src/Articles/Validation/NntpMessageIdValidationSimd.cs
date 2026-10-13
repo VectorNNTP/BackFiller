@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-namespace VectorNNTP.Common.Articles.Validation
+namespace VectorNNTP.BackFiller.Articles.Validation
 {
     /// <summary>
     /// One-pass RFC 5536 <c>msg-id</c> scan.

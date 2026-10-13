@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Bounded table of active receive streams. StreamId 0 is reserved and rejected.

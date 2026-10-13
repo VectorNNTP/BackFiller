@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Persistent <see cref="ArticleType"/> flag combinations used by account

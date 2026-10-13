@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Networking
+namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>
     /// Classifies IP addresses for DNS publication from resolved bind addresses.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.OverviewDb
+namespace VectorNNTP.BackFiller.Articles.OverviewDb
 {
     /// <summary>
     /// Compact protobuf encoder/decoder for <see cref="OverviewArticleV1"/>.

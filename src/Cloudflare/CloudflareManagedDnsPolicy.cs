@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Managed A/AAAA DNS attributes enforced by reconciliation.

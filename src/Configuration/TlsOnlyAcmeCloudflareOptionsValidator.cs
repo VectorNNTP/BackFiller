@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Application policy: TLS is required. <see cref="AcmeCloudflareOptions.BindPortTls"/>

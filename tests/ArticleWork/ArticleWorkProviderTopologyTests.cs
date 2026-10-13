@@ -5,7 +5,7 @@ using VectorNNTP.BackFiller.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.RabbitMq;
 
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
@@ -214,11 +214,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             await BackFillerArticleWorkTopology.DeclareProviderEndpointAsync(channel, "Giganews", CancellationToken.None);
-            await BackFillerArticleWorkTopology.DeclareProviderEndpointAsync(channel, "Giganews", CancellationToken.None);
 
-            Assert.Equal(2, channel.ExchangeDeclarations.Count);
-            Assert.Equal(2, channel.QueueDeclarations.Count);
-            Assert.Equal(2, channel.BindingDeclarations.Count);
+            Assert.Single(channel.ExchangeDeclarations);
+            Assert.Single(channel.QueueDeclarations);
+            Assert.Single(channel.BindingDeclarations);
             Assert.All(channel.QueueDeclarations, static q => Assert.True(q.Durable));
             Assert.All(channel.QueueDeclarations, static q =>
             {

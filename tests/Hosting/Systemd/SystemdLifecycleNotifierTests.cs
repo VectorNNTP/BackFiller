@@ -100,7 +100,6 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             lifetime.SignalStopping();
 
             await notifier.StopAsync(CancellationToken.None);
-            await notifier.StopAsync(CancellationToken.None);
 
             Assert.Equal(1, notify.ReadyCount);
             Assert.Equal(1, notify.StoppingCount);

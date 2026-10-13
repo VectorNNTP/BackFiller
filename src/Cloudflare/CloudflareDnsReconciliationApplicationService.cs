@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Core;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Shared <see cref="IApplicationService"/> adapter around

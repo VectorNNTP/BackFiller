@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Configuration;
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// Application-level NntpDB service: configuration, lifecycle, and startup connectivity.

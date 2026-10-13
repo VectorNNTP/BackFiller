@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace VectorNNTP.Common.Articles.YEnc
+namespace VectorNNTP.BackFiller.Articles.YEnc
 {
     /// <summary>
     /// Parses strict one-to-eight digit hexadecimal ASCII values for yEnc CRC metadata.

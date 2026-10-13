@@ -1,8 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {

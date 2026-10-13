@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {
@@ -117,7 +117,6 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
             var service = CreateService(factory);
-            await service.StartAsync(CancellationToken.None);
             await service.StartAsync(CancellationToken.None);
 
             Assert.Equal(1, factory.ConnectCount);
@@ -390,7 +389,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
         {
             var assembly = typeof(RabbitMqService).Assembly;
             Assert.NotNull(assembly.GetType("VectorNNTP.BackFiller.ArticleWork.ArticleWorkConsumerService"));
-            Assert.NotNull(assembly.GetType("VectorNNTP.Common.Messaging.Cache.CacheFleetTopology"));
+            Assert.NotNull(assembly.GetType("VectorNNTP.BackFiller.Messaging.Cache.CacheFleetTopology"));
             Assert.DoesNotContain(
                 assembly.GetManifestResourceNames(),
                 static name => name.Contains("backfiller.storage", StringComparison.OrdinalIgnoreCase));

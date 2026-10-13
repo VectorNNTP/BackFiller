@@ -1,4 +1,4 @@
-using VectorNNTP.Common.NntpDb;
+using VectorNNTP.BackFiller.NntpDb;
 
 namespace VectorNNTP.BackFiller.NntpDb
 {

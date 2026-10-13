@@ -2,9 +2,9 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Authentication;
 using RabbitMQ.Client;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Maps validated RabbitMQ options onto RabbitMQ.Client and opens one broker connection.

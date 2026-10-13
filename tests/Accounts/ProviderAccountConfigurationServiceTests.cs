@@ -1,11 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using VectorNNTP.Common.Configuration;
-using VectorNNTP.Common.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Accounts;
-using VectorNNTP.Common.NntpDb;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Nntp;
+using VectorNNTP.BackFiller.NntpDb;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Nntp;
 

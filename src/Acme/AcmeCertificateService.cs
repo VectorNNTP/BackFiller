@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Application service that ensures ACME account/certificate readiness when TLS is enabled,

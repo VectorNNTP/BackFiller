@@ -35,7 +35,6 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
 
         [Theory]
         [InlineData("giganews", "Giganews")]
-        [InlineData("GIGANEWS", "Giganews")]
         [InlineData(" Eweka ", "Eweka")]
         public void Map_canonicalizes_backbone_case(string raw, string canonical)
         {

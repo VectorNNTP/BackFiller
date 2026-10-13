@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Networking;
+using VectorNNTP.BackFiller.Networking;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Authoritative Cloudflare DNS reconciler for the generated FQDN.

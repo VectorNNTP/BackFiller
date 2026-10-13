@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Broker close details for a single AMQP connection.</summary>
     /// <param name="ReplyCode">AMQP reply code supplied by the close.</param>

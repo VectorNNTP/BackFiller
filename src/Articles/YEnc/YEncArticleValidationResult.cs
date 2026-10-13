@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.YEnc
+namespace VectorNNTP.BackFiller.Articles.YEnc
 {
     /// <summary>
     /// Terminal yEnc validation classification for a raw NNTP article body.

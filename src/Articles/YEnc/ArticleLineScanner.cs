@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-namespace VectorNNTP.Common.Articles.YEnc
+namespace VectorNNTP.BackFiller.Articles.YEnc
 {
     /// <summary>
     /// Byte-level line scanning used by yEnc control-line recognition.

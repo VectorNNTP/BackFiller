@@ -1,6 +1,6 @@
 using VectorNNTP.BackFiller.Hosting;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Acme;
+using VectorNNTP.BackFiller.Core;
 
 namespace VectorNNTP.BackFiller.Acme
 {

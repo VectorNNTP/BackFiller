@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
@@ -257,11 +256,11 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         private static void RegisterHostFakes(HostApplicationBuilder builder)
         {
             builder.Services.AddSingleton<ILocalIpAddressAssignee>(new FakeLocalIpAddressAssignee(assignAll: true));
-            builder.Services.AddSingleton<VectorNNTP.Common.Cloudflare.ICloudflareDnsReconciler>(
+            builder.Services.AddSingleton<VectorNNTP.BackFiller.Cloudflare.ICloudflareDnsReconciler>(
                 new NoOpCloudflareDnsReconciler());
             builder.Services.AddSingleton<IPhysicalMemoryProvider>(
                 new FakePhysicalMemoryProvider(64L * 1024 * 1024 * 1024));
-            builder.Services.AddSingleton<VectorNNTP.Common.Messaging.RabbitMq.IRabbitMqConnectionFactory>(
+            builder.Services.AddSingleton<VectorNNTP.BackFiller.Messaging.RabbitMq.IRabbitMqConnectionFactory>(
                 new FakeBackFillerRabbitMqConnectionFactory());
             builder.Services.AddSingleton<VectorNNTP.BackFiller.Accounts.IProviderAccountSource>(
                 new FakeProviderAccountSource());

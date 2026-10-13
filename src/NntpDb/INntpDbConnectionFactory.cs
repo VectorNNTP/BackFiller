@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>Opens a logical MySQL connection using MySqlConnector's native pool.</summary>
     public interface INntpDbConnectionFactory

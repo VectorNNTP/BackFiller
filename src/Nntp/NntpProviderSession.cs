@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Nntp
 {

@@ -1,6 +1,6 @@
 using System.Text.Json;
-using VectorNNTP.Common.Articles.Validation;
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Articles.Validation;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.ArticleWork
 {

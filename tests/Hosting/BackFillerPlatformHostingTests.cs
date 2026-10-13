@@ -6,10 +6,8 @@ using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {

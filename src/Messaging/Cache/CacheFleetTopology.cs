@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.Cache
+namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
     /// Shared NNTPD ↔ StorageServer cache-fleet RabbitMQ topology names and timing constants.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// One consumed AMQP delivery on a manual-ack channel. Does not wrap RabbitMQ.Client types.

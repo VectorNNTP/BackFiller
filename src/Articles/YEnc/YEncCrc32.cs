@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using VectorNNTP.Common.Articles.Checksum;
+using VectorNNTP.BackFiller.Articles.Checksum;
 
-namespace VectorNNTP.Common.Articles.YEnc
+namespace VectorNNTP.BackFiller.Articles.YEnc
 {
     /// <summary>
     /// IEEE CRC-32 (polynomial <c>0xEDB88320</c>) used by yEnc trailer validation.

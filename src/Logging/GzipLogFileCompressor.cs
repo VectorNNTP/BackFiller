@@ -1,6 +1,6 @@
 using System.IO.Compression;
 
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Gzip-compresses a completed log beside itself using a temporary file and an atomic move.

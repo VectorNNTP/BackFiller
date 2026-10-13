@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Minimal parse/validation state for an <see cref="ArticleRecord"/>.

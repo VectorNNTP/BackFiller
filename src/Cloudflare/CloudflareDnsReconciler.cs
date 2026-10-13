@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Networking;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Networking;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Idempotent reconciler that makes Cloudflare A/AAAA records for a single FQDN match a desired IP set,

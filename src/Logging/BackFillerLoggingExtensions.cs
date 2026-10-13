@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog;
 using Serilog.Events;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Logging
 {

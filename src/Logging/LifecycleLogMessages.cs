@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Core;
 
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Reserved logger category names for VectorNNTP.NNTPD lifecycle diagnostics.

@@ -1,6 +1,6 @@
 using System.Net.NetworkInformation;
 
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Reports whether an IP address is assigned to a local network interface and enumerates local unicast addresses.

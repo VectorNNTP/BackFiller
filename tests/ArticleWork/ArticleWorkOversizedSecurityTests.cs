@@ -2,7 +2,7 @@
 
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {

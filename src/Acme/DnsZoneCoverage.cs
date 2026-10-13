@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Ensures every certificate identity falls under the configured DNS apex (<c>DnsSuffix</c>).

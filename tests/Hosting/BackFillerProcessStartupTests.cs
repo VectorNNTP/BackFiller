@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using VectorNNTP.BackFiller.Hosting;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {

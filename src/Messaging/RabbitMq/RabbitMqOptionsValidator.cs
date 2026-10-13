@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Validates <see cref="RabbitMqOptions"/> connection and reserved fields at bind / startup time.</summary>
     /// <remarks>

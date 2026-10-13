@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Source-generated JSON metadata for Cloudflare DNS API request/response envelopes.

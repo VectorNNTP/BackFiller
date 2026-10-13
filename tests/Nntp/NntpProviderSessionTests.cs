@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {

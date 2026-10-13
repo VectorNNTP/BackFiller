@@ -1,7 +1,7 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Owns one RabbitMQ.Client channel for topology, manual-ack consume, and settlement.</summary>
     internal sealed class RabbitMqClientManualAckChannel : IRabbitMqManualAckChannel

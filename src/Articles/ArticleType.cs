@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Diablo-mapped article classification flags used as ArticleRecord <c>ArtType</c>.

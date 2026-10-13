@@ -6,7 +6,7 @@ using Serilog.Formatting;
 using Serilog.Formatting.Display;
 using Serilog.Sinks.File;
 
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Registers <see cref="GzipRollingFileSink"/> with the same flush wrapping as Serilog's File sink.

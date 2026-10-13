@@ -46,14 +46,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             public ArticleRetentionResult RetainCanonical(
                 string messageId,
                 Guid requestId,
-                VectorNNTP.Common.Articles.ArticleRecord record,
-                VectorNNTP.Common.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
+                VectorNNTP.BackFiller.Articles.ArticleRecord record,
+                VectorNNTP.BackFiller.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
             public VatpOpenResult TryOpenTransfer(
                 Guid requestId,
-                VectorNNTP.Common.Articles.ArticleId expectedArticleId,
+                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
                 Func<int, bool>? tryReserveOutboundBytes = null) =>
                 VatpOpenResult.Rejected();
 

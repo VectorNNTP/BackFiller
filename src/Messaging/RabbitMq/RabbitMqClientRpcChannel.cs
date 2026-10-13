@@ -1,7 +1,7 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Adapts a RabbitMQ.Client channel to RPC publish/consume.</summary>
     internal sealed class RabbitMqClientRpcChannel : IRabbitMqRpcChannel

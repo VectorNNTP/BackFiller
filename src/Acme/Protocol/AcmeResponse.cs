@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>Typed ACME HTTP response with Location / Link / Retry-After metadata.</summary>
     /// <typeparam name="T">Deserialized JSON body. Unused when the caller keeps only <see cref="AcmeResponse{T}.RawBody"/>.</typeparam>

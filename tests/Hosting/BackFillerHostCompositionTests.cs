@@ -5,22 +5,19 @@ using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.Acme;
 using VectorNNTP.BackFiller.ArticleWork;
+using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Hosting.Systemd;
-using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Listener;
+using VectorNNTP.BackFiller.Logging;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Networking.Certificates;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.NntpDb;
 using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Core;
-using VectorNNTP.Common.Networking.Certificates;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
@@ -197,7 +194,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             pairs["BackFiller:Logging:File:LogDir"] = Directory.CreateTempSubdirectory("bf-host-logs-").FullName;
             builder.Configuration.AddInMemoryCollection(pairs);
             builder.Services.AddSingleton<ILocalIpAddressAssignee>(new FakeLocalIpAddressAssignee(assignAll: true));
-            builder.Services.AddSingleton<VectorNNTP.Common.Cloudflare.ICloudflareDnsReconciler>(new NoOpCloudflareDnsReconciler());
+            builder.Services.AddSingleton<VectorNNTP.BackFiller.Cloudflare.ICloudflareDnsReconciler>(new NoOpCloudflareDnsReconciler());
             builder.Services.AddSingleton<IPhysicalMemoryProvider>(new FakePhysicalMemoryProvider(64L * 1024 * 1024 * 1024));
             builder.Services.AddSingleton<IRabbitMqConnectionFactory>(
                 factory ?? new FakeBackFillerRabbitMqConnectionFactory());

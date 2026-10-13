@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Reads and skips DNS domain names in wire format, including compression pointers (RFC 1035 §4.1.4).
