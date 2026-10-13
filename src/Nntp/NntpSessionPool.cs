@@ -402,6 +402,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 var desiredPermits = Math.Max(0, bound - permitHolders);
                 while (_leases.CurrentCount > desiredPermits && _leases.Wait(0, CancellationToken.None))
                 {
+                    // Intentionally empty: this loop only consumes excess permits.
                 }
             }
             finally
