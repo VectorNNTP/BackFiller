@@ -35,4 +35,4 @@ Linux x64:
 dotnet publish .\src\BackFiller.csproj -c Release -r linux-x64
 ```
 
-The standalone project has no external build/runtime dependency on a separate `VectorNNTP.BackFiller` project or assembly.
+The standalone project has no external build/runtime dependency on a separate `VectorNNTP.Common` project or assembly.
