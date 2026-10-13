@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Accounts

@@ -1,5 +1,3 @@
-using System.Buffers;
-
 namespace VectorNNTP.Common.Transport.ArticleTransfer
 {
     /// <summary>One parsed VATP frame (header plus payload sequence).</summary>

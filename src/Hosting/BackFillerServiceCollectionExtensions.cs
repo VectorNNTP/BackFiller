@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Console;
-using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.Acme;
 using VectorNNTP.BackFiller.ArticleWork;

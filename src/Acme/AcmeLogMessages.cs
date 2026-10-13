@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace VectorNNTP.Common.Acme
 {
     /// <summary>Source-generated ACME certificate, issuer, and DNS-01 log messages.</summary>

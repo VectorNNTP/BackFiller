@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.RabbitMq;
 

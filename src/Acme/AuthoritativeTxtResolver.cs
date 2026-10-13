@@ -1,4 +1,3 @@
-using System.Net;
 using VectorNNTP.Common.Dns;
 
 namespace VectorNNTP.Common.Acme

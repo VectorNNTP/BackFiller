@@ -1,5 +1,3 @@
-using System.Buffers;
-
 namespace VectorNNTP.Common.Transport.ArticleTransfer
 {
     /// <summary>

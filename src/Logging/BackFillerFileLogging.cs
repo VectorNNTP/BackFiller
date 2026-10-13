@@ -1,4 +1,3 @@
-using System.Globalization;
 using Serilog;
 using Serilog.Configuration;
 using Serilog.Core;
@@ -6,7 +5,6 @@ using Serilog.Events;
 using Serilog.Formatting;
 using Serilog.Formatting.Display;
 using Serilog.Formatting.Json;
-using Serilog.Sinks.File;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.Common.Logging;
 using VectorNNTP.Common.Messaging.RabbitMq;

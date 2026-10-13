@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.Common.Acme;
 using VectorNNTP.Common.Core;

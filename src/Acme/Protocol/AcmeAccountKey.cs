@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace VectorNNTP.Common.Acme.Protocol
 {
     /// <summary>

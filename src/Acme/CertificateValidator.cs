@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-
 namespace VectorNNTP.Common.Acme
 {
     /// <summary>Validates PKCS#12/PFX certificate material before reuse or promotion.</summary>

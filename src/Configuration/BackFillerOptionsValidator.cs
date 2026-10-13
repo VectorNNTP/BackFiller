@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using VectorNNTP.Common.Messaging.RabbitMq;
 using VectorNNTP.Common.Configuration;
 

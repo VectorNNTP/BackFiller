@@ -1,5 +1,3 @@
-using System.Net.Sockets;
-
 namespace VectorNNTP.BackFiller.Nntp
 {
     /// <summary>

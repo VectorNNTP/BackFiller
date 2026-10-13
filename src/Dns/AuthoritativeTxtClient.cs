@@ -1,7 +1,4 @@
-using System.Buffers;
 using System.Buffers.Binary;
-using System.Net;
-using System.Net.Sockets;
 
 namespace VectorNNTP.Common.Dns
 {

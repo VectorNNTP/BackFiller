@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Text;
 using VectorNNTP.Common.Articles.DateParser;
 using VectorNNTP.Common.Articles.Validation;
 using VectorNNTP.Common.Articles.YEnc;

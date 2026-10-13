@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-
 namespace VectorNNTP.Common.Acme.Protocol
 {
     /// <summary>Leaf certificate RSA private key used to build the ACME finalize CSR and PKCS#12.</summary>

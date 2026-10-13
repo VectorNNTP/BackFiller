@@ -1,6 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.Net;
-using Microsoft.Extensions.Configuration;
 
 namespace VectorNNTP.Common.Configuration
 {

@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -25,12 +24,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Setup .NET SDK (repo pin)
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
@@ -41,14 +40,14 @@ jobs:
 
           disk_list="$(mktemp)"
           sln_list="$(mktemp)"
-          find src tests tools -name '*.csproj' | sed 's|\\|/|g' | sed 's|^\./||' | sort -u > "$disk_list"
-          dotnet sln VectorNNTP.NNTPD.sln list | tr -d '\r' | sed 's|\\|/|g' | sed 's|^\./||' | grep '\.csproj$' | sort -u > "$sln_list"
+          find src tests -name '*.csproj' | sed 's|\\|/|g' | sed 's|^\./||' | sort -u > "$disk_list"
+          dotnet sln BackFiller.slnx list | tr -d '\r' | sed 's|\\|/|g' | sed 's|^\./||' | grep '\.csproj$' | sort -u > "$sln_list"
 
           if ! cmp -s "$disk_list" "$sln_list"; then
-            echo "Solution membership does not match every project under src/, tests/, and tools/."
-            echo "On disk but not in VectorNNTP.NNTPD.sln:"
+            echo "Solution membership does not match every project under src/ and tests/."
+            echo "On disk but not in BackFiller.slnx:"
             comm -23 "$disk_list" "$sln_list"
-            echo "In VectorNNTP.NNTPD.sln but missing on disk:"
+            echo "In BackFiller.slnx but missing on disk:"
             comm -13 "$disk_list" "$sln_list"
             exit 1
           fi
@@ -69,7 +68,7 @@ jobs:
               echo "Non-test project is marked IsTestProject: $proj"
               exit 1
             fi
-          done < <(find src tools -name '*.csproj' | sort)
+          done < <(find src -name '*.csproj' | sort)
 
           echo "Solution projects:"
           cat "$sln_list"
@@ -77,7 +76,7 @@ jobs:
           find tests -name '*.csproj' | sed 's|\\|/|g' | sort
 
       - name: Restore solution
-        run: dotnet restore VectorNNTP.NNTPD.sln
+        run: dotnet restore BackFiller.slnx
 
       - name: Build solution
         # The solution maps Release|x64 to Release|Any CPU for every project.
@@ -85,14 +84,14 @@ jobs:
         # project-level dotnet test -p:Platform=x64 looks in bin/x64/Release.
         # Ordinary CI stays on the solution configuration. win-x64 publishing
         # is a separate runtime-identifier step in the Windows job.
-        run: dotnet build VectorNNTP.NNTPD.sln --configuration Release --no-restore
+        run: dotnet build BackFiller.slnx --configuration Release --no-restore
 
       - name: Test solution
         timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
-          # Only VectorNNTP.NNTPD.Tests references coverlet.collector. Passing
+          # Only the BackFiller test project references coverlet.collector. Passing
           # --collect to a project without that package makes VSTest fail before
           # the tests run. Coverage is collected for projects that already
           # reference the collector. Adding it to the other test projects is a
@@ -191,7 +190,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: code-coverage-report
           path: TestResults/CoverageReport/
@@ -200,7 +199,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: linux-test-results
           path: TestResults/**/*.trx
@@ -214,41 +213,39 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Setup .NET SDK (repo pin)
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore VectorNNTP.NNTPD.sln
+        run: dotnet restore BackFiller.slnx
 
       - name: Build solution
         # Same Any CPU Release build as Linux. This job does not repeat tests.
-        # VectorNNTP.NNTPD.PostAllocBench is a benchmark tool with no test project;
-        # the solution build is its validation. Companion test projects cover
-        # VectorNNTP.NNTPD.Bench and VectorNNTP.StandaloneTxPoc.
-        run: dotnet build VectorNNTP.NNTPD.sln --configuration Release --no-restore
+        # BackFiller.slnx is the canonical CI entrypoint for the production and test projects.
+        run: dotnet build BackFiller.slnx --configuration Release --no-restore
 
-      - name: Publish NNTPD win-x64
+      - name: Publish BackFiller win-x64
         # Runtime identifier publish, including Native AOT from Directory.Build.targets.
         # This is not the managed build used for tests. Solution restore already
         # includes win-x64 because the production executables set RuntimeIdentifiers.
         shell: pwsh
         run: |
-          dotnet publish src/VectorNNTP.NNTPD/VectorNNTP.NNTPD.csproj `
+          dotnet publish src/BackFiller.csproj `
             --configuration Release `
             --runtime win-x64 `
             --output ./artifacts/win-x64 `
             --no-restore
 
       - name: Upload Windows build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: nntpd-win-x64-ci-build
+          name: backfiller-win-x64-ci-build
           path: artifacts/win-x64/
           if-no-files-found: error
           retention-days: 7

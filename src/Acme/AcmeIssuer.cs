@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using VectorNNTP.Common.Acme.Protocol;
 using VectorNNTP.Common.Configuration;
 

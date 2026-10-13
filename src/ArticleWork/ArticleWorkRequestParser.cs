@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using VectorNNTP.Common.Articles.Validation;
 using VectorNNTP.Common.Messaging.RabbitMq;

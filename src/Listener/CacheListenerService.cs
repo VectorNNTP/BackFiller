@@ -1,9 +1,5 @@
 using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Security;
-using System.Net.Sockets;
 using System.Security.Authentication;
-using System.Security.Cryptography.X509Certificates;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Retention;

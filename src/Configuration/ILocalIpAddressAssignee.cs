@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.NetworkInformation;
 
 namespace VectorNNTP.Common.Configuration
