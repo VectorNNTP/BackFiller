@@ -1,0 +1,29 @@
+# Build artifacts
+bin/
+obj/
+
+# IDE folders/files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test artifacts
+.artifacts/
+TestResults/
+*.trx
+
+# Coverage
+coverage*
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
+# OS files
+.DS_Store
+Thumbs.db
