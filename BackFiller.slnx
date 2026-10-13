@@ -8,6 +8,8 @@
     </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/BackFiller.Tests.csproj" />
+    <Project Path="tests/BackFiller.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
   </Folder>
 </Solution>
