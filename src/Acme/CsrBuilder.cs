@@ -1,5 +1,3 @@
-using System.Net;
-using System.Security.Cryptography.X509Certificates;
 using VectorNNTP.Common.Acme.Protocol;
 
 namespace VectorNNTP.Common.Acme

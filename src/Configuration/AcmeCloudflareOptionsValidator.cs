@@ -1,4 +1,3 @@
-using System.Net;
 using VectorNNTP.Common.Acme;
 
 namespace VectorNNTP.Common.Configuration

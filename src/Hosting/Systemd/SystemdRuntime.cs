@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Hosting.Systemd;
 using VectorNNTP.BackFiller.Logging;

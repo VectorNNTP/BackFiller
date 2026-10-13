@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-
 namespace VectorNNTP.BackFiller.Accounts
 {
     /// <summary>Source-generated account control-plane logs. Never includes passwords or connection strings.</summary>

@@ -8,6 +8,6 @@
     </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/VectorNNTP.BackFiller.Tests/BackFiller.Tests.csproj" />
+    <Project Path="tests/BackFiller.Tests.csproj" />
   </Folder>
 </Solution>

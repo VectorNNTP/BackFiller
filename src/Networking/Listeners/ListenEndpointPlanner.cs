@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Sockets;
 using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.Common.Networking.Listeners

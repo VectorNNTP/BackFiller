@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-
 namespace VectorNNTP.Common.Configuration
 {
     /// <summary>

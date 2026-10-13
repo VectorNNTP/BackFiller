@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace VectorNNTP.Common.Acme.Protocol
 {
     /// <summary>Typed ACME HTTP response with Location / Link / Retry-After metadata.</summary>

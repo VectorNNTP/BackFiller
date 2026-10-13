@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Threading.Channels;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Retention;

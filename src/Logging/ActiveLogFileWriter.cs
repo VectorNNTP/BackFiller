@@ -1,4 +1,3 @@
-using System.Text;
 using Serilog.Events;
 using Serilog.Formatting;
 

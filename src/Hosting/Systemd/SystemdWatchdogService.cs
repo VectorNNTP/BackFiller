@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Logging;
 

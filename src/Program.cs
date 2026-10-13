@@ -1,5 +1,4 @@
 using Serilog;
-using System.Threading.Tasks;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.Common.Configuration;

@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace VectorNNTP.Common.Articles.OverviewDb
 {
     /// <summary>

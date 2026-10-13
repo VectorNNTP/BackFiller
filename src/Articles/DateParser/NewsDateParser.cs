@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace VectorNNTP.Common.Articles.DateParser
 {
     /// <summary>

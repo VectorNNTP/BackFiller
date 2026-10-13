@@ -1,5 +1,3 @@
-using System.Buffers;
-
 namespace VectorNNTP.Common.Acme.Protocol
 {
     /// <summary>RFC 4648 base64url encode/decode used by ACME JWS and DNS-01 digests.</summary>

@@ -1,8 +1,4 @@
 using MySqlConnector;
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using VectorNNTP.Common.NntpDb;
 
 namespace VectorNNTP.BackFiller.Accounts

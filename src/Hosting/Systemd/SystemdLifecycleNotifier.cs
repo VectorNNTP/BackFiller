@@ -1,6 +1,5 @@
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Logging;
-using Microsoft.Extensions.Options;
 
 namespace VectorNNTP.BackFiller.Hosting.Systemd
 {

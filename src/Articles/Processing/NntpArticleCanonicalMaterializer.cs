@@ -1,4 +1,3 @@
-using System.Buffers;
 using VectorNNTP.Common.Articles.Parsing;
 
 namespace VectorNNTP.Common.Articles.Processing

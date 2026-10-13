@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using Serilog.Core;
 using Serilog.Debugging;
 using Serilog.Events;

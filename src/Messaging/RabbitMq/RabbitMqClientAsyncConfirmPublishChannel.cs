@@ -1,4 +1,3 @@
-using System.Globalization;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 

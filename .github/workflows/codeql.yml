@@ -12,7 +12,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
   security-events: write
 
@@ -28,22 +27,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
+          config-file: ./.github/codeql/codeql-config.yml
           languages: csharp
 
       - name: Setup .NET SDK (repo pin)
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
       - name: Build solution
-        run: dotnet build VectorNNTP.NNTPD.sln --configuration Release
+        run: dotnet build BackFiller.slnx --configuration Release --no-restore
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace VectorNNTP.Common.Messaging.RabbitMq
 {
     /// <summary>Validates <see cref="RabbitMqOptions"/> connection and reserved fields at bind / startup time.</summary>

@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace VectorNNTP.Common.Networking
 {
     /// <summary>Source-generated bind-address, TLS certificate, listener, and connection-acceptance log messages.</summary>
