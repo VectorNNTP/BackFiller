@@ -230,13 +230,13 @@ jobs:
         # BackFiller.slnx is the canonical CI entrypoint for the production and test projects.
         run: dotnet build BackFiller.slnx --configuration Release --no-restore
 
-      - name: Publish NNTPD win-x64
+      - name: Publish BackFiller win-x64
         # Runtime identifier publish, including Native AOT from Directory.Build.targets.
         # This is not the managed build used for tests. Solution restore already
         # includes win-x64 because the production executables set RuntimeIdentifiers.
         shell: pwsh
         run: |
-          dotnet publish src/VectorNNTP.NNTPD/VectorNNTP.NNTPD.csproj `
+          dotnet publish src/BackFiller.csproj `
             --configuration Release `
             --runtime win-x64 `
             --output ./artifacts/win-x64 `
@@ -245,7 +245,7 @@ jobs:
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nntpd-win-x64-ci-build
+          name: backfiller-win-x64-ci-build
           path: artifacts/win-x64/
           if-no-files-found: error
           retention-days: 7

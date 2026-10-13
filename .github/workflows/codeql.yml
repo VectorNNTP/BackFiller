@@ -42,6 +42,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Restore solution
+        run: dotnet restore BackFiller.slnx
+
       - name: Build solution
         run: dotnet build BackFiller.slnx --configuration Release --no-restore
 
