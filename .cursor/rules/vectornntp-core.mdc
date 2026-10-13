@@ -30,7 +30,7 @@ alwaysApply: true
 
 All C# namespaces must be block-scoped; file-scoped namespaces are not permitted.
 
-This applies to `src/BackFiller` and `tests/BackFiller.Tests`. Both projects set `csharp_style_namespace_declarations = block_scoped`.
+This applies to `src/` and `tests/`. Both projects set `csharp_style_namespace_declarations = block_scoped`.
 
 The namespace must match the folder under the project directory. Files directly under the project directory use that project's root namespace. `GlobalUsings.cs` has no namespace.
 
