@@ -40,7 +40,7 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="8.0.0-nblumhardt-02322" />
     <PackageReference Include="Serilog.Sinks.SyslogMessages" Version="4.1.0" />
-    <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
+    <PackageReference Include="System.IO.Hashing" Version="11.0.0-rc.2.26504.105" />
   </ItemGroup>
 
 
