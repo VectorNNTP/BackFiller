@@ -8,10 +8,10 @@ using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.Transport.ArticleTransfer;
-using VectorNNTP.Common.Networking.Certificates;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
@@ -150,49 +150,14 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         public async Task Multiplex_interleaved_transfers_complete()
         {
             await using var context = await VatpListenerContext.StartAsync(maxBytes: 16 * 1024 * 1024);
-            var articles = new PreparedArticle[8];
-            for (var i = 0; i < articles.Length; i++)
-            {
-                articles[i] = RetainArticle(context.Authority, $"<vatp-mux{i}@example.test>", $"body-{i}\r\n");
-            }
+            var articles = BuildArticles(context.Authority);
 
             await using var client = await ConnectAsync(context);
             await ExchangeHelloAsync(client.Stream);
-            for (var i = 0; i < articles.Length; i++)
-            {
-                await SendOpenAsync(client.Stream, (uint)(i + 1), articles[i].RequestId, articles[i].Record.ArtId);
-            }
+            await SendOpenFramesAsync(client.Stream, articles);
 
-            var receivers = new Dictionary<uint, ManualTransferReceiver>();
-            for (var i = 0; i < articles.Length; i++)
-            {
-                var streamId = (uint)(i + 1);
-                receivers[streamId] = new ManualTransferReceiver(articles[i].Record.ArtId);
-            }
-
-            var completed = 0;
-            while (completed < articles.Length)
-            {
-                var frame = await ReadVatpFrameAsync(client.Stream);
-                if (!receivers.TryGetValue(frame.Header.StreamId, out var receiver))
-                {
-                    continue;
-                }
-
-                if (frame.Header.Type == VatpFrameType.Fail)
-                {
-                    Assert.Fail($"Unexpected FAIL: {ReadFailCode(frame)}");
-                }
-
-                if (ApplyFrame(client.Stream, frame, receiver, grantServerWindow: true)
-                    && receiver.IsComplete)
-                {
-                    var expected = articles[(int)frame.Header.StreamId - 1];
-                    Assert.True(receiver.Record!.Value.ArtData.Span.SequenceEqual(expected.ExpectedArtData));
-                    receivers.Remove(frame.Header.StreamId);
-                    completed++;
-                }
-            }
+            var receivers = CreateReceivers(articles);
+            await AssertMultiplexTransfersCompleteAsync(client.Stream, articles, receivers);
         }
 
         [Fact]
@@ -635,6 +600,67 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             Assert.True(receiver.TryTakeRecord(out var record));
             return record;
+        }
+
+        private static PreparedArticle[] BuildArticles(ArticleRetentionAuthority authority)
+        {
+            var articles = new PreparedArticle[8];
+            for (var i = 0; i < articles.Length; i++)
+            {
+                articles[i] = RetainArticle(authority, $"<vatp-mux{i}@example.test>", $"body-{i}\r\n");
+            }
+
+            return articles;
+        }
+
+        private static Dictionary<uint, ManualTransferReceiver> CreateReceivers(PreparedArticle[] articles)
+        {
+            var receivers = new Dictionary<uint, ManualTransferReceiver>();
+            for (var i = 0; i < articles.Length; i++)
+            {
+                var streamId = (uint)(i + 1);
+                receivers[streamId] = new ManualTransferReceiver(articles[i].Record.ArtId);
+            }
+
+            return receivers;
+        }
+
+        private static async Task SendOpenFramesAsync(Stream stream, PreparedArticle[] articles)
+        {
+            for (var i = 0; i < articles.Length; i++)
+            {
+                await SendOpenAsync(stream, (uint)(i + 1), articles[i].RequestId, articles[i].Record.ArtId);
+            }
+        }
+
+        private static async Task AssertMultiplexTransfersCompleteAsync(
+            Stream stream,
+            PreparedArticle[] articles,
+            Dictionary<uint, ManualTransferReceiver> receivers)
+        {
+            var completed = 0;
+            while (completed < articles.Length)
+            {
+                var frame = await ReadVatpFrameAsync(stream);
+                if (!receivers.TryGetValue(frame.Header.StreamId, out var receiver))
+                {
+                    continue;
+                }
+
+                if (frame.Header.Type == VatpFrameType.Fail)
+                {
+                    Assert.Fail($"Unexpected FAIL: {ReadFailCode(frame)}");
+                }
+
+                if (ApplyFrame(stream, frame, receiver, grantServerWindow: true)
+                    && receiver.IsComplete)
+                {
+                    var expected = articles[(int)frame.Header.StreamId - 1];
+                    Assert.True(receiver.Record!.Value.ArtData.Span.SequenceEqual(expected.ExpectedArtData));
+                    receivers.Remove(frame.Header.StreamId);
+                    completed++;
+                }
+            }
         }
 
         private static PreparedArticle RetainArticle(

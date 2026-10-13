@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Published after <see cref="RabbitMqService"/> installs a connection generation.</summary>
     /// <param name="ConnectionGeneration">Monotonic generation assigned to the newly current connection.</param>

@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Parses TXT resource records from DNS response packets for ACME DNS-01 visibility checks.

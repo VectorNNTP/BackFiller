@@ -2,7 +2,7 @@ using System.Text.Json;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Integration
 {

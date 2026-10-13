@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Core
+namespace VectorNNTP.BackFiller.Core
 {
     /// <summary>
     /// Explicit application lifecycle states shared by hosts that use

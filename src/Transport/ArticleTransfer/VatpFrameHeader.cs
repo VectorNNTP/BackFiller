@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Fixed 16-byte VATP frame header: version, type, headerLength, streamId, payloadLength, flags.

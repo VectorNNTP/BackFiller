@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Issues a TLS certificate for the given DNS identities via ACME.</summary>
     internal interface ICertificateIssuer

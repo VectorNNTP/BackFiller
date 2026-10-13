@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>
     /// ACME account private key (JWK thumbprint, JWS signing, DNS-01 key authorization).

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <summary>
     /// Validates that code units stay within printable ASCII using vector instructions when available.

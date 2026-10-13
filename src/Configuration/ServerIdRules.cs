@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Shared <c>ServerId</c> bounds and required/default semantics.

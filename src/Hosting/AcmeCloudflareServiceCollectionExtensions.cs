@@ -1,11 +1,11 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Networking;
-using VectorNNTP.Common.Networking.Certificates;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Acme;
+using VectorNNTP.BackFiller.Cloudflare;
+using VectorNNTP.BackFiller.Networking;
+using VectorNNTP.BackFiller.Networking.Certificates;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Hosting
+namespace VectorNNTP.BackFiller.Hosting
 {
     /// <summary>
     /// Registers shared ACME, Cloudflare, and bind-address infrastructure.

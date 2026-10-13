@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
-namespace VectorNNTP.Common.Articles.Processing
+namespace VectorNNTP.BackFiller.Articles.Processing
 {
     /// <summary>
     /// Classifies why canonical Date/Path materialization could not produce a retainable article.

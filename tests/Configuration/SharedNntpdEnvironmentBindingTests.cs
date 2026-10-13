@@ -2,12 +2,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using VectorNNTP.BackFiller.Acme;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
@@ -77,7 +76,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         {
             var builder = Host.CreateApplicationBuilder([]);
             builder.Services.AddSingleton<ILocalIpAddressAssignee>(new FakeLocalIpAddressAssignee(assignAll: true));
-            builder.Services.AddSingleton<VectorNNTP.Common.Cloudflare.ICloudflareDnsReconciler>(
+            builder.Services.AddSingleton<VectorNNTP.BackFiller.Cloudflare.ICloudflareDnsReconciler>(
                 new VectorNNTP.BackFiller.Tests.TestDoubles.NoOpCloudflareDnsReconciler());
             builder.ConfigureBackFillerPlatformHosting();
             builder.Configuration.AddInMemoryCollection(BackFillerTestOptions.CreateValidConfigurationPairs());

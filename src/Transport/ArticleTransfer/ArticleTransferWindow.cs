@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Per-stream WINDOW credit accounting.

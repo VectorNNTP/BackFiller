@@ -1,4 +1,4 @@
-using VectorNNTP.Common.Articles.YEnc;
+using VectorNNTP.BackFiller.Articles.YEnc;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
@@ -91,21 +92,57 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
-        public void Article_exactly_at_capacity_is_retained_and_oversize_is_rejected()
+        public void Invalid_payload_rejection_reports_current_retained_total_and_leaves_state_unchanged()
         {
             var fit = RetentionTestArticles.Create("<fit@b>", "x\r\n");
-            var authority = Create(new ManualTimeProvider(Start), maxBytes: fit.Record.ArtSize);
+            var authority = Create(new ManualTimeProvider(Start), maxBytes: 1024 * 1024);
             Assert.Equal(ArticleRetentionKind.Retained, authority.RetainCanonical(
                 "<fit@b>", fit.RequestId, fit.Record, fit.SelectedDateHeaderName).Kind);
             Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
 
+            var invalidSource = RetentionTestArticles.Create("<invalid@b>", "invalid-candidate\r\n");
+            Assert.NotEqual(invalidSource.Record.ArtSize, fit.Record.ArtSize);
+            var invalid = CreateRecordWithParseStatus(invalidSource.Record, ArticleParseStatus.None);
+
+            var rejected = authority.RetainCanonical(
+                "<invalid@b>", invalidSource.RequestId, invalid, invalidSource.SelectedDateHeaderName);
+
+            Assert.Equal(ArticleRetentionKind.InvalidPayload, rejected.Kind);
+            Assert.Null(rejected.Fqdn);
+            Assert.Null(rejected.VatpPort);
+            Assert.Equal(fit.Record.ArtSize, rejected.RetainedPayloadBytes);
+            Assert.Equal(0, rejected.ReleasedPayloadBytes);
+            Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
+            Assert.Equal(1, authority.RetainedCount);
+            using var open = authority.TryOpenTransfer(fit.RequestId, fit.Record.ArtId);
+            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+        }
+
+        [Fact]
+        public void Payload_exceeds_capacity_rejection_reports_current_retained_total_and_leaves_state_unchanged()
+        {
+            var fit = RetentionTestArticles.Create("<fit-cap@b>", "x\r\n");
+            var authority = Create(new ManualTimeProvider(Start), maxBytes: fit.Record.ArtSize + 1);
+            Assert.Equal(ArticleRetentionKind.Retained, authority.RetainCanonical(
+                "<fit-cap@b>", fit.RequestId, fit.Record, fit.SelectedDateHeaderName).Kind);
+            Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
+
             var over = RetentionTestArticles.Create("<big@b>", "longer-body\r\n");
-            Assert.True(over.Record.ArtSize > fit.Record.ArtSize);
+            Assert.True(over.Record.ArtSize > fit.Record.ArtSize + 1);
+            Assert.NotEqual(over.Record.ArtSize, fit.Record.ArtSize);
             var rejected = authority.RetainCanonical(
                 "<big@b>", over.RequestId, over.Record, over.SelectedDateHeaderName);
+
             Assert.Equal(ArticleRetentionKind.PayloadExceedsCapacity, rejected.Kind);
             Assert.True(rejected.IsCapacityRejected);
+            Assert.Null(rejected.Fqdn);
+            Assert.Null(rejected.VatpPort);
+            Assert.Equal(fit.Record.ArtSize, rejected.RetainedPayloadBytes);
+            Assert.Equal(0, rejected.ReleasedPayloadBytes);
             Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
+            Assert.Equal(1, authority.RetainedCount);
+            using var open = authority.TryOpenTransfer(fit.RequestId, fit.Record.ArtId);
+            Assert.Equal(VatpOpenKind.Opened, open.Kind);
         }
 
         [Fact]
@@ -290,6 +327,17 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 Assert.DoesNotContain(".Result;", text, StringComparison.Ordinal);
             }
         }
+
+        private static ArticleRecord CreateRecordWithParseStatus(ArticleRecord source, ArticleParseStatus parseStatus) =>
+            new(
+                source.ArtId,
+                source.ArtHash,
+                source.ArtType,
+                source.ArtLines,
+                source.CanonicalUtc,
+                parseStatus,
+                source.ArtData.ToArray(),
+                source.Fields);
 
         internal static ArticleRetentionAuthority Create(
             TimeProvider time,

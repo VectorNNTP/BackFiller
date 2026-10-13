@@ -1,8 +1,8 @@
-using VectorNNTP.Common.Articles.DateParser;
-using VectorNNTP.Common.Articles.Validation;
-using VectorNNTP.Common.Articles.YEnc;
+using VectorNNTP.BackFiller.Articles.DateParser;
+using VectorNNTP.BackFiller.Articles.Validation;
+using VectorNNTP.BackFiller.Articles.YEnc;
 
-namespace VectorNNTP.Common.Articles.Parsing
+namespace VectorNNTP.BackFiller.Articles.Parsing
 {
     /// <summary>
     /// Parses untrusted NNTP article bytes into a compact structured result.

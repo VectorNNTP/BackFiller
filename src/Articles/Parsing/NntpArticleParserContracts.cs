@@ -1,9 +1,9 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
-using VectorNNTP.Common.Articles.DateParser;
-using VectorNNTP.Common.Articles.YEnc;
+using VectorNNTP.BackFiller.Articles.DateParser;
+using VectorNNTP.BackFiller.Articles.YEnc;
 
-namespace VectorNNTP.Common.Articles.Parsing
+namespace VectorNNTP.BackFiller.Articles.Parsing
 {
     /// <summary>
     /// Detected article content classification produced by the parser.

@@ -5,7 +5,7 @@ using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.RabbitMq;
 
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
@@ -543,7 +543,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 Outcome = ArticleWorkOutcome.Success,
                 Fqdn = ArticleWorkTestDeliveries.CanonicalFqdn,
                 VatpPort = ArticleWorkTestDeliveries.CanonicalVatpPort,
-                ArticleId = VectorNNTP.Common.Articles.ArticleId.ParseLowerHex(
+                ArticleId = VectorNNTP.BackFiller.Articles.ArticleId.ParseLowerHex(
                     ArticleWorkTestDeliveries.CanonicalArticleIdHex),
             };
 

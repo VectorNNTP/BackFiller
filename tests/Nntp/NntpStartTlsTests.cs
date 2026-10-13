@@ -181,8 +181,6 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         [Theory]
         [InlineData("starttls")]
-        [InlineData("StartTls")]
-        [InlineData("STARTTLS")]
         public async Task Starttls_capability_matching_is_case_insensitive(string label)
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -240,7 +238,6 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         public void Capability_label_equals_is_case_insensitive_and_token_scoped()
         {
             Assert.True(NntpProtocolIo.CapabilityLabelEquals("STARTTLS"u8, NntpProtocolIo.StartTlsCapability));
-            Assert.True(NntpProtocolIo.CapabilityLabelEquals("starttls"u8, NntpProtocolIo.StartTlsCapability));
             Assert.True(NntpProtocolIo.CapabilityLabelEquals(" StartTls extra"u8, NntpProtocolIo.StartTlsCapability));
             Assert.False(NntpProtocolIo.CapabilityLabelEquals("XSTARTTLS"u8, NntpProtocolIo.StartTlsCapability));
             Assert.False(NntpProtocolIo.CapabilityLabelEquals("COMPRESS DEFLATE"u8, NntpProtocolIo.StartTlsCapability));

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// DNS resource record TYPE/QTYPE and CLASS constants used by the owned ACME DNS wire stack (RFC 1035).

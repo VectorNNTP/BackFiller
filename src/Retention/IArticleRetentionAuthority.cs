@@ -1,7 +1,7 @@
 namespace VectorNNTP.BackFiller.Retention
 {
     /// <summary>
-    /// Single owner of retained CanonicalV1 <see cref="VectorNNTP.Common.Articles.ArticleRecord"/> values,
+    /// Single owner of retained CanonicalV1 <see cref="VectorNNTP.BackFiller.Articles.ArticleRecord"/> values,
     /// identity, TTL, and capacity. Independent of RabbitMQ and NNTP sessions.
     /// VATP OPEN is the only data-plane consumer of retained ArtData.
     /// </summary>
@@ -37,7 +37,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// </returns>
         /// <remarks>
         /// Does not copy ArtData. On AlreadyPresent, the existing retained
-        /// <see cref="VectorNNTP.Common.Articles.ArticleRecord"/> remains authoritative (first-wins);
+        /// <see cref="VectorNNTP.BackFiller.Articles.ArticleRecord"/> remains authoritative (first-wins);
         /// the new RequestId is added as an additional openable capability and does not revoke prior
         /// RequestIds. When the per-article openable RequestId bound is reached, admission is rejected
         /// without modifying existing RequestIds or ArtData.
@@ -48,8 +48,8 @@ namespace VectorNNTP.BackFiller.Retention
         ArticleRetentionResult RetainCanonical(
             string messageId,
             Guid requestId,
-            VectorNNTP.Common.Articles.ArticleRecord record,
-            VectorNNTP.Common.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
+            VectorNNTP.BackFiller.Articles.ArticleRecord record,
+            VectorNNTP.BackFiller.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
             string? endpointFqdn = null);
 
         /// <summary>
@@ -70,7 +70,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// </returns>
         VatpOpenResult TryOpenTransfer(
             Guid requestId,
-            VectorNNTP.Common.Articles.ArticleId expectedArticleId,
+            VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
             Func<int, bool>? tryReserveOutboundBytes = null);
 
         /// <summary>Cancels one openable RequestId without releasing the Message-ID entry.</summary>

@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Acme.Protocol;
+using VectorNNTP.BackFiller.Acme.Protocol;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Builds ACME certificate signing requests from DNS identities.</summary>
     internal static class CsrBuilder

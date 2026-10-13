@@ -1,7 +1,7 @@
 using System.Reflection;
 using Microsoft.Extensions.Configuration.Json;
 
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Names the primary JSON configuration file from the entry assembly short name.

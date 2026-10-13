@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Processing;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Processing;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Result of applying one protocol event to a receive stream.

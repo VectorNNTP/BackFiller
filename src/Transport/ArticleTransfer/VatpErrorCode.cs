@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Typed VATP protocol error codes used on FAIL frames and in typed parse/state results.

@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Articles.Parsing;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// Reads and validates one <c>nntpsharedconfig</c> row.

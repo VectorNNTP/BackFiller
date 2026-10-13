@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Core
+namespace VectorNNTP.BackFiller.Core
 {
     /// <summary>
     /// Minimal abstraction for an application-managed service whose lifetime is

@@ -1,4 +1,4 @@
-using VectorNNTP.Common.Networking.Listeners;
+using VectorNNTP.BackFiller.Networking.Listeners;
 
 namespace VectorNNTP.BackFiller.Listener
 {

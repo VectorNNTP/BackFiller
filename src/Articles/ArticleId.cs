@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using Blake3;
 
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Compact internal Vector article identity: 32-byte BLAKE3 of Message-ID header value bytes.

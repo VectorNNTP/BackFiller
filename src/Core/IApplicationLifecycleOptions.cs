@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Core
+namespace VectorNNTP.BackFiller.Core
 {
     /// <summary>
     /// Lifecycle and graceful-shutdown knobs shared by hosts that use

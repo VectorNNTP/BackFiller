@@ -1,5 +1,5 @@
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Creates one RabbitMQ broker connection from validated configuration.</summary>
     internal interface IRabbitMqConnectionFactory

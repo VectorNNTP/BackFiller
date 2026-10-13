@@ -1,4 +1,4 @@
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Configuration
 {

@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Shared DNS response header checks (transaction ID, QR, OPCODE, TC, RCODE).

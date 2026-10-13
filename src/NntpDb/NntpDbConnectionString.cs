@@ -1,7 +1,7 @@
 using MySqlConnector;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// Validates <c>ConnectionStrings:NntpDB</c> with MySqlConnector's parser.

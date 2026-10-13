@@ -1,4 +1,4 @@
-﻿namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Cloudflare DNS Records API client scoped to a single zone.

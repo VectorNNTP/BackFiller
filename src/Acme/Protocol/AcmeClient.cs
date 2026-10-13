@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>
     /// ACME v2 protocol client for directory, account, order, authorization, challenge, finalize, and certificate download.

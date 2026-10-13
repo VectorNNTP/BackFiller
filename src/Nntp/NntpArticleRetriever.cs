@@ -1,5 +1,5 @@
 using VectorNNTP.BackFiller.ArticleWork;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Nntp
 {

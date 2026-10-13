@@ -1,17 +1,15 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using VectorNNTP.Common.Configuration;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.ArticleWork;
+using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Nntp;
+using VectorNNTP.BackFiller.NntpDb;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.NntpDb;
-
-using VectorNNTP.Common.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {

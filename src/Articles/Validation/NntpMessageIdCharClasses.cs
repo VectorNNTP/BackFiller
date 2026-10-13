@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace VectorNNTP.Common.Articles.Validation
+namespace VectorNNTP.BackFiller.Articles.Validation
 {
     /// <summary>
     /// Scalar character classes for an RFC 5536 <c>msg-id</c>.

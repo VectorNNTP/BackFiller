@@ -12,6 +12,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var options = BackFillerTestOptions.CreateValid();
             options.DnsSuffix = "Usenet.Ninja.";
             var rabbit = BackFillerTestOptions.CreateValidRabbitMq();
+            rabbit.Hosts = [" 127.0.0.1 ", "localhost", "LOCALHOST", "127.0.0.1"];
             rabbit.WorkRequestMaxPayloadBytes = 2048;
             rabbit.PublishConfirmTimeoutSeconds = 7;
             rabbit.ConsumerPrefetchCount = 3;

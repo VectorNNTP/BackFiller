@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <summary>
     /// Controls the guardrails and normalization steps applied before date canonicalization.

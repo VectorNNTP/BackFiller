@@ -1,5 +1,5 @@
 using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {

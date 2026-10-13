@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Hard protocol and resource boundaries for NNTP article processing.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// Invalid NntpDB configuration that must fail startup immediately.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Base type for ACME subsystem failures (sanitized messages; never include key material).</summary>
     internal class AcmeException : Exception

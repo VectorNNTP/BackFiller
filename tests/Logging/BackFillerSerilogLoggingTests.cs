@@ -14,7 +14,6 @@ using Serilog.Events;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {
@@ -469,7 +468,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 .ToHashSet(StringComparer.Ordinal);
             Assert.Contains("Serilog.Sinks.Console", names);
             Assert.Contains("Serilog.Sinks.File", names);
-            Assert.DoesNotContain("VectorNNTP.Common", names);
+            Assert.DoesNotContain("VectorNNTP.BackFiller", names);
             Assert.DoesNotContain("Serilog.Sinks.File.Archive", names);
             Assert.Contains("Serilog.Sinks.Async", names);
             Assert.Contains("Serilog.Sinks.Syslog", names);

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Shared VectorNNTP environment-variable contract.

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Builds a canonical application FQDN from a fixed prefix, validated server id, and DNS suffix.

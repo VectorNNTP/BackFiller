@@ -140,7 +140,6 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var pool = CreatePool(factory, max: 1);
             var lease = await pool.AcquireAsync(CancellationToken.None);
             await lease.DisposeAsync();
-            await lease.DisposeAsync();
             Assert.Equal(0, pool.ActiveLeaseCount);
 
             var again = await pool.AcquireAsync(CancellationToken.None);

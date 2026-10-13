@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Pooled UDP DNS exchange with remote-endpoint source validation.

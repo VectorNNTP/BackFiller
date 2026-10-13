@@ -1,6 +1,6 @@
 using RabbitMQ.Client.Events;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Confirm-enabled publish channel that does <b>not</b> await broker confirmation inside

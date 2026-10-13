@@ -3,8 +3,8 @@ using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Transport.ArticleTransfer;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {

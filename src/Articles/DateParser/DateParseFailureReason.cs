@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <summary>
     /// Classifies why a candidate article date value could not be normalized into canonical UTC.

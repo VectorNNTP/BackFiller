@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Raised when a Cloudflare DNS API operation fails.

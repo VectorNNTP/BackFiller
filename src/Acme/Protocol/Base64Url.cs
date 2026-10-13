@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>RFC 4648 base64url encode/decode used by ACME JWS and DNS-01 digests.</summary>
     internal static class Base64Url

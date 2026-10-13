@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Loads and persists ACME account PKCS#8 DER key + registration metadata.

@@ -118,9 +118,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             using var document = JsonDocument.Parse(json);
             var hex = document.RootElement.GetProperty("articleId").GetString();
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalArticleIdHex, hex);
-            Assert.True(VectorNNTP.Common.Articles.ArticleId.TryParseLowerHex(hex, out var parsed));
+            Assert.True(VectorNNTP.BackFiller.Articles.ArticleId.TryParseLowerHex(hex, out var parsed));
             Assert.Equal(
-                VectorNNTP.Common.Articles.ArticleId.ParseLowerHex(ArticleWorkTestDeliveries.CanonicalArticleIdHex),
+                VectorNNTP.BackFiller.Articles.ArticleId.ParseLowerHex(ArticleWorkTestDeliveries.CanonicalArticleIdHex),
                 parsed);
         }
 

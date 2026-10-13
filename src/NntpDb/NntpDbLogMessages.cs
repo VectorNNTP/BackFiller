@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>Source-generated NntpDB lifecycle log messages. Never includes credentials.</summary>
     internal static partial class NntpDbLogMessages

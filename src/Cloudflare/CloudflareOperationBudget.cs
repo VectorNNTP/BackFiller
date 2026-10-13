@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Shared wall-clock deadline for a single Cloudflare reconcile or clean-up operation.

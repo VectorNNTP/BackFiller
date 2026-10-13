@@ -1,7 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Messaging.Cache;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Messaging.Cache;
 
 namespace VectorNNTP.BackFiller.ArticleWork
 {

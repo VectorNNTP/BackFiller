@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Acme;
+using VectorNNTP.BackFiller.Acme;
 
-namespace VectorNNTP.Common.Networking.Certificates
+namespace VectorNNTP.BackFiller.Networking.Certificates
 {
     /// <summary>
     /// Publishes and leases immutable <see cref="SslStreamCertificateContext"/> instances for TLS use.

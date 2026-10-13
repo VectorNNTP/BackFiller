@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles;
+using VectorNNTP.BackFiller.Articles;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>STORE payload: 32-byte <see cref="ArticleId"/>.</summary>
     internal static class VatpStorePayload

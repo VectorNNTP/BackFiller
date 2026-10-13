@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Crash-safe FQDN-scoped live server certificate store using generation directories

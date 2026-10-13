@@ -1,6 +1,6 @@
 using MySqlConnector;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>MySqlConnector-backed logical connection. Dispose returns it to the provider pool.</summary>
     public sealed class MySqlNntpDbSession : INntpDbSession

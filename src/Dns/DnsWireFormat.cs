@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// DNS wire-format limits, QNAME validation, and presentation-form encoding helpers (RFC 1035).

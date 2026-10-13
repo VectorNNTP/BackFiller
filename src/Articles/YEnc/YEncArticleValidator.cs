@@ -1,7 +1,7 @@
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 
-namespace VectorNNTP.Common.Articles.YEnc
+namespace VectorNNTP.BackFiller.Articles.YEnc
 {
     /// <summary>
     /// Validates yEnc correctness for transport-normalized NNTP article body bytes without materializing decoded payload output.

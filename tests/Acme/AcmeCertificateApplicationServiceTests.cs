@@ -3,12 +3,11 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Acme;
+using VectorNNTP.BackFiller.Cloudflare;
+using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Core;
-using VectorNNTP.Common.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
@@ -70,7 +69,6 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             await harness.Adapter.StopAsync(CancellationToken.None);
             Assert.True(execution.IsCompleted);
 
-            await harness.Adapter.DisposeAsync();
             await harness.Adapter.DisposeAsync();
         }
 

@@ -1,9 +1,9 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
-    /// Shared bind, ACME, and Cloudflare settings owned by VectorNNTP.Common.
+    /// Shared bind, ACME, and Cloudflare settings owned by VectorNNTP.BackFiller.
     /// </summary>
     /// <remarks>
     /// NNTPD, BackFiller, and StorageServer publish the ACME account, certificate password,

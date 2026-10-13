@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Shared NntpDB options. Physical connection pooling is owned by MySqlConnector.

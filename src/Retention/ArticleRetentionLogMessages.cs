@@ -25,7 +25,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// <see cref="ArticleRetentionKind.PayloadExceedsCapacity"/>, which are logged before an identity exists.
         /// </param>
         /// <param name="PayloadBytes">
-        /// <see cref="VectorNNTP.Common.Articles.ArticleRecord.ArtSize"/> when the record is invalid;
+        /// <see cref="VectorNNTP.BackFiller.Articles.ArticleRecord.ArtSize"/> when the record is invalid;
         /// otherwise the ArtData length that was refused.
         /// </param>
         /// <param name="RetainedPayloadBytes">Owned payload bytes observed for the log. This event does not change that total.</param>

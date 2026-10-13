@@ -1,6 +1,6 @@
 using VectorNNTP.BackFiller.ArticleWork;
 
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {

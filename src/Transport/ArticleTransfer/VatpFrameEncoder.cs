@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace VectorNNTP.Common.Transport.ArticleTransfer
+namespace VectorNNTP.BackFiller.Transport.ArticleTransfer
 {
     /// <summary>
     /// Deterministic encoders for VATP v1 frames. Payload-bearing frames keep header and
@@ -87,10 +87,6 @@ namespace VectorNNTP.Common.Transport.ArticleTransfer
         internal static EncodedFrame EncodeData(uint streamId, ReadOnlyMemory<byte> payload, bool fin = false)
         {
             ThrowIfConnectionStream(streamId);
-            if (payload.Length > int.MaxValue)
-            {
-                throw new ArgumentOutOfRangeException(nameof(payload));
-            }
 
             var flags = fin ? VatpProtocol.FlagFin : 0u;
             return Encode(VatpFrameType.Data, streamId, payload, flags);

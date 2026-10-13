@@ -3,7 +3,7 @@ using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Formatting;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>
     /// Serilog sink that publishes formatted log events on the process RabbitMQ connection.

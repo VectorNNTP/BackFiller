@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.Parsing
+namespace VectorNNTP.BackFiller.Articles.Parsing
 {
     /// <summary>
     /// Classifies how a Path header would be rewritten without mutating the article buffer.

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace VectorNNTP.Common.Acme.Protocol
+namespace VectorNNTP.BackFiller.Acme.Protocol
 {
     /// <summary>Builds ACME JWS (RFC 8555 §6.2) and external-account-binding HMAC JWS.</summary>
     internal static class JsonWebSignature

@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Networking
+namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>Source-generated bind-address, TLS certificate, listener, and connection-acceptance log messages.</summary>
     internal static partial class NetworkingLogMessages

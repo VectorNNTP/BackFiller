@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <content>
     /// Trailing timezone-abbreviation detection and numeric-offset substitution on byte buffers.

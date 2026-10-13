@@ -1,7 +1,7 @@
-using VectorNNTP.Common.Networking;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Networking;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Cloudflare
+namespace VectorNNTP.BackFiller.Cloudflare
 {
     /// <summary>
     /// Application service that reconciles Cloudflare DNS on startup and removes the exact FQDN on shutdown.

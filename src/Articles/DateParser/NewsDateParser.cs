@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <summary>
     /// Parses raw article date-header values into a canonical UTC instant without heap strings.

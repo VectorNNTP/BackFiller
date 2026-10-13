@@ -1,5 +1,5 @@
 using System.ComponentModel.DataAnnotations;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Configuration
 {

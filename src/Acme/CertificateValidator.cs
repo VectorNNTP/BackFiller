@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Validates PKCS#12/PFX certificate material before reuse or promotion.</summary>
     internal static class CertificateValidator

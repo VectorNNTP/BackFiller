@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Integer offset/length into an <see cref="ArticleRecord"/> ArtData buffer.

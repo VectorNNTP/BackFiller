@@ -2,14 +2,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Processing;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Nntp;
-using VectorNNTP.Common.Configuration;
-using VectorNNTP.Common.NntpDb;
+using VectorNNTP.BackFiller.NntpDb;
 using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.Articles.Processing;
 
 namespace VectorNNTP.BackFiller.ArticleWork
 {

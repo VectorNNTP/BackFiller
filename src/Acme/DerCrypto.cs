@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Helpers for ACME account private-key DER (PKCS#8). Not used for the TLS server credential.

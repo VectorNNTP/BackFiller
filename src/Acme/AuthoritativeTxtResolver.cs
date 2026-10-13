@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Dns;
+using VectorNNTP.BackFiller.Dns;
 
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>
     /// Resolves challenge TXT visibility by querying authoritative nameservers for the configured DNS apex

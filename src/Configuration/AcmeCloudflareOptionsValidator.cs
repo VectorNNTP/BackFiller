@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Acme;
+using VectorNNTP.BackFiller.Acme;
 
-namespace VectorNNTP.Common.Configuration
+namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>
     /// Validates shared bind, ACME, and Cloudflare settings.

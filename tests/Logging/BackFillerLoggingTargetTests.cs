@@ -11,7 +11,7 @@ using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.RabbitMq;
-using VectorNNTP.Common.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {

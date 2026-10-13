@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using VectorNNTP.BackFiller.Core;
-using VectorNNTP.Common.Logging;
+using VectorNNTP.BackFiller.Logging;
 
-namespace VectorNNTP.Common.Core
+namespace VectorNNTP.BackFiller.Core
 {
     /// <summary>
     /// Explicit, observable application lifecycle coordinator with validated state transitions.

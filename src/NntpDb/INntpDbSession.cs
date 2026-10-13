@@ -1,6 +1,6 @@
 using MySqlConnector;
 
-namespace VectorNNTP.Common.NntpDb
+namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>
     /// One open logical MySQL connection. Dispose returns the physical connection to MySqlConnector's pool.

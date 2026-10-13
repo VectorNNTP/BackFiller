@@ -3,21 +3,17 @@ using Microsoft.Extensions.Logging.Console;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.Acme;
 using VectorNNTP.BackFiller.ArticleWork;
+using VectorNNTP.BackFiller.Articles.Parsing;
+using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting.Systemd;
 using VectorNNTP.BackFiller.Listener;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
 using VectorNNTP.BackFiller.Nntp;
-using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Articles.Parsing;
-using VectorNNTP.Common.Hosting;
-using VectorNNTP.Common.NntpDb;
 using VectorNNTP.BackFiller.NntpDb;
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Acme;
-using VectorNNTP.Common.Cloudflare;
-using VectorNNTP.Common.Core;
-using VectorNNTP.Common.Networking.Certificates;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Networking.Certificates;
+using VectorNNTP.BackFiller.Retention;
 
 namespace VectorNNTP.BackFiller.Hosting
 {

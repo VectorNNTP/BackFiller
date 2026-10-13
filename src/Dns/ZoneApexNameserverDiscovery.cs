@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Net.NetworkInformation;
 
-namespace VectorNNTP.Common.Dns
+namespace VectorNNTP.BackFiller.Dns
 {
     /// <summary>
     /// Discovers authoritative nameserver addresses for a configured DNS zone apex via recursive bootstrap.

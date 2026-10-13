@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Tests.Fixtures;
-using VectorNNTP.Common.Core;
+using VectorNNTP.BackFiller.Core;
 using BackFillerApplicationServiceManager = VectorNNTP.BackFiller.Core.ApplicationServiceManager;
 
 namespace VectorNNTP.BackFiller.Tests.Core

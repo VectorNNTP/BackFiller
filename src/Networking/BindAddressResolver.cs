@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Configuration;
 
-namespace VectorNNTP.Common.Networking
+namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>
     /// Resolves <see cref="AcmeCloudflareOptions.BindAddress"/> into the eligible IP set used for DNS reconciliation.

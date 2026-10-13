@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
-namespace VectorNNTP.Common.Articles.DateParser
+namespace VectorNNTP.BackFiller.Articles.DateParser
 {
     /// <summary>
     /// Resolves the first usable article date header in the parser's deterministic candidate order.

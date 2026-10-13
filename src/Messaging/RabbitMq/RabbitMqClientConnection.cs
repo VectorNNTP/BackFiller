@@ -1,7 +1,7 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-namespace VectorNNTP.Common.Messaging.RabbitMq
+namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Owns one RabbitMQ.Client <see cref="IConnection"/>.</summary>
     internal sealed class RabbitMqClientConnection : IRabbitMqConnection

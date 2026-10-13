@@ -1,5 +1,5 @@
-using VectorNNTP.Common.Messaging.RabbitMq;
-using VectorNNTP.Common.Configuration;
+using VectorNNTP.BackFiller.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Configuration
 {

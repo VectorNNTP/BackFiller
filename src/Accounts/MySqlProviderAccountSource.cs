@@ -1,5 +1,5 @@
 using MySqlConnector;
-using VectorNNTP.Common.NntpDb;
+using VectorNNTP.BackFiller.NntpDb;
 
 namespace VectorNNTP.BackFiller.Accounts
 {

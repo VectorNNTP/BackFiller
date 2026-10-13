@@ -4,8 +4,8 @@ using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
-using VectorNNTP.Common.Articles;
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.Audit
 {

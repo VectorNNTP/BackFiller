@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Acme
+namespace VectorNNTP.BackFiller.Acme
 {
     /// <summary>Source-generated ACME certificate, issuer, and DNS-01 log messages.</summary>
     internal static partial class AcmeLogMessages
@@ -228,7 +228,7 @@ namespace VectorNNTP.Common.Acme
         internal static partial void AcmeProtocolAccountRegistered(ILogger logger, string AccountUrl);
 
         /// <summary>
-        /// Written when a JWS POST is rejected with <see cref="VectorNNTP.Common.Acme.Protocol.AcmeErrorTypes.BadNonce"/> and will be signed again.
+        /// Written when a JWS POST is rejected with <see cref="VectorNNTP.BackFiller.Acme.Protocol.AcmeErrorTypes.BadNonce"/> and will be signed again.
         /// </summary>
         /// <param name="logger">Logger that receives the event.</param>
         /// <param name="Url">Request URL that rejected the nonce.</param>

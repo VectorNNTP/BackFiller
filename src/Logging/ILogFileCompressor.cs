@@ -1,4 +1,4 @@
-namespace VectorNNTP.Common.Logging
+namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>
     /// Replaces one completed uncompressed log with a gzip file.

@@ -1,6 +1,6 @@
-using VectorNNTP.Common.Articles.Parsing;
+using VectorNNTP.BackFiller.Articles.Parsing;
 
-namespace VectorNNTP.Common.Articles
+namespace VectorNNTP.BackFiller.Articles
 {
     /// <summary>
     /// Compact header-value ranges into one canonical ArtData buffer.
