@@ -26,7 +26,7 @@ namespace VectorNNTP.BackFiller.Core
     /// handlers are not caught there.
     /// </para>
     /// </remarks>
-    internal sealed class ApplicationServiceManager
+    internal sealed class ApplicationServiceManager : IDisposable
     {
         /// <summary>
         /// Services in registration order. An argument that is already an
@@ -503,6 +503,16 @@ namespace VectorNNTP.BackFiller.Core
                     // Expected.
                 }
             }
+        }
+
+        /// <summary>
+        /// Releases manager-owned coordination resources.
+        /// </summary>
+        public void Dispose()
+        {
+            _gate.Dispose();
+            var cts = Interlocked.Exchange(ref _executionCts, null);
+            cts?.Dispose();
         }
     }
 

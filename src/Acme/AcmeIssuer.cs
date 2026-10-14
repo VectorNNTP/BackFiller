@@ -433,19 +433,22 @@ namespace VectorNNTP.BackFiller.Acme
                 leafPem.ExportCertificatePem(),
                 keyPem);
 
-            var intermediates = new List<X509Certificate2>();
+            var intermediates = new List<X509Certificate2>(Math.Max(chain.Count - 1, 0));
+            for (var i = 1; i < chain.Count; i++)
+            {
+                intermediates.Add(chain[i]);
+            }
+
             try
             {
-                for (var i = 1; i < chain.Count; i++)
-                {
-                    intermediates.Add(chain[i]);
-                }
-
                 return PfxCrypto.ExportPfx(leafWithKey, intermediates, password);
             }
             finally
             {
-                // leafPem/leafWithKey disposed via using; intermediates were borrowed from the collection.
+                foreach (var intermediate in intermediates)
+                {
+                    intermediate.Dispose();
+                }
             }
         }
 

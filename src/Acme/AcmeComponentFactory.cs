@@ -6,7 +6,7 @@ namespace VectorNNTP.BackFiller.Acme
     /// <summary>
     /// Creates ACME components only when TLS is enabled so non-TLS startups never touch ACME state.
     /// </summary>
-    internal class AcmeComponentFactory
+    internal class AcmeComponentFactory : IDisposable
     {
         /// <summary>ACME and Cloudflare options read on each factory call.</summary>
         private readonly IOptions<AcmeCloudflareOptions> _options;
@@ -28,6 +28,9 @@ namespace VectorNNTP.BackFiller.Acme
 
         /// <summary>Provider created with <see cref="_manager"/>. <see langword="null"/> until the manager exists.</summary>
         private IServerCertificateProvider? _provider;
+
+        /// <summary>Non-zero after <see cref="Dispose"/> begins.</summary>
+        private int _disposed;
 
         /// <summary>Stores the options, DNS client, HTTP factory, and logger factory used when TLS is enabled.</summary>
         /// <param name="options">ACME and Cloudflare options.</param>
@@ -57,6 +60,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <returns>The cached manager, or <see langword="null"/> when <see cref="AcmeCloudflareOptions.IsTlsListenerEnabled"/> is false.</returns>
         internal virtual CertificateManager? GetOrCreateManager()
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             var options = _options.Value;
             if (!options.IsTlsListenerEnabled)
             {
@@ -126,6 +130,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// </returns>
         internal IServerCertificateProvider GetCertificateProvider()
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             if (!_options.Value.IsTlsListenerEnabled)
             {
                 return DisabledServerCertificateProvider.Instance;
@@ -133,6 +138,27 @@ namespace VectorNNTP.BackFiller.Acme
 
             _ = GetOrCreateManager();
             return _provider ?? DisabledServerCertificateProvider.Instance;
+        }
+
+        /// <summary>
+        /// Disposes the cached certificate manager when one was created.
+        /// </summary>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            CertificateManager? manager;
+            lock (_sync)
+            {
+                manager = _manager;
+                _manager = null;
+                _provider = null;
+            }
+
+            manager?.Dispose();
         }
     }
 

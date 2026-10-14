@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Acme
     /// <summary>
     /// Owns server certificate lifecycle: evaluate, issue, renew, and expose validated PFX material.
     /// </summary>
-    internal sealed class CertificateManager
+    internal sealed class CertificateManager : IDisposable
     {
         /// <summary>Normalized certificate FQDN that owns this manager's store and journal.</summary>
         private readonly string _fqdn;
@@ -43,6 +43,9 @@ namespace VectorNNTP.BackFiller.Acme
 
         /// <summary>Count of successful persists on this instance. Logged by <see cref="AcmeLogMessages.ServerCertificateReady"/>; not the filesystem generation id.</summary>
         private int _generation;
+
+        /// <summary>Non-zero after <see cref="Dispose"/> begins.</summary>
+        private int _disposed;
 
         /// <summary>Initializes a new instance of the <see cref="CertificateManager"/> class.</summary>
         /// <param name="fqdn">Certificate FQDN that owns this manager.</param>
@@ -110,6 +113,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <returns>Usable material, or a non-usable status whose reason is <c>absent</c> or the storage/certificate category.</returns>
         internal CertificateStatus EvaluateExisting(DateTimeOffset? now = null)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             try
             {
                 var loaded = _store.Load();
@@ -140,6 +144,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <returns>The reused or newly stored material.</returns>
         internal async Task<CertificateMaterial> EnsureCertificateAsync(CancellationToken cancellationToken)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -180,6 +185,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <returns><see langword="true"/> when a new certificate was persisted.</returns>
         internal async Task<bool> RenewIfDueAsync(CancellationToken cancellationToken)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -218,6 +224,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// </summary>
         internal X509Certificate2 CreateTlsCertificate()
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             var material = _current ?? EvaluateExisting().Material
                 ?? throw new AcmeCertificateException("no_certificate", "live material missing");
             return PfxCrypto.LoadCertificate(material.PfxBytes, _pfxPassword);
@@ -275,6 +282,19 @@ namespace VectorNNTP.BackFiller.Acme
                     DateTimeOffset.UtcNow);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Disposes coordination resources owned by this manager.
+        /// </summary>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            _gate.Dispose();
         }
     }
 }
