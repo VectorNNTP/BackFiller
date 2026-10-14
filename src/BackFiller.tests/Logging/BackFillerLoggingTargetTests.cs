@@ -684,12 +684,21 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                     pending.Push(value);
                     if (value is IEnumerable enumerable)
                     {
-                        foreach (var inner in enumerable)
+                        // A sink may drain its event queue on another thread while this walk reads it.
+                        var snapshot = new List<object>();
+                        try
                         {
-                            if (inner is not null and not string and not ValueType)
-                            {
-                                pending.Push(inner);
-                            }
+                            snapshot.AddRange(enumerable.OfType<object>().Where(
+                                static inner => inner is not string and not ValueType));
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            snapshot.Clear();
+                        }
+
+                        foreach (var inner in snapshot)
+                        {
+                            pending.Push(inner);
                         }
                     }
                 }
