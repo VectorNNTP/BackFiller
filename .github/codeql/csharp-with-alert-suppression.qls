@@ -1,0 +1,7 @@
+- description: security-extended, security-and-quality, and AlertSuppression.ql
+- import: codeql-suites/csharp-security-extended.qls
+  from: codeql/csharp-queries
+- import: codeql-suites/csharp-security-and-quality.qls
+  from: codeql/csharp-queries
+- query: AlertSuppression.ql
+  from: codeql/csharp-queries

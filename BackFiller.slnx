@@ -3,12 +3,10 @@
     <Platform Name="x64" />
   </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/BackFiller.csproj">
+    <Project Path="src/BackFiller/BackFiller.csproj">
       <Platform Project="x64" />
     </Project>
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/BackFiller.Tests.csproj">
+    <Project Path="src/BackFiller.tests/BackFiller.Tests.csproj">
       <Platform Project="x64" />
     </Project>
   </Folder>

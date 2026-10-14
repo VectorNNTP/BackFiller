@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Before changing anything
 
-1. Identify the **actual target project** (today: primarily `VectorNNTP.NNTPD`). Do not assume every component shares architecture or invariants.
+1. This repository is standalone **VectorNNTP.BackFiller**, extracted from VectorNNTP.NNTPD. Do not assume NNTPD server, transit, or benchmark layout still exists here. Do not assume every component shares architecture or invariants.
 2. Inspect existing implementation, callers, consumers, ownership, lifecycle, and tests before editing.
 3. Prefer the **smallest correct change**. Avoid speculative abstractions and unnecessary dependencies.
 4. Preserve unrelated user changes and out-of-scope files.
@@ -17,20 +17,20 @@ alwaysApply: true
 - Solution: `BackFiller.slnx`
 - Target framework: `net10.0`; nullable + implicit usings enabled; x64-only; production docs XML enabled; tests suppress CS1591
 - Host: .NET Generic Host worker service; startup is ordered and validated before hosted services run; Serilog is the logging stack
-- Primary project: `src/BackFiller.csproj`; test project: `tests/BackFiller.Tests.csproj`
-- Namespace/layout: production code lives under `VectorNNTP.BackFiller.*` in `src/`; tests live under `VectorNNTP.BackFiller.Tests.*` in `tests/`
+- Primary project: `src/BackFiller/BackFiller.csproj`; test project: `src/BackFiller.tests/BackFiller.Tests.csproj`
+- Namespace/layout: production code lives under `VectorNNTP.BackFiller.*` in `src/BackFiller/`; tests live under `VectorNNTP.BackFiller.Tests.*` in `src/BackFiller.tests/`
 - Source layout: functional directories only. Do not recreate `Common` or `Shared` source trees, namespaces, or project boundaries.
-- Lifecycle: `ApplicationLifecycle` + `ApplicationServiceManager` + `IApplicationService` (see `docs/architecture.md`)
+- Lifecycle: `ApplicationServiceManager` + `IApplicationService`, hosted by `BackFillerApplicationHostedService`. systemd ready is Generic Host `ApplicationStarted` via `SystemdLifecycleNotifier`. `ApplicationLifecycle` is present in `src/BackFiller/Core/` and is not constructed by the host (see `docs/architecture.md`)
 - Config contract: `docs/configuration.md` (authoritative over memory)
 - Protocol data plane: **bytes throughout** — see `docs/architecture.md` § Byte-Oriented Protocol Data Plane
-- NNTP standards library: `docs/standards/rfcs/` — read applicable RFC text before protocol work
-- Experimental/historical material: `.artifacts/` (index: `.artifacts/ARTIFACT-INDEX.md`; policy: `.artifacts/REPOSITORY-ARTIFACT-POLICY.md`). Does not override `src/` / `tests/` / accepted `docs/`.
+- NNTP standards library: `docs/standards/rfcs/` — read applicable RFC text before protocol work. BackFiller's client subset is in `docs/architecture.md`
+- Local evidence: `.artifacts/` (gitignored). Placement policy is this rule's sibling [repository-artifacts.mdc](repository-artifacts.mdc). Local evidence does not override `src/` / `tests/` / accepted `docs/`.
 
 ## BackFiller code style
 
 All C# namespaces must be block-scoped; file-scoped namespaces are not permitted.
 
-This applies to `src/` and `tests/`. Both projects set `csharp_style_namespace_declarations = block_scoped`.
+This applies to `src/BackFiller/` and `src/BackFiller.tests/`. Both projects set `csharp_style_namespace_declarations = block_scoped` in their `.editorconfig`.
 
 The namespace must match the folder under the project directory. Files directly under the project directory use that project's root namespace. `GlobalUsings.cs` has no namespace.
 

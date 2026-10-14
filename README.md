@@ -4,21 +4,22 @@ Standalone migration of `VectorNNTP.BackFiller` into an independent repository.
 
 ## Structure
 
-- `src/BackFiller.csproj` - standalone BackFiller worker app (net10.0)
-- `src/Acme`, `src/Articles`, `src/Cloudflare`, `src/Configuration`, `src/Core`, `src/Dns`, `src/Hosting`, `src/Logging`, `src/Messaging`, `src/Networking`, `src/NntpDb`, `src/Transport` - integrated implementation formerly sourced from VectorNNTP.Common, now organized by BackFiller responsibility
-- `tests/VectorNNTP.BackFiller.Tests` - migrated BackFiller test suite
+- `src/BackFiller/BackFiller.csproj` - standalone BackFiller worker app (net10.0)
+- `src/BackFiller/` - production code organized by responsibility (for example `Acme`, `Articles`, `Configuration`, `Core`, `Hosting`, `Nntp`, `Transport`)
+- `src/BackFiller.tests/BackFiller.Tests.csproj` - xUnit test suite, namespace `VectorNNTP.BackFiller.Tests`
 - `BackFiller.slnx` - solution including app + tests
+- `tools/Invoke-CodeQlAnalysis.ps1` - local traced C# CodeQL analysis
 
 ## Build
 
 ```powershell
-dotnet build .\BackFiller.slnx
+dotnet build .\BackFiller.slnx -c Release -p:Platform=x64
 ```
 
 ## Test
 
 ```powershell
-dotnet test .\BackFiller.slnx -c Debug
+dotnet test .\src\BackFiller.tests\BackFiller.Tests.csproj -c Release -p:Platform=x64
 ```
 
 ## Publish
@@ -26,13 +27,30 @@ dotnet test .\BackFiller.slnx -c Debug
 Windows x64:
 
 ```powershell
-dotnet publish .\src\BackFiller.csproj -c Release -r win-x64
+dotnet publish .\src\BackFiller\BackFiller.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -p:PublishAot=true -p:SelfContained=true
 ```
 
 Linux x64:
 
 ```powershell
-dotnet publish .\src\BackFiller.csproj -c Release -r linux-x64
+dotnet publish .\src\BackFiller\BackFiller.csproj -c Release -p:Platform=x64 -r linux-x64 --self-contained true -p:PublishAot=true -p:SelfContained=true
 ```
 
+The production project references the `StuDev.AotAnywhere` 1.0.4 MSBuild SDK. On Windows that SDK links `linux-x64` with the Zig toolchain restored by NuGet. A globalization-enabled Linux host still needs `libicu`.
+
+Native AOT publish keeps trim and AOT analysis enabled. CI then runs the published executable with `VECTORNNTP_BACKFILLER_STARTUP_SMOKE=1` and `VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG` pointing at an isolated JSON file. The process must print `BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01.usenet.ninja` and exit 0. That checkpoint is configuration binding and host construction. It does not open a listener or contact a database, broker, DNS provider, or certificate authority.
+
 The standalone project has no external build/runtime dependency on a separate `VectorNNTP.Common` project or assembly.
+
+## CodeQL
+
+Local analysis uses the installed CodeQL CLI. It traces the Release x64 restore and build, then runs the queries selected by `.github/codeql/codeql-config.yml`. That file selects `.github/codeql/csharp-with-alert-suppression.qls`, which imports the `security-extended` and `security-and-quality` suites and adds `AlertSuppression.ql` from the same query pack. The suites themselves do not include that query, and CodeQL CLI 2.27.2 does not record in-source suppressions unless it is analyzed with them. The database, SARIF, and logs are written under `.artifacts/codeql/`, which Git ignores.
+
+A suppression is a `// codeql[rule-id]` comment on the line immediately before the alert, with no other code on that line. A same-line `// codeql[...]` comment is not recognized. A recognized suppression stays in the SARIF with `suppressions.kind` set to `inSource`. Each `cs/catch-of-all-exceptions` suppression is on a boundary that must contain every exception, including types the method cannot enumerate, and the comment states that contract. Generated System.Text.Json and regex sources are not edited and are not suppressed.
+
+```powershell
+.\tools\Invoke-CodeQlAnalysis.ps1
+.\tools\Invoke-CodeQlAnalysis.ps1 -CodeQl C:\Tools\codeql\codeql.exe
+```
+
+A local SARIF file does not update or clear GitHub code scanning alerts. For a traced C# build, `paths-ignore` in the repository config does not exclude compiled files; the CLI records that limitation while creating the database.

@@ -31,10 +31,10 @@ Protect real production contracts with deterministic, failure-sensitive tests.
 
 ## Project constraints
 
-- Test project: `tests/VectorNNTP.NNTPD.Tests` (subsystem folders under that root; shared helpers in `Fixtures/` and `TestDoubles/`)
-- Established patterns: fakes in `TestDoubles/`, host factory in `Fixtures/`, injectable `ILocalIpAddressAssignee`, host builders without live sockets
-- Do not require internet, live Cloudflare, DNS mutation, or bound NNTP listeners unless the task explicitly demands it
-- Analyzer/nullable/docs rules apply to test code; do not add `NoWarn` to hide failures
+- Test project: `src/BackFiller.tests/BackFiller.Tests.csproj` (`VectorNNTP.BackFiller.Tests`). Shared helpers live in `src/BackFiller.tests/Fixtures/` and `src/BackFiller.tests/TestDoubles/`
+- Established patterns: fakes in `TestDoubles/`, harnesses in `Fixtures/`, injectable `ILocalIpAddressAssignee`, host builders without live sockets
+- Do not require internet, live Cloudflare, DNS mutation, or bound listeners unless the task explicitly demands it
+- Analyzer and nullable rules apply to test code. The test project already sets `GenerateDocumentationFile` false and suppresses `CS1591`. Do not add further `NoWarn` entries to hide failures
 
 ## Cover when relevant
 
@@ -52,7 +52,7 @@ Protect real production contracts with deterministic, failure-sensitive tests.
 - Tests added only to inflate coverage
 - Disabling, skipping, or weakening tests to get a green build
 - Broad parallel-disable to hide races (narrow serialization only with justification)
-- RabbitMQ / exactly-once settlement assertions unless this codebase owns that invariant
+- Settlement assertions that disagree with `ArticleWorkDispositionPlanner` and `ArticleWorkSettlementLease` (see `docs/architecture.md`)
 
 ## Failure classification
 

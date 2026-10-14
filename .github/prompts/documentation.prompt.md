@@ -1,9 +1,9 @@
 ---
 mode: agent
-description: Perform the canonical, additive, single-file XML documentation pass for VectorNNTP.NNTPD.
+description: Perform the canonical, additive, single-file XML documentation pass for VectorNNTP.BackFiller.
 ---
 
-# Canonical VectorNNTP.NNTPD documentation-only pass
+# Canonical VectorNNTP.BackFiller documentation-only pass
 
 Documentation-only pass for:
 
@@ -13,7 +13,7 @@ IMPORTANT: Execute this entire task continuously from start to finish. Do not st
 
 ## Objective
 
-Document `<TARGET_FILE>` to the engineering-contract standard established by completed VectorNNTP.NNTPD documentation passes.
+Document `<TARGET_FILE>` to the engineering-contract standard in `.github/instructions/documentation.instructions.md` and `.github/skills/documentation/SKILL.md`.
 
 This is not a tag-counting exercise.
 
@@ -43,7 +43,7 @@ Before editing:
 3. Search relevant repository call sites and inspect related types and implementations.
 4. Verify actual inputs, outputs, state changes, exceptions, cancellation, concurrency, resource ownership, I/O, buffering, logging, allocation, and performance behavior where relevant.
 5. Understand framework-, compiler-, dependency-injection-, and source-generator-consumed contracts.
-6. Inspect `.copilot/PERFORMANCE-CONTEXT.md` when the target participates in a performance-sensitive path or the documentation requires verified performance context.
+6. Do not consult `.copilot/PERFORMANCE-CONTEXT.md`. That file is not in this repository. Performance claims in documentation require evidence in source or tests.
 7. Do not infer semantics from names, parameter names, comments, or log-message wording alone.
 8. Do not begin writing documentation until the implementation and relevant usage have been understood.
 9. Do not modify any other file.

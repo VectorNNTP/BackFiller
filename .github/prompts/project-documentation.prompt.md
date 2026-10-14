@@ -1,11 +1,11 @@
 ---
 mode: agent
-description: Audit and complete XML documentation across the entire VectorNNTP.NNTPD production project.
+description: Audit and complete XML documentation across the entire BackFiller production project.
 ---
 
-# VectorNNTP.NNTPD Project Documentation Audit
+# BackFiller Project Documentation Audit
 
-Perform a complete, project-wide XML documentation audit and remediation pass across the VectorNNTP.NNTPD production project.
+Perform a complete, project-wide XML documentation audit and remediation pass across the BackFiller production project.
 
 This prompt is the PROJECT-LEVEL ORCHESTRATOR.
 
@@ -27,7 +27,7 @@ This task itself is NOT restricted to one file.
 
 The project-wide scope is:
 
-src/VectorNNTP.NNTPD/
+src/BackFiller/
 
 You must enumerate, audit, and remediate the entire production project.
 
@@ -43,16 +43,14 @@ Treat those resources as the canonical methodology for each individual file.
 
 The ONLY files that may be modified are C# source files under:
 
-src/VectorNNTP.NNTPD/
+src/BackFiller/
 
 Do NOT modify:
 
-- tests/VectorNNTP.NNTPD.Tests/
-- tests/VectorNNTP.NNTPD.Bench.Tests/
-- tools/VectorNNTP.NNTPD.Bench/
+- src/BackFiller.tests/
 - tools/
 - `.github/`
-- `.copilot/`
+- `.artifacts/`
 - solution files
 - project files
 - configuration files outside the production project
@@ -65,7 +63,7 @@ Tests and benchmarks may be READ when required to establish production behavior,
 
 # PRIMARY OBJECTIVE
 
-The objective is to leave the ENTIRE VectorNNTP.NNTPD production codebase with genuinely useful engineering-contract XML documentation.
+The objective is to leave the ENTIRE BackFiller production codebase with genuinely useful engineering-contract XML documentation.
 
 This means auditing BOTH:
 
@@ -111,7 +109,7 @@ Do not stop after a convenient number of files.
 
 First enumerate every C# source file belonging to:
 
-src/VectorNNTP.NNTPD/
+src/BackFiller/
 
 Establish the exact current number of production C# files.
 
@@ -375,8 +373,6 @@ Only document claims supported by:
 - verified repository usage;
 - established architecture;
 - tests used as behavioral evidence;
-- benchmark evidence;
-- `.copilot/PERFORMANCE-CONTEXT.md`;
 - reliable repository history.
 
 Do not invent guarantees.
@@ -586,13 +582,13 @@ After remediation:
 7. Verify no logging contract changed.
 8. Verify no configuration changed.
 9. Verify no analyzer configuration changed.
-10. Verify no files outside src/VectorNNTP.NNTPD/ changed.
+10. Verify no files outside src/BackFiller/ changed.
 11. Validate XML documentation.
 12. Build ONLY:
 
-src/VectorNNTP.NNTPD/VectorNNTP.NNTPD.csproj
+src/BackFiller/BackFiller.csproj
 
-using the repository's normal Release/x64 configuration.
+with `dotnet build src/BackFiller/BackFiller.csproj --configuration Release -p:Platform=x64`.
 
 Do NOT build the entire solution unless a genuine blocking issue requires it.
 
@@ -653,7 +649,7 @@ For each:
 
 If there are no remaining meaningful gaps, state exactly:
 
-"Zero remaining meaningful XML documentation gaps were identified in the VectorNNTP.NNTPD production project."
+"Zero remaining meaningful XML documentation gaps were identified in the BackFiller production project."
 
 Do not claim zero gaps merely because the project builds.
 
@@ -670,7 +666,7 @@ For each:
 
 If none remain, state:
 
-"Zero materially inadequate generic or paraphrase XML documentation comments remain in the VectorNNTP.NNTPD production project."
+"Zero materially inadequate generic or paraphrase XML documentation comments remain in the BackFiller production project."
 
 Do not omit this section.
 
@@ -688,7 +684,7 @@ Report:
 - build result;
 - tests not run;
 - exact files modified;
-- confirmation that only src/VectorNNTP.NNTPD/ was modified;
+- confirmation that only src/BackFiller/ was modified;
 - confirmation that only XML documentation changed;
 - confirmation that no executable behavior changed;
 - confirmation that no API/signature changed;
@@ -697,7 +693,7 @@ Report:
 
 # DEFINITION OF DONE
 
-The task is complete only when the ENTIRE VectorNNTP.NNTPD production project has been independently audited for:
+The task is complete only when the ENTIRE BackFiller production project has been independently audited for:
 
 1. missing documentation;
 2. generic documentation;
@@ -719,4 +715,4 @@ Do not stop after the highest-value files.
 
 Do not declare success merely because the build succeeds.
 
-The objective is a genuinely well-documented ENTIRE VectorNNTP.NNTPD production codebase.
+The objective is a genuinely well-documented ENTIRE BackFiller production codebase.

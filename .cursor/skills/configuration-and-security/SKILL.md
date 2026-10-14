@@ -3,7 +3,7 @@ name: configuration-and-security
 description: >-
   Safely implements VectorNNTP configuration binding, validation, secrets handling,
   bind-address NIC checks, and Cloudflare environment variables. Use when changing
-  NntpdOptions, validators, appsettings, env vars, secrets, or configuration docs/tests.
+  BackFillerOptions, validators, appsettings, env vars, secrets, or configuration docs/tests.
 ---
 
 # Configuration and security
@@ -23,22 +23,31 @@ Keep configuration correct, fail-fast on mandatory errors, and never leak secret
 Inspect current sources before editing:
 
 - `docs/configuration.md`
-- `NntpdOptions`, `NntpdOptionsValidator`
-- `NntpdServiceCollectionExtensions` (`BindConfiguration`, `ValidateOnStart`, bind-address normalize)
+- `BackFillerOptions`, `BackFillerOptionsValidator`
+- `AcmeCloudflareOptions`, `RabbitMqOptions`, `NntpDbOptions`
+- `BackFillerServiceCollectionExtensions` (`ValidateOnStart`)
 - `ILocalIpAddressAssignee` for deterministic NIC checks
 
-Do not hardcode obsolete snake_case keys or old port defaults if the repo has moved on.
+Do not hardcode obsolete snake_case keys, `nntpd__` names, or `backfiller__` names. `VectorEnvironment` does not register those prefixes as aliases.
 
 ## Current naming (verify in repo)
 
-PascalCase settings under section `Nntpd`, including: `BindAddress`, `BindPort`, `BindPortTls`, `CloudFlareApiKey`, `CloudFlareZoneId`, `DnsSuffix`, `ServerId`. Generated `Fqdn` is not independently configurable.
+PascalCase settings under section `BackFiller`, including `ServerId`, `BindAddress`, `BindPortTls`, `DnsSuffix`, and `CloudFlareZoneId`. There is no `BackFiller:BindPort`. Generated `Fqdn` is `backfiller{ServerId:00}.{DnsSuffix}` and is not independently configurable.
 
-Cloudflare env vars (exact):
+RabbitMQ connectivity other than username and password binds from section `RabbitMQ`. Username and password are published from `nntpsharedconfig`.
+
+Shared secrets use the `VECTOR__` prefix. Exact names include:
 
 ```text
-nntpd__cloudflareapikey
-nntpd__CloudFlareZoneId
+VECTOR__CLOUDFLAREAPIKEY
+VECTOR__CLOUDFLAREZONEID
+VECTOR__RABBITMQ__USERNAME
+VECTOR__RABBITMQ__PASSWORD
+VECTOR__ACMEACCOUNT
+VECTOR__ACMECERTIFICATEPASSWORD
 ```
+
+The NntpDB connection string environment variable is `ConnectionStrings__NntpDB` (no `VECTOR__` prefix).
 
 ## Mandatory workflow
 

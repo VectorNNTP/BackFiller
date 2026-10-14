@@ -1,15 +1,15 @@
 ---
 mode: agent
-description: Review VectorNNTP.NNTPD tests for meaningful, deterministic regression protection.
+description: Review VectorNNTP.BackFiller tests for meaningful, deterministic regression protection.
 ---
 
-# VectorNNTP.NNTPD Test Review
+# VectorNNTP.BackFiller Test Review
 
 Review the selected test file, test class, or test area as an engineering regression-protection review.
 
 The goal is not to maximize test count or coverage percentage.
 
-The goal is to determine whether the tests provide strong, deterministic protection for the actual production contracts, failure modes, lifecycle guarantees, concurrency invariants, protocol behavior, and operational requirements of VectorNNTP.NNTPD.
+The goal is to determine whether the tests provide strong, deterministic protection for the actual production contracts, failure modes, lifecycle guarantees, concurrency invariants, protocol behavior, and operational requirements of VectorNNTP.BackFiller.
 
 ## Execute the review continuously
 
@@ -279,7 +279,7 @@ Where the project has an explicit lifecycle state or readiness contract, tests s
 
 Preserve established regression baselines and CI expectations.
 
-In particular, do not weaken or remove established `TransitPublisherTests` coverage or the known `44/44` baseline when those tests are part of the reviewed area.
+There is no `TransitPublisherTests` baseline in this repository. Do not weaken Article Work settlement coverage.
 
 Protect benchmark contracts and benchmark infrastructure tests from accidental weakening.
 

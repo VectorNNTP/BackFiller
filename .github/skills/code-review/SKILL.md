@@ -1,10 +1,10 @@
-# VectorNNTP.NNTPD Code Review Skill
+# VectorNNTP.BackFiller Code Review Skill
 
 ## Purpose
 
-Review changes to the VectorNNTP.NNTPD codebase for correctness, reliability, performance, concurrency safety, resource safety, maintainability, and consistency with the established architecture.
+Review changes to the VectorNNTP.BackFiller codebase for correctness, reliability, performance, concurrency safety, resource safety, maintainability, and consistency with the established architecture.
 
-VectorNNTP.NNTPD is a high-performance .NET service responsible for retrieving unavailable Usenet articles from external NNTP providers.
+VectorNNTP.BackFiller is a standalone worker, extracted from VectorNNTP.NNTPD, that retrieves unavailable Usenet articles from external NNTP providers and settles Article Work on RabbitMQ.
 
 The service is designed for very high throughput and high concurrency. Code review must therefore consider both functional correctness and behaviour under sustained load, failure, cancellation, and shutdown.
 
@@ -91,7 +91,7 @@ Do not recommend unrelated refactoring merely because it could make the code "cl
 
 ## Concurrency
 
-Concurrency is a critical concern in VectorNNTP.NNTPD.
+Concurrency is a critical concern in VectorNNTP.BackFiller.
 
 For every change involving shared state, queues, consumers, producers, workers, providers, or asynchronous operations, explicitly consider:
 
@@ -148,6 +148,8 @@ Review changes for:
 The following invariant must always hold:
 
 > Every admitted unit of work is settled exactly once.
+
+BackFiller implements that invariant for Article Work in `ArticleWorkDispositionPlanner` and `ArticleWorkSettlementLease`. The lease claims its only attempt on the original channel before the broker RPC. A failed RPC is not retried on that lease. A stale or closed channel returns without ACK or NACK, and the broker may redeliver. Terminal outcomes ACK. Retryable outcomes, including cancellation, NACK with requeue. The full map is in `docs/architecture.md`.
 
 This invariant applies regardless of whether the work:
 
@@ -250,7 +252,7 @@ Never assume that a network connection represents a valid NNTP session merely be
 
 ## Network I/O
 
-BackFiller is expected to operate at very high network throughput.
+BackFiller is expected to operate at high network throughput. There is no in-repo throughput baseline to cite.
 
 Review network changes for:
 

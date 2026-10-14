@@ -7,12 +7,17 @@ alwaysApply: true
 
 | Kind | Location |
 |------|----------|
-| Production code | `src/` |
-| Production tests | `tests/` |
+| Production code | `src/BackFiller/` |
+| Production tests | `src/BackFiller.tests/` |
 | Permanent docs (explicitly accepted only) | `docs/` |
-| Experiments, benches, audits, generated reports, prototypes | `.artifacts/` |
+| Local experiments, benches, audits, generated reports, prototypes | `.artifacts/` |
+| CI publish output | `artifacts/win-x64` on the Linux/Windows runner workspace |
 
-If unsure a document is permanent: write it under `.artifacts/`. Never default to `docs/SOMETHING.md`.
+`.gitignore` ignores `.artifacts/` and `Artifacts/`. On Windows, `artifacts/` and `Artifacts/` are the same path, so that name is gitignored locally. On Linux, `artifacts/` is not the same as `Artifacts/` or `.artifacts/`. CI writes `./artifacts/win-x64` as a job output and uploads it. That directory is not a source tree and is not where agents put notes they expect to commit.
+
+Agents write local evidence under `.artifacts/`. Do not put committable documentation or policy there: the directory is gitignored, so a file created only to satisfy an old index path will not be in git. This rule is the committed placement policy. There is no committed `.artifacts/ARTIFACT-INDEX.md` or `.artifacts/REPOSITORY-ARTIFACT-POLICY.md`.
+
+If unsure a document is permanent: write it under `.artifacts/` when it is disposable local evidence. Never default to `docs/SOMETHING.md`.
 
 Do not put experimental/benchmark/prototype/diagnostic code under `src/`, `tests/`, `docs/`, or `tools/` unless the user explicitly promotes it.
 
@@ -23,10 +28,8 @@ Promotion (`.artifacts/` → `docs/` or `src/`/`tests/`) requires an explicit us
 1. Current `src/`
 2. Current `tests/`
 3. Accepted `docs/`
-4. `.artifacts/` (historical evidence only)
+4. `.artifacts/` (local evidence only, when present on disk)
 
-Before command or data-plane work: inspect production code, then `.artifacts/ARTIFACT-INDEX.md`, then relevant artifacts. Do not treat an old report as current architecture.
+Before command or data-plane work: inspect production code, then accepted `docs/`. Local files under `.artifacts/` are evidence from a machine, not current architecture.
 
-Policy: `.artifacts/REPOSITORY-ARTIFACT-POLICY.md`.
-
-Do not delete or “clean up” historical artifacts. Do not implement features or optimize as part of indexing/hygiene tasks.
+Do not delete or “clean up” historical artifacts. Do not implement features or optimize as part of indexing/hygiene tasks. Do not move CI publish output into `.artifacts/` or the reverse.

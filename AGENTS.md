@@ -1,14 +1,16 @@
-# VectorNNTP agent instructions
+# VectorNNTP.BackFiller agent instructions
 
 Concise routing for Cursor agents (including JetBrains Rider ACP). This file is an entry point; it does not prove that Rider ACP automatically loads it.
+
+This repository is standalone **VectorNNTP.BackFiller**. It was extracted from VectorNNTP.NNTPD. NNTPD names that remain in code comments or shared configuration are provenance or shared-domain context. The solution, projects, and verification commands are BackFiller's.
 
 ## Before substantive work
 
 1. Read the engineering skill index: [`.cursor/skills/README.md`](.cursor/skills/README.md).
 2. Identify the task domain and **explicitly read** the relevant [`.cursor/skills/<skill-name>/SKILL.md`](.cursor/skills/) file(s) before implementing, reviewing, testing, or documenting.
 3. Combine skills when appropriate (do not default to a single skill when several apply).
-4. Follow the core engineering rules in [`.cursor/rules/vectornntp-core.mdc`](.cursor/rules/vectornntp-core.mdc). Protocol data remains byte-oriented throughout the data plane ([`docs/architecture.md`](docs/architecture.md#byte-oriented-protocol-data-plane)). Application logging prefers source-generated structured methods ([`docs/architecture.md`](docs/architecture.md#source-generated-structured-logging)).
-5. Follow the placement policy in [`.cursor/rules/repository-artifacts.mdc`](.cursor/rules/repository-artifacts.mdc): production in `src/`/`tests/`; permanent docs only in `docs/`; experiments, benches, and generated reports in `.artifacts/`. Historical lookup starts at [`.artifacts/ARTIFACT-INDEX.md`](.artifacts/ARTIFACT-INDEX.md).
+4. Follow the core engineering rules in [`.cursor/rules/vectornntp-core.mdc`](.cursor/rules/vectornntp-core.mdc). Protocol data remains byte-oriented throughout the data plane ([`docs/architecture.md`](docs/architecture.md#byte-oriented-protocol-data-plane)). Application logging prefers source-generated structured methods ([`docs/architecture.md`](docs/architecture.md#source-generated-structured-logging)). Host lifecycle, Article Work settlement, and the NNTP client subset are in [`docs/architecture.md`](docs/architecture.md).
+5. Follow the placement policy in [`.cursor/rules/repository-artifacts.mdc`](.cursor/rules/repository-artifacts.mdc): production in `src/BackFiller/`; tests in `src/BackFiller.tests/`; permanent docs only in `docs/`; local evidence in `.artifacts/`. That directory is gitignored. Do not treat it as a committed index. Builds are x64 only (`-p:Platform=x64`); output is `bin/x64/<Configuration>/`.
 
 ## Discovery honesty
 

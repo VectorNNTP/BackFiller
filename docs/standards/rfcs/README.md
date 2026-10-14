@@ -1,6 +1,6 @@
 # RFC standards reference library
 
-This directory holds **official plain-text copies** of RFCs used as the persistent standards reference library for `VectorNNTP.NNTPD`.
+This directory holds **official plain-text copies** of RFCs used as the persistent standards reference library. Standalone VectorNNTP.BackFiller was extracted from VectorNNTP.NNTPD and keeps this library. BackFiller implements the client subset in [architecture.md](../../architecture.md#nntp-client): greeting, `CAPABILITIES`, conditional `STARTTLS`, `AUTHINFO`, `ARTICLE` by Message-ID, idle `DATE`, and article-byte parsing. It does not implement an NNTP listener, compression, streaming feeds, `LIST` extensions, PGPVERIFY, or SPAMD. Do not treat every file below as a feature of this process.
 
 Use these files for implementation, design reviews, and conformance testing. Local copies are for convenience and offline review only. **Implementation decisions must still be checked against the applicable RFC text, subsequent updates, and errata** published by the RFC Editor / IETF.
 
@@ -42,13 +42,14 @@ RFC 1036  --(obsoleted by)--> RFC 5536 + RFC 5537
                                  |              +-- CANCEL / control-message protocol
                                  +-- Netnews article format (Control syntax)
 
-PGPVERIFY  --(not an RFC)--> de-facto control-message authentication
-                             See ../pgpverify/ (FORMAT + README).
-                             VectorNNTP implements it for CANCEL interoperability.
-                             Do not describe PGPVERIFY as RFC-compliant.
-SPAMD/SPAMC --(not an RFC)--> Apache SpamAssassin network protocol
-                             See ../spamd/ (PROTOCOL.md).
-                             Bundled reference for the SPAMC/SPAMD integration.
+PGPVERIFY  --(not an RFC)--> de-facto control-message authentication.
+                             RFC 5537 §5.1 cites it as unstandardized.
+                             `docs/standards/pgpverify/` is not in this repository.
+                             BackFiller does not implement PGPVERIFY. It only
+                             classifies PGP armor and `Control: cancel` as article-type bits.
+SPAMD/SPAMC --(not an RFC)--> Apache SpamAssassin network protocol.
+                             `docs/standards/spamd/` is not in this repository.
+                             BackFiller does not implement SPAMD.
 RFC 4642  --(updated by)--> RFC 8143 (and RFC 8996)
 RFC 5538  defines news/nntp URI schemes (see also historical RFC 1738)
 RFC 8054  NNTP compression extension

@@ -1,0 +1,68 @@
+{
+  "ACMEACCOUNT": "security@usenet.ninja",
+  "AcmeCertificatePassword": "startup-smoke-pfx",
+  "CloudFlareApiKey": "startup-smoke-cloudflare-key",
+  "ConnectionStrings": {
+    "NntpDB": "Server=127.0.0.1;Database=nntp;User ID=nntparticles;Password=startup-smoke-db"
+  },
+  "BackFiller": {
+    "AcmeDirectoryUrl": "https://acme-staging-v02.api.letsencrypt.org/directory",
+    "AcmeRenewalThresholdDays": 30,
+    "AcmeStateDir": "certs/",
+    "ArticleRetention": {
+      "MaximumRetainedPayloadGigabytes": 1,
+      "MaxOpenableRequestIdsPerArticle": 16,
+      "RetentionTtlSeconds": 10,
+      "SweepIntervalSeconds": 1
+    },
+    "BackFillerAccountRefreshIntervalSeconds": 60,
+    "BindAddress": [
+      "127.0.0.1"
+    ],
+    "BindPortTls": 1190,
+    "CloudFlareZoneId": "0123456789abcdef0123456789abcdef",
+    "DnsSuffix": "usenet.ninja",
+    "Listener": {
+      "AwaitingReceiptAckTimeoutSeconds": 30,
+      "IoProgressTimeoutSeconds": 60,
+      "MaxActiveConnections": 8,
+      "MaxQueuedFoundPayloadBytes": 1048576,
+      "ParserAccumulationMaxBytes": 262144,
+      "TlsHandshakeTimeoutSeconds": 30
+    },
+    "Logging": {
+      "LogLevel": "Information",
+      "LogRetentionDays": 14,
+      "Json": false,
+      "File": {
+        "Enabled": false,
+        "LogDir": "logs"
+      },
+      "Syslog": {
+        "Enabled": false,
+        "Host": "",
+        "Port": 514,
+        "Protocol": "Udp"
+      },
+      "RabbitMQ": {
+        "Enabled": false,
+        "Exchange": "logs",
+        "RoutingKey": "backfiller"
+      }
+    },
+    "ServerId": 1,
+    "Shutdown": {
+      "DrainQueuedWork": true,
+      "FinishActiveArticles": true,
+      "GracePeriodSeconds": 30
+    }
+  },
+  "RabbitMQ": {
+    "EnableSsl": false,
+    "Hosts": [
+      "127.0.0.1"
+    ],
+    "Port": 5672,
+    "VirtualHost": "/"
+  }
+}

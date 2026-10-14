@@ -12,6 +12,7 @@ obj/
 # Test artifacts
 .artifacts/
 Artifacts/
+release/
 TestResults/
 *.trx
 

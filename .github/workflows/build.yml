@@ -40,11 +40,11 @@ jobs:
 
           disk_list="$(mktemp)"
           sln_list="$(mktemp)"
-          find src tests -name '*.csproj' | sed 's|\\|/|g' | sed 's|^\./||' | sort -u > "$disk_list"
+          find src -name '*.csproj' | sed 's|\\|/|g' | sed 's|^\./||' | sort -u > "$disk_list"
           dotnet sln BackFiller.slnx list | tr -d '\r' | sed 's|\\|/|g' | sed 's|^\./||' | grep '\.csproj$' | sort -u > "$sln_list"
 
           if ! cmp -s "$disk_list" "$sln_list"; then
-            echo "Solution membership does not match every project under src/ and tests/."
+            echo "Solution membership does not match every project under src/."
             echo "On disk but not in BackFiller.slnx:"
             comm -23 "$disk_list" "$sln_list"
             echo "In BackFiller.slnx but missing on disk:"
@@ -52,39 +52,42 @@ jobs:
             exit 1
           fi
 
-          while IFS= read -r proj; do
-            grep -q '<IsTestProject>true</IsTestProject>' "$proj" || {
-              echo "Test project is not marked IsTestProject: $proj"
-              exit 1
-            }
-            grep -q 'Microsoft.NET.Test.Sdk' "$proj" || {
-              echo "Test project is missing Microsoft.NET.Test.Sdk: $proj"
-              exit 1
-            }
-          done < <(find tests -name '*.csproj' | sort)
-
+          test_count=0
+          prod_count=0
           while IFS= read -r proj; do
             if grep -q '<IsTestProject>true</IsTestProject>' "$proj"; then
-              echo "Non-test project is marked IsTestProject: $proj"
-              exit 1
+              test_count=$((test_count + 1))
+              grep -q 'Microsoft.NET.Test.Sdk' "$proj" || {
+                echo "Test project is missing Microsoft.NET.Test.Sdk: $proj"
+                exit 1
+              }
+            else
+              prod_count=$((prod_count + 1))
             fi
-          done < <(find src -name '*.csproj' | sort)
+          done < "$disk_list"
+
+          if [ "$test_count" -lt 1 ]; then
+            echo "No test project found under src/."
+            exit 1
+          fi
+          if [ "$prod_count" -lt 1 ]; then
+            echo "No production project found under src/."
+            exit 1
+          fi
 
           echo "Solution projects:"
           cat "$sln_list"
-          echo "Test projects:"
-          find tests -name '*.csproj' | sed 's|\\|/|g' | sort
+          echo "Test projects: $test_count"
+          echo "Production projects: $prod_count"
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx
+        run: dotnet restore BackFiller.slnx -p:Platform=x64
 
       - name: Build solution
-        # The solution maps Release|x64 to Release|Any CPU for every project.
-        # Passing -p:Platform=x64 does not change that build, but a later
-        # project-level dotnet test -p:Platform=x64 looks in bin/x64/Release.
-        # Ordinary CI stays on the solution configuration. win-x64 publishing
-        # is a separate runtime-identifier step in the Windows job.
-        run: dotnet build BackFiller.slnx --configuration Release --no-restore
+        # Platform x64 writes bin/x64/Release. The test step uses the same
+        # property with --no-build so VSTest reads that output.
+        # Native AOT publishing is a later runtime-identifier step.
+        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Test solution
         timeout-minutes: 25
@@ -98,11 +101,15 @@ jobs:
           # separate change.
           failed=0
           while IFS= read -r proj; do
+            if ! grep -q '<IsTestProject>true</IsTestProject>' "$proj"; then
+              continue
+            fi
             name="$(basename "$proj" .csproj)"
             echo "Testing $name"
             if grep -q 'coverlet.collector' "$proj"; then
               if ! dotnet test "$proj" \
                 --configuration Release \
+                -p:Platform=x64 \
                 --no-build \
                 --no-restore \
                 --collect:"XPlat Code Coverage" \
@@ -114,6 +121,7 @@ jobs:
             else
               if ! dotnet test "$proj" \
                 --configuration Release \
+                -p:Platform=x64 \
                 --no-build \
                 --no-restore \
                 --results-directory ./TestResults \
@@ -122,7 +130,7 @@ jobs:
                 failed=1
               fi
             fi
-          done < <(find tests -name '*.csproj' | sort)
+          done < <(find src -name '*.csproj' | sort)
           exit "$failed"
 
       - name: Verify every test project reported results
@@ -130,13 +138,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test_count="$(find tests -name '*.csproj' | wc -l | tr -d '[:space:]')"
+          test_count=0
           coverlet_count=0
           while IFS= read -r proj; do
-            if grep -q 'coverlet.collector' "$proj"; then
-              coverlet_count=$((coverlet_count + 1))
+            if grep -q '<IsTestProject>true</IsTestProject>' "$proj"; then
+              test_count=$((test_count + 1))
+              if grep -q 'coverlet.collector' "$proj"; then
+                coverlet_count=$((coverlet_count + 1))
+              fi
             fi
-          done < <(find tests -name '*.csproj' | sort)
+          done < <(find src -name '*.csproj' | sort)
           trx_count=0
           cov_count=0
           if [ -d TestResults ]; then
@@ -206,6 +217,87 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Publish BackFiller linux-x64
+        # Same Native AOT invocation as the VectorNNTP release script, plus the
+        # x64 platform contract. Publish restores the ILCompiler pack and the
+        # StuDev.AotAnywhere Zig toolchain for this runtime identifier.
+        run: |
+          dotnet publish src/BackFiller/BackFiller.csproj \
+            --configuration Release \
+            -p:Platform=x64 \
+            --runtime linux-x64 \
+            --self-contained true \
+            -p:PublishAot=true \
+            -p:SelfContained=true \
+            --output ./artifacts/linux-x64
+
+      - name: Validate linux-x64 Native AOT executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=./artifacts/linux-x64
+          exe="$dir/VectorNNTP.BackFiller"
+          test -f "$exe"
+          test -x "$exe"
+          file "$exe"
+          readelf -h "$exe"
+          objdump -f "$exe"
+          file -b "$exe" | grep -q "ELF 64-bit LSB"
+          file -b "$exe" | grep -q "x86-64"
+          readelf -h "$exe" | grep -q "Class:[[:space:]]*ELF64"
+          readelf -h "$exe" | grep -q "Data:[[:space:]]*2's complement, little endian"
+          readelf -h "$exe" | grep -q "Machine:[[:space:]]*Advanced Micro Devices X86-64"
+          readelf -h "$exe" | grep -E -q "Type:[[:space:]]*(EXEC|DYN)"
+          objdump -f "$exe" | grep -q "elf64-x86-64"
+          for forbidden in VectorNNTP.BackFiller.dll libcoreclr.so libhostfxr.so coreclr.dll hostfxr.dll; do
+            if [ -e "$dir/$forbidden" ]; then
+              echo "Native AOT output contains $forbidden."
+              exit 1
+            fi
+          done
+          if ldd "$exe" | grep -E -q 'coreclr|hostfxr'; then
+            echo "Executable depends on the shared CLR."
+            ldd "$exe"
+            exit 1
+          fi
+
+      - name: Smoke-test linux-x64 Native AOT startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=./artifacts/linux-x64/VectorNNTP.BackFiller
+          config="$PWD/src/BackFiller.tests/Fixtures/startup-smoke.json"
+          test -f "$exe"
+          test -f "$config"
+          export VECTORNNTP_BACKFILLER_STARTUP_SMOKE=1
+          export VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG="$config"
+          set +e
+          timeout 30 "$exe" >./artifacts/linux-x64-smoke-stdout.txt 2>./artifacts/linux-x64-smoke-stderr.txt
+          code=$?
+          set -e
+          echo "linux-x64 startup smoke exit=$code"
+          echo "----- stdout -----"
+          cat ./artifacts/linux-x64-smoke-stdout.txt
+          echo "----- stderr -----"
+          cat ./artifacts/linux-x64-smoke-stderr.txt
+          if [ "$code" -eq 124 ]; then
+            echo "linux-x64 startup smoke timed out."
+            exit 1
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "linux-x64 startup smoke failed."
+            exit 1
+          fi
+          grep -q "BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01.usenet.ninja" ./artifacts/linux-x64-smoke-stdout.txt
+
+      - name: Upload Linux build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: backfiller-linux-x64-ci-build
+          path: artifacts/linux-x64/
+          if-no-files-found: error
+          retention-days: 7
+
   windows-build:
     name: Windows Build Validation
     runs-on: windows-latest
@@ -223,24 +315,90 @@ jobs:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx
+        run: dotnet restore BackFiller.slnx -p:Platform=x64
 
       - name: Build solution
-        # Same Any CPU Release build as Linux. This job does not repeat tests.
+        # Same x64 Release build as Linux. This job does not repeat tests.
         # BackFiller.slnx is the canonical CI entrypoint for the production and test projects.
-        run: dotnet build BackFiller.slnx --configuration Release --no-restore
+        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Publish BackFiller win-x64
-        # Runtime identifier publish, including Native AOT from Directory.Build.targets.
-        # This is not the managed build used for tests. Solution restore already
-        # includes win-x64 because the production executables set RuntimeIdentifiers.
+        # Native AOT. PublishAot is true only for this runtime identifier, and the
+        # ILCompiler pack is restored only when that identifier is present.
+        # The solution restore above does not pass a runtime identifier, so this
+        # publish restores itself. --no-restore here would publish a self-contained
+        # managed app and the RequireNativeAotCompiler target would fail.
         shell: pwsh
         run: |
-          dotnet publish src/BackFiller.csproj `
+          dotnet publish src/BackFiller/BackFiller.csproj `
             --configuration Release `
+            -p:Platform=x64 `
             --runtime win-x64 `
-            --output ./artifacts/win-x64 `
-            --no-restore
+            --self-contained true `
+            -p:PublishAot=true `
+            -p:SelfContained=true `
+            --output ./artifacts/win-x64
+
+      - name: Validate win-x64 Native AOT executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = './artifacts/win-x64'
+          $exe = Join-Path $dir 'VectorNNTP.BackFiller.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Missing $exe" }
+          foreach ($forbidden in @('VectorNNTP.BackFiller.dll', 'coreclr.dll', 'hostfxr.dll', 'libcoreclr.so', 'libhostfxr.so')) {
+            $path = Join-Path $dir $forbidden
+            if (Test-Path -LiteralPath $path) { throw "Native AOT output contains $forbidden." }
+          }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Expected a Windows PE executable." }
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
+          if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) { throw "Missing PE signature." }
+          $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) { throw "Expected x64 machine 0x8664 and found 0x$('{0:X4}' -f $machine)." }
+          $optional = $peOffset + 24
+          $magic = [System.BitConverter]::ToUInt16($bytes, $optional)
+          if ($magic -ne 0x20B) { throw "Expected PE32+ and found magic 0x$('{0:X4}' -f $magic)." }
+          $clrSize = [System.BitConverter]::ToUInt32($bytes, $optional + 112 + (14 * 8) + 4)
+          if ($clrSize -ne 0) { throw "Executable still has a CLR runtime header, so it is not Native AOT." }
+
+      - name: Smoke-test win-x64 Native AOT startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path (Resolve-Path './artifacts/win-x64') 'VectorNNTP.BackFiller.exe'
+          $config = (Resolve-Path './src/BackFiller.tests/Fixtures/startup-smoke.json').Path
+          $stdoutPath = Join-Path (Resolve-Path './artifacts') 'win-x64-smoke-stdout.txt'
+          $stderrPath = Join-Path (Resolve-Path './artifacts') 'win-x64-smoke-stderr.txt'
+          $process = [System.Diagnostics.Process]::new()
+          $process.StartInfo.FileName = $exe
+          $process.StartInfo.WorkingDirectory = Split-Path -Parent $exe
+          $process.StartInfo.UseShellExecute = $false
+          $process.StartInfo.RedirectStandardOutput = $true
+          $process.StartInfo.RedirectStandardError = $true
+          $process.StartInfo.Environment['VECTORNNTP_BACKFILLER_STARTUP_SMOKE'] = '1'
+          $process.StartInfo.Environment['VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG'] = $config
+          if (-not $process.Start()) { throw 'Failed to start the win-x64 startup smoke process.' }
+          $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+          $stderrTask = $process.StandardError.ReadToEndAsync()
+          if (-not $process.WaitForExit(30000)) {
+            try { $process.Kill($true) } catch { }
+            throw 'win-x64 startup smoke timed out.'
+          }
+          $process.WaitForExit()
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          Set-Content -LiteralPath $stdoutPath -Value $stdout
+          Set-Content -LiteralPath $stderrPath -Value $stderr
+          Write-Host "win-x64 startup smoke exit=$($process.ExitCode)"
+          Write-Host '----- stdout -----'
+          Write-Host $stdout
+          Write-Host '----- stderr -----'
+          Write-Host $stderr
+          if ($process.ExitCode -ne 0) { throw 'win-x64 startup smoke failed.' }
+          if ($stdout -notmatch 'BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01\.usenet\.ninja') {
+            throw 'win-x64 startup smoke did not reach the configuration checkpoint.'
+          }
 
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v7

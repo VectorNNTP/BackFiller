@@ -43,8 +43,8 @@ Review changed code as a senior .NET systems engineer. Prefer defects and operat
 
 ## Project constraints
 
-- Target project may be `VectorNNTP.NNTPD` — do not import BackFiller RabbitMQ / ACK-NACK settlement invariants unless this repo actually has that contract.
-- Lifecycle truth lives in `ApplicationLifecycle`, `ApplicationServiceManager`, and systemd helpers — verify against code, not memory.
+- This repository is standalone BackFiller. Article Work ACK/NACK settlement is in scope. The map and its limits are in `docs/architecture.md` (`ArticleWorkDispositionPlanner`, `ArticleWorkSettlementLease`).
+- Live lifecycle is `ApplicationServiceManager`, `BackFillerApplicationHostedService`, and `SystemdLifecycleNotifier`. `ApplicationLifecycle` is unwired. Verify against code, not memory.
 - Protocol claims require `docs/standards/rfcs/` (see `nntp-protocol` skill).
 - Protocol **representation** is byte-oriented (`docs/architecture.md` § Byte-Oriented Protocol Data Plane). A silent `bytes → string → bytes` conversion is a defect unless an explicit boundary is justified.
 - Application logging prefers source-generated structured methods (`docs/architecture.md` § Source-Generated Structured Logging). Preformatted interpolated log messages and extra protocol-byte conversions solely for logging are defects unless the logging API cannot consume the original representation.
