@@ -190,12 +190,14 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(service.IsActive);
         }
 
-        [Fact]
-        public async Task Watchdog_NotificationFailure_DoesNotStopHost()
+        [Theory]
+        [InlineData(typeof(InvalidOperationException))]
+        [InlineData(typeof(NotSupportedException))]
+        public async Task Watchdog_NotificationFailure_DoesNotStopHost(Type exceptionType)
         {
             var notify = new FakeSystemdNotifyBridge
             {
-                ThrowOnNotify = new InvalidOperationException("notify-failed"),
+                ThrowOnNotify = (Exception)Activator.CreateInstance(exceptionType, "notify-failed")!,
             };
             var health = new FakeApplicationHealth { IsHealthyForWatchdog = true };
             var lifetime = new TestHostApplicationLifetime();

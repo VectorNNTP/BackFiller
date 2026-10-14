@@ -169,7 +169,8 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                         _notify.NotifyWatchdog();
                         SystemdLogMessages.WatchdogKeepAliveSent(_logger);
                     }
-                    catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or TimeoutException)
+                    // codeql[cs/catch-of-all-exceptions] A watchdog notify failure must be logged and must not stop the process.
+                    catch (Exception ex)
                     {
                         // Unlike NNTPD, notify failures must not stop BackFiller. Missing
                         // keep-alives still trip systemd when WatchdogSec is configured.
