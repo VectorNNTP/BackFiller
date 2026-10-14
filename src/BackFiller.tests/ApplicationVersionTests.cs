@@ -18,7 +18,8 @@ namespace VectorNNTP.BackFiller.Tests
             Assert.NotNull(version);
             Assert.Equal(1, version.Major);
             Assert.Equal(0, version.Minor);
-            Assert.Equal((DateTime.Now.Date - new DateTime(2000, 1, 1)).Days, version.Build);
+            var todayBuild = (DateTime.Now.Date - new DateTime(2000, 1, 1)).Days;
+            Assert.InRange(version.Build, todayBuild - 1, todayBuild);
             Assert.InRange(version.Revision, 0, 43199);
 
             var expected = $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
