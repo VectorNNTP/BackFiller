@@ -67,6 +67,7 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
                 var candidate = Path.Combine(
                     directory.FullName,
                     "src",
+                    "BackFiller",
                     "Accounts",
                     "MySqlProviderAccountSource.cs");
                 if (File.Exists(candidate))

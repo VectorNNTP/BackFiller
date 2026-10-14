@@ -35,10 +35,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx
+        run: dotnet restore BackFiller.slnx -p:Platform=x64
 
       - name: Build solution
-        run: dotnet build BackFiller.slnx --configuration Release --no-restore
+        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Test solution with coverage where the collector is already referenced
         timeout-minutes: 25
@@ -47,11 +47,15 @@ jobs:
           set -euo pipefail
           failed=0
           while IFS= read -r proj; do
+            if ! grep -q '<IsTestProject>true</IsTestProject>' "$proj"; then
+              continue
+            fi
             name="$(basename "$proj" .csproj)"
             echo "Testing $name"
             if grep -q 'coverlet.collector' "$proj"; then
               if ! dotnet test "$proj" \
                 --configuration Release \
+                -p:Platform=x64 \
                 --no-build \
                 --no-restore \
                 --collect:"XPlat Code Coverage" \
@@ -63,6 +67,7 @@ jobs:
             else
               if ! dotnet test "$proj" \
                 --configuration Release \
+                -p:Platform=x64 \
                 --no-build \
                 --no-restore \
                 --results-directory ./TestResults \
@@ -71,7 +76,7 @@ jobs:
                 failed=1
               fi
             fi
-          done < <(find tests -name '*.csproj' | sort)
+          done < <(find src -name '*.csproj' | sort)
           exit "$failed"
 
       - name: Verify every test project reported results
@@ -79,13 +84,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test_count="$(find tests -name '*.csproj' | wc -l | tr -d '[:space:]')"
+          test_count=0
           coverlet_count=0
           while IFS= read -r proj; do
-            if grep -q 'coverlet.collector' "$proj"; then
-              coverlet_count=$((coverlet_count + 1))
+            if grep -q '<IsTestProject>true</IsTestProject>' "$proj"; then
+              test_count=$((test_count + 1))
+              if grep -q 'coverlet.collector' "$proj"; then
+                coverlet_count=$((coverlet_count + 1))
+              fi
             fi
-          done < <(find tests -name '*.csproj' | sort)
+          done < <(find src -name '*.csproj' | sort)
           trx_count=0
           cov_count=0
           if [ -d TestResults ]; then

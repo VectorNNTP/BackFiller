@@ -100,7 +100,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir is not null)
             {
-                var candidate = Path.Combine(dir.FullName, "src", "VectorNNTP.BackFiller.json");
+                var candidate = Path.Combine(dir.FullName, "src", "BackFiller", "VectorNNTP.BackFiller.json");
                 if (File.Exists(candidate))
                 {
                     return candidate;
@@ -109,7 +109,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 dir = dir.Parent;
             }
 
-            throw new FileNotFoundException("Could not locate src/VectorNNTP.BackFiller.json.");
+            throw new FileNotFoundException("Could not locate src/BackFiller/VectorNNTP.BackFiller.json.");
         }
     }
 }

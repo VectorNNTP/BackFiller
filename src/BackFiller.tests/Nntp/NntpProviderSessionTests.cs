@@ -589,7 +589,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "Nntp");
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Nntp");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -598,7 +598,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 directory = directory.Parent;
             }
 
-            throw new DirectoryNotFoundException("Could not locate src/Nntp.");
+            throw new DirectoryNotFoundException("Could not locate src/BackFiller/Nntp.");
         }
     }
 }

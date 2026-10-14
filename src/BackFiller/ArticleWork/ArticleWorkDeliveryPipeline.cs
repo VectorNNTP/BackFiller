@@ -283,7 +283,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                     channelStillCurrent() && lease.IsOriginalChannel(channel),
                     CancellationToken.None)
                 .ConfigureAwait(false);
-                return outcome;
+            return outcome;
         }
 
         /// <summary>

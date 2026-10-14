@@ -72,7 +72,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", relativePath);
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", relativePath);
                 if (File.Exists(candidate))
                 {
                     return candidate;

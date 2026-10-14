@@ -3,6 +3,22 @@
   <component name="JsonSchemaMappingsProjectConfiguration">
     <state>
       <map>
+        <entry key="appsettings.json">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="appsettings.json" />
+              <option name="relativePathToSchema" value="https://www.schemastore.org/appsettings.json" />
+              <option name="applicationDefined" value="true" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="src/BackFiller/appsettings.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
         <entry key="global.json">
           <value>
             <SchemaInfo>

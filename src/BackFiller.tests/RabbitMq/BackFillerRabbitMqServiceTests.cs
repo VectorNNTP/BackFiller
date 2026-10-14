@@ -395,6 +395,9 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 static name => name.Contains("backfiller.storage", StringComparison.OrdinalIgnoreCase));
 
             var topologyNames = assembly.GetTypes()
+                .Where(static type => type.Namespace?.StartsWith(
+                    "Coverlet.Core.Instrumentation",
+                    StringComparison.Ordinal) != true)
                 .SelectMany(static type => type.GetFields(
                     System.Reflection.BindingFlags.Public
                     | System.Reflection.BindingFlags.NonPublic
@@ -439,7 +442,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "RabbitMq");
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "RabbitMq");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -448,7 +451,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 directory = directory.Parent;
             }
 
-            throw new DirectoryNotFoundException("Could not locate src/RabbitMq.");
+            throw new DirectoryNotFoundException("Could not locate src/BackFiller/RabbitMq.");
         }
     }
 }

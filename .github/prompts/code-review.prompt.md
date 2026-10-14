@@ -1,11 +1,11 @@
 ---
 mode: agent
-description: Review VectorNNTP.NNTPD changes for correctness, architecture, concurrency, and operational safety.
+description: Review VectorNNTP.BackFiller changes for correctness, architecture, concurrency, and operational safety.
 ---
 
-# VectorNNTP.NNTPD Code Review
+# VectorNNTP.BackFiller Code Review
 
-Review the selected change as production code for a high-throughput, highly concurrent NNTP/Usenet recovery service.
+Review the selected change as production code for standalone VectorNNTP.BackFiller, a high-throughput Usenet article-recovery worker.
 
 The purpose of this review is to identify specific defects, correctness risks, architectural violations, concurrency failures, lifecycle problems, security issues, operational hazards, and material unintended behavior changes.
 
@@ -543,7 +543,7 @@ Tests should assert observable behavior and actual invariants rather than implem
 
 Do not recommend removing, skipping, weakening, suppressing, or bypassing tests merely to obtain a passing build.
 
-Preserve established regression baselines, including the known `TransitPublisherTests` `44/44` baseline where applicable.
+Preserve established BackFiller regression tests. There is no `TransitPublisherTests` baseline in this repository. Article Work settlement expectations are in `docs/architecture.md`.
 
 If a change is documentation-only, do not demand tests merely because code coverage is incomplete.
 

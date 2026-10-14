@@ -1,6 +1,6 @@
 ---
 name: documentation
-description: Add and improve accurate XML documentation in the VectorNNTP.NNTPD C# codebase without changing behavior.
+description: Add and improve accurate XML documentation in the VectorNNTP.BackFiller C# codebase without changing behavior.
 ---
 
 # Documentation Skill

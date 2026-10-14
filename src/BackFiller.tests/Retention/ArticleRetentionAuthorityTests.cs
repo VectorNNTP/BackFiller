@@ -361,7 +361,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "Retention");
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Retention");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -370,7 +370,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 directory = directory.Parent;
             }
 
-            throw new DirectoryNotFoundException("Could not locate src/Retention.");
+            throw new DirectoryNotFoundException("Could not locate src/BackFiller/Retention.");
         }
     }
 }

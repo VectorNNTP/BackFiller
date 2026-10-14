@@ -6,7 +6,7 @@ Project-local Agent Skills for Cursor (including JetBrains Rider). Location: `.c
 - Protocol data plane (byte-oriented): [`docs/architecture.md`](../../docs/architecture.md#byte-oriented-protocol-data-plane)
 - Source-generated structured logging: [`docs/architecture.md`](../../docs/architecture.md#source-generated-structured-logging)
 - Artifact placement: [`.cursor/rules/repository-artifacts.mdc`](../rules/repository-artifacts.mdc) — experiments and generated reports go under `.artifacts/`, not `docs/` or `tools/`
-- Historical index: [`.artifacts/ARTIFACT-INDEX.md`](../../.artifacts/ARTIFACT-INDEX.md)
+- Local evidence directory: `.artifacts/` (gitignored; not a committed index). Placement: [`.cursor/rules/repository-artifacts.mdc`](../rules/repository-artifacts.mdc)
 - Project entry point: [`AGENTS.md`](../../AGENTS.md) (routing only; honor by Rider ACP is **not** assumed)
 
 ## Reliable discovery (Rider ACP)
@@ -28,7 +28,7 @@ Project skills **may not** appear in Rider ACP’s injected skill list.
 4. Follow each skill’s mandatory workflow and validation checklist.
 5. **Combine** skills when needed (e.g. protocol feature → `nntp-protocol` + `testing` + `implementation-and-verification`). Do not default to a single skill when several apply.
 
-These skills are for **VectorNNTP** (including `VectorNNTP.NNTPD`). They intentionally exclude BackFiller-only RabbitMQ / work-settlement assumptions.
+These skills apply to standalone **VectorNNTP.BackFiller**. Article Work RabbitMQ settlement is in scope. Do not invent NNTPD server, transit-publisher, or benchmark behavior that this tree does not contain. Shared NNTPD context that the code still documents (for example `nntpsharedconfig` and `ConnectionStrings__NntpDB`) stays shared-domain context.
 
 ## Skills
 
@@ -49,7 +49,6 @@ The core rule establishes identity, inspection-first discipline, and honesty abo
 
 ## Out of scope for this skill set
 
-- GitHub Actions / Copilot workflow YAML from other repositories
 - Inventing CI pipelines
 - Claiming 40+ Gbps (or any throughput target) without measured evidence
-- Copying RabbitMQ ACK/NACK settlement invariants into NNTPD
+- Treating Article Work ACK/NACK as out of scope for this repository

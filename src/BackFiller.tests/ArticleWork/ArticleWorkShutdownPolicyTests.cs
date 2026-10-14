@@ -669,7 +669,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "ArticleWork");
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "ArticleWork");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -678,7 +678,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 directory = directory.Parent;
             }
 
-            throw new DirectoryNotFoundException("Could not locate src/ArticleWork.");
+            throw new DirectoryNotFoundException("Could not locate src/BackFiller/ArticleWork.");
         }
 
         private sealed class ShutdownContext : IAsyncDisposable

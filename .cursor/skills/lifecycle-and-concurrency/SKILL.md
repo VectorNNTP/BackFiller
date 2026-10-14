@@ -24,10 +24,10 @@ Keep startup, running, and shutdown correct under concurrency and failure.
 Inspect before changing:
 
 - `docs/architecture.md`
-- `ApplicationLifecycle` state machine and serialization rules
 - `ApplicationServiceManager` start order / reverse stop / rollback
-- `NntpdHostedService`, `NntpdHostLifetime` single-flight shutdown
-- `SystemdLifecycleNotifier`, `SystemdWatchdogService`, `IApplicationHealth`
+- `BackFillerApplicationHostedService` (Generic Host adapter; unexpected execution end stops the host)
+- `SystemdLifecycleNotifier`, `SystemdWatchdogService`, `BackFillerApplicationHealth` / `IApplicationHealth`
+- `ApplicationLifecycle` only when the change is to that type. The host does not construct it
 
 Do **not** invent readiness or ordering guarantees. Prefer verified code comments and tests.
 
@@ -47,8 +47,8 @@ Do **not** invent readiness or ordering guarantees. Prefer verified code comment
 - Startup failure rolls back partially started services
 - Repeated stop is safe (await in-flight stop)
 - Concurrent lifecycle ops are serialized where the implementation requires it
-- Unexpected service termination behavior matches options (`StopHostOnUnexpectedServiceTermination`)
-- systemd READY/STOPPING/WATCHDOG stay off the future NNTP data path
+- Unexpected `IApplicationService.Execution` completion marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`. `StopHostOnUnexpectedServiceTermination` is not read
+- systemd `READY=1` is sent at most once from Generic Host `ApplicationStarted`, not from `ApplicationLifecycle`
 - No custom competing SIGTERM/SIGINT handlers unless architecture changes intentionally
 
 ## Avoid
@@ -57,7 +57,7 @@ Do **not** invent readiness or ordering guarantees. Prefer verified code comment
 - Fire-and-forget without observation
 - Assuming DI construction order equals readiness
 - Premature dispose of resources still used by async work
-- Importing RabbitMQ drain/settlement shutdown models from BackFiller
+- Replacing Article Work drain and settlement (`DrainQueuedWork`, `FinishActiveArticles`, NACK requeue on cancellation) with a different host's shutdown model
 
 ## Validation checklist
 

@@ -24,6 +24,8 @@ Implement and review NNTP behavior from **local RFC text**, not memory.
 
 Primary path: `docs/standards/rfcs/` (see `docs/standards/rfcs/README.md`).
 
+BackFiller speaks a client subset: greeting check, `CAPABILITIES`, `STARTTLS` when advertised and the session is not already implicit TLS, `AUTHINFO USER`/`PASS`, `ARTICLE` by Message-ID, and `DATE` as idle keepalive. It does not implement an NNTP listener, `COMPRESS`, streaming (`IHAVE`/`TAKETHIS`/`MODE STREAM`), `LIST`, PGPVERIFY, or SPAMD. `docs/standards/pgpverify/` and `docs/standards/spamd/` are not in this repository. Article parsing recognizes `Control: cancel` and PGP armor as article-type bits. That is not cancel propagation or PGPVERIFY.
+
 | Start with | Role |
 |------------|------|
 | `rfc3977.txt` | Current NNTP base (obsoletes 977) |

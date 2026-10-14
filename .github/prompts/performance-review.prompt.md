@@ -1,9 +1,9 @@
 ---
 mode: agent
-description: Review VectorNNTP.NNTPD changes as high-throughput NNTP and network infrastructure.
+description: Review VectorNNTP.BackFiller changes as high-throughput article recovery and network infrastructure.
 ---
 
-# VectorNNTP.NNTPD Performance Review
+# VectorNNTP.BackFiller Performance Review
 
 Review the selected production code, benchmark, test, configuration, or performance-related change as high-throughput NNTP/network infrastructure.
 
@@ -39,7 +39,7 @@ Before making performance recommendations:
 3. Locate callers and consumers.
 4. Inspect relevant interfaces, abstractions, configuration, lifecycle orchestration, benchmarks, tests, and supporting infrastructure.
 5. Search the repository for related implementations and usages.
-6. Read `.copilot/PERFORMANCE-CONTEXT.md` when it is relevant to the reviewed area.
+6. Do not read `.copilot/PERFORMANCE-CONTEXT.md`. That checkpoint is not in this repository.
 7. Inspect existing benchmark results, baselines, historical measurements, or performance notes where available.
 8. Determine whether the code is on a hot path, warm path, startup path, shutdown path, or operationally insignificant path.
 9. Identify the expected workload, concurrency, data volume, network behavior, and resource lifetime.
@@ -74,7 +74,7 @@ Do not treat a theoretical optimization as a demonstrated performance improvemen
 
 If measurement is unavailable, state that clearly and provide a credible measurement plan rather than presenting speculation as fact.
 
-When `.copilot/PERFORMANCE-CONTEXT.md` conflicts with newer source, benchmark, test, or artifact evidence, prefer the newer verified evidence and identify the checkpoint as stale if appropriate.
+When local evidence conflicts with newer source, test, or artifact evidence, prefer the newer verified evidence and identify the local file as stale if appropriate.
 
 Do not manufacture benchmark numbers, expected percentage improvements, or performance claims.
 
@@ -741,7 +741,7 @@ If implementation is explicitly requested:
 - do not weaken tests or benchmark contracts;
 - do not modify unrelated files.
 
-Do not change `.copilot/PERFORMANCE-CONTEXT.md` merely because a review was performed.
+Do not create a performance-checkpoint file merely because a review was performed.
 
 Only update the performance checkpoint when the task explicitly requires recording a new verified performance result, decision, or experiment outcome.
 

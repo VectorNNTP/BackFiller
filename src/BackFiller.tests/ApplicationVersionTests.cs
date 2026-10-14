@@ -37,7 +37,7 @@ namespace VectorNNTP.BackFiller.Tests
             Assert.Equal(expected, file.FileVersion);
             Assert.Equal(expected, file.ProductVersion);
 
-            const string copyright = "© 2026 Chris Knipe <cknipe@opticnetworks.net>";
+            const string copyright = "©2026 Chris Knipe <cknipe@opticnetworks.net>";
             var copyrightAttribute = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>();
             Assert.NotNull(copyrightAttribute);
             Assert.Equal(copyright, copyrightAttribute.Copyright);

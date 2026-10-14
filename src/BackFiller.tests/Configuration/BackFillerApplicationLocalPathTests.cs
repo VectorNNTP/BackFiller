@@ -132,15 +132,15 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 runtime.LogDirectory);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "Hosting", "BackFillerServiceCollectionExtensions.cs"))),
+                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Hosting", "BackFillerServiceCollectionExtensions.cs"))),
                 StringComparison.Ordinal);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "Configuration", "BackFillerRuntimeOptionsFactory.cs"))),
+                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Configuration", "BackFillerRuntimeOptionsFactory.cs"))),
                 StringComparison.Ordinal);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "Logging", "BackFillerFileLogging.cs"))),
+                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Logging", "BackFillerFileLogging.cs"))),
                 StringComparison.Ordinal);
         }
 

@@ -362,7 +362,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "Listener");
+                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Listener");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -371,7 +371,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 directory = directory.Parent;
             }
 
-            throw new DirectoryNotFoundException("Could not locate src/Listener.");
+            throw new DirectoryNotFoundException("Could not locate src/BackFiller/Listener.");
         }
 
         private sealed class HangingStream : Stream

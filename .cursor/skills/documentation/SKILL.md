@@ -4,8 +4,10 @@ description: >-
   Adds or improves accurate engineering-contract XML and Markdown documentation for
   VectorNNTP without changing behavior. Use for documentation-only passes, XML docs,
   README/architecture updates, or when the user asks to document a type or file.
-  XML documentation is required for every documentable C# symbol whose contract
-  matters, including private, internal, and nested declarations.
+  Document contract-bearing C# symbols at every accessibility, including private
+  and nested declarations when the comment carries engineering information.
+  Skip symbols with nothing beyond the identifier to say. Do not require a
+  documentation coverage count. Tests suppress CS1591.
 ---
 
 # Documentation
@@ -14,9 +16,9 @@ description: >-
 
 Write useful engineering-contract documentation grounded in real behavior.
 
-Every C# symbol that can legally carry XML documentation and whose behavior or contract is relevant to understanding the code must have an accurate, useful XML documentation comment — regardless of accessibility.
+Document a symbol when its behavior or contract would help an engineer maintain it, at every accessibility including private and nested declarations. Skip a symbol that has nothing engineering-specific to say. Do not add comments to raise a coverage count. The test project suppresses `CS1591` and disables documentation generation. Do not remove that suppression to force test comments, and do not add further `NoWarn` entries.
 
-This is not a request for useless comments on every trivial implementation detail. Every documentable symbol receives a relevant comment. The content stays useful and proportional to the symbol.
+This is not a request for useless comments on trivial implementation details. The content stays useful and proportional to the symbol. Do not add filename banners or per-file copyright headers. Assembly copyright is emitted from `Directory.Build.targets`.
 
 ## When to use
 
@@ -137,7 +139,7 @@ If documentation exposes a genuine design defect or ambiguity, report it. Do not
 ## Validation checklist
 
 - [ ] Target file fully read; usages inspected where the contract depends on them
-- [ ] Every documentable declaration has accurate XML documentation
+- [ ] Contract-bearing declarations have accurate XML documentation; symbols with nothing to add were left undocumented on purpose
 - [ ] Claims verified against code; no invented contracts
 - [ ] XML well-formed; parameters, type parameters, and meaningful returns documented
 - [ ] Scope limited; no behavior, signature, or accessibility change

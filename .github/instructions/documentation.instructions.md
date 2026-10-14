@@ -4,7 +4,7 @@ applyTo: "**/*.{cs,md}"
 
 # Documentation standards
 
-- Every `.cs` file must start with the repository-required header containing the file's specific purpose/responsibility and `Copyright © Chris Knipe cknipe@opticnetworks.net`. During a documentation pass, do not modify headers in files outside the explicitly selected target file.
+- Do not add filename banners or per-file copyright headers. Assembly copyright is emitted from `Directory.Build.targets`. During a documentation pass, do not modify files outside the explicitly selected target file.
 - Documentation is an engineering contract, not tag counting or warning suppression. Base claims on the actual implementation and verified repository usage, not names, parameter names, comments, or assumptions.
 - Provide meaningful XML documentation for documentable types and members at every accessibility level where the documentation communicates useful engineering information. Include tests and private helpers when they communicate a non-obvious contract, invariant, lifecycle rule, ownership rule, state transition, validation rule, error rule, framework contract, or other engineering intent.
 - Explain purpose, observable behavior, invariants, parameters, returns, exceptions, lifecycle, ownership, threading, cancellation, performance, logging, I/O, and side effects where applicable and supported by the implementation or verified repository evidence.

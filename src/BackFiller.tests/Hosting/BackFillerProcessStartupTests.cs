@@ -207,8 +207,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                yield return Path.Combine(directory.FullName, "src", "VectorNNTP.BackFiller", "bin", "Release", "net10.0");
-                yield return Path.Combine(directory.FullName, "src", "VectorNNTP.BackFiller", "bin", "Debug", "net10.0");
+                yield return Path.Combine(directory.FullName, "src", "BackFiller", "bin", "x64", "Release", "net10.0");
+                yield return Path.Combine(directory.FullName, "src", "BackFiller", "bin", "x64", "Debug", "net10.0");
                 directory = directory.Parent;
             }
         }

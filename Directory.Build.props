@@ -7,5 +7,14 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      The SDK otherwise defaults an unset Platform to AnyCPU, which writes
+      bin/$(Configuration). Platform x64 writes bin/x64/$(Configuration).
+      Defaulting here keeps solution and project builds on one output path.
+      A command-line Platform is a global property and is not overwritten;
+      Directory.Build.targets rejects every value other than x64.
+    -->
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <Platforms>x64</Platforms>
   </PropertyGroup>
 </Project>

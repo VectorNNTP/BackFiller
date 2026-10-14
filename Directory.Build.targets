@@ -54,10 +54,29 @@
     <SuppressAotAnalysisWarnings Condition="'$(PublishAot)' == 'true'">true</SuppressAotAnalysisWarnings>
   </PropertyGroup>
 
+  <Target Name="RejectNonX64Platform"
+          BeforeTargets="Restore;Build;Publish">
+    <Error Condition="'$(Platform)' != 'x64'"
+           Text="BackFiller builds only for Platform x64. Platform '$(Platform)' is not supported." />
+  </Target>
+
   <Target Name="RejectUnsupportedProductionRuntimeIdentifier"
           BeforeTargets="Restore;Build;Publish"
           Condition="('$(MSBuildProjectName)' == 'VectorNNTP.NNTPD' OR '$(MSBuildProjectName)' == 'VectorNNTP.StorageServer' OR '$(MSBuildProjectName)' == 'VectorNNTP.BackFiller' OR '$(MSBuildProjectName)' == 'BackFiller' OR '$(MSBuildProjectName)' == 'VectorNNTP.NNTPCancelMessage') AND '$(RuntimeIdentifier)' != '' AND '$(RuntimeIdentifier)' != 'win-x64' AND '$(RuntimeIdentifier)' != 'linux-x64'">
     <Error Text="Production applications publish only win-x64 and linux-x64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported." />
+  </Target>
+
+  <!--
+    PublishAot is true only when RuntimeIdentifier is win-x64 or linux-x64.
+    The SDK imports ILCompiler targets only when that package was restored.
+    A restore without the runtime identifier does not download it, and publishing
+    without restoring again then emits a self-contained managed app instead of failing.
+  -->
+  <Target Name="RequireNativeAotCompiler"
+          BeforeTargets="Publish"
+          Condition="'$(PublishAot)' == 'true' AND ('$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'linux-x64')">
+    <Error Condition="'$(ILCompilerTargetsPath)' == ''"
+           Text="Native AOT publish for $(RuntimeIdentifier) did not restore the ILCompiler targets. Restore this project with the same RuntimeIdentifier before publishing." />
   </Target>
 
 </Project>
