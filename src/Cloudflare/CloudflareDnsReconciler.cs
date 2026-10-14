@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
     /// linked with the caller token.
     /// </para>
     /// </remarks>
-    internal sealed class CloudflareDnsReconciler : ICloudflareDnsReconciler
+    internal sealed class CloudflareDnsReconciler : ICloudflareDnsReconciler, IDisposable
     {
         /// <summary>Maximum reconcile attempts within a single <see cref="ReconcileAsync"/> call.</summary>
         internal const int MaxAttempts = 3;
@@ -46,6 +46,9 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// The wait observes the caller token, so a canceled waiter does not enter the operation.
         /// </summary>
         private readonly SemaphoreSlim _gate = new(1, 1);
+
+        /// <summary>Non-zero after <see cref="Dispose"/> begins.</summary>
+        private int _disposed;
 
         /// <summary>
         /// Gets or sets the delay function used for reconciler attempt backoff (tests may replace this).
@@ -79,6 +82,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
             ResolvedBindAddresses desired,
             CancellationToken cancellationToken)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             ArgumentException.ThrowIfNullOrWhiteSpace(zoneId);
             ArgumentException.ThrowIfNullOrWhiteSpace(fqdn);
             ArgumentNullException.ThrowIfNull(desired);
@@ -201,6 +205,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
             CancellationToken cancellationToken,
             TimeSpan? operationTimeout = null)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             ArgumentException.ThrowIfNullOrWhiteSpace(zoneId);
             ArgumentException.ThrowIfNullOrWhiteSpace(fqdn);
 
@@ -901,5 +906,18 @@ namespace VectorNNTP.BackFiller.Cloudflare
             IReadOnlyList<CloudflareDnsRecord> Stale,
             IReadOnlyList<CloudflareDnsRecord> DuplicateExtras,
             IReadOnlyList<CloudflareDnsRecord> RecordsToDelete);
+
+        /// <summary>
+        /// Disposes the reconciliation gate.
+        /// </summary>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            _gate.Dispose();
+        }
     }
 }

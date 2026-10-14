@@ -72,6 +72,32 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             await harness.Adapter.DisposeAsync();
         }
 
+        [Fact]
+        public void Certificate_manager_evaluate_throws_after_dispose()
+        {
+            var options = BackFillerTestOptions.CreateValidAcme();
+            var domains = CertificateIdentities.ForFqdn(options.Fqdn, includeNewsHostname: false);
+            var manager = new CertificateManager(
+                options.Fqdn,
+                AppContext.BaseDirectory,
+                options.AcmeDirectoryUrl,
+                new CertificateStore(
+                    AppContext.BaseDirectory,
+                    options.Fqdn,
+                    options.AcmeCertificatePassword,
+                    domains,
+                    TimeSpan.FromDays(options.AcmeRenewalThresholdDays)),
+                new ThrowingIssuer(),
+                options.AcmeCertificatePassword,
+                TimeSpan.FromDays(options.AcmeRenewalThresholdDays),
+                NullLogger<CertificateManager>.Instance,
+                includeNewsHostname: false);
+
+            manager.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => manager.EvaluateExisting());
+        }
+
         private static AdapterHarness CreateTlsDisabledHarness()
         {
             var options = BackFillerTestOptions.CreateValidAcme();
