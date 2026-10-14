@@ -418,11 +418,12 @@ namespace VectorNNTP.BackFiller.Acme
         {
             var records = await _client.ListAllRecordsForNameAsync(zoneId, name, cancellationToken)
                 .ConfigureAwait(false);
-            return (string[])[.. records
+            return records
                 .Where(r =>
                     string.Equals(r.Type, Cloudflare.CloudflareDnsRecordTypes.TXT, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(r.Content, content, StringComparison.Ordinal))
-                .Select(r => r.Id)];
+                .Select(r => r.Id)
+                .ToArray();
         }
 
         /// <summary>Deletes one record. HTTP 404, a message containing <c>not found</c>, or Cloudflare error 81044 is treated as already deleted.</summary>
@@ -533,7 +534,7 @@ namespace VectorNNTP.BackFiller.Acme
                 Fqdn = entry.Fqdn,
                 TransactionId = entry.TransactionId,
             };
-            var path = Path.Combine(journalDir, entry.EntryId + ".json");
+            var path = Path.Join(journalDir, entry.EntryId + ".json");
             AtomicFile.WriteText(
                 path,
                 System.Text.Json.JsonSerializer.Serialize(
@@ -546,7 +547,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <param name="journalDir">FQDN recovery directory.</param>
         /// <param name="entryId">Recovery file id.</param>
         private static void RemoveJournalFile(string journalDir, string entryId) =>
-            AtomicFile.TryDelete(Path.Combine(journalDir, entryId + ".json"));
+            AtomicFile.TryDelete(Path.Join(journalDir, entryId + ".json"));
 
         /// <summary>Reads every <c>*.json</c> file in ordinal path order. A missing directory returns an empty list.</summary>
         /// <param name="journalDir">FQDN recovery directory.</param>

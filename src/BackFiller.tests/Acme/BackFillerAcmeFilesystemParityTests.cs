@@ -19,29 +19,29 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
             const string certs = "certs-root";
             Assert.Equal(
-                Path.Combine(certs, "live", fqdn, "current"),
+                Path.Join(certs, "live", fqdn, "current"),
                 AcmePaths.CurrentGenerationPointerPath(certs, fqdn));
             Assert.Equal(
-                Path.Combine(certs, "live", fqdn, "gens"),
+                Path.Join(certs, "live", fqdn, "gens"),
                 AcmePaths.GenerationsDir(certs, fqdn));
             Assert.Equal(
-                Path.Combine(certs, "live", fqdn, "dns01"),
+                Path.Join(certs, "live", fqdn, "dns01"),
                 AcmePaths.Dns01RecoveryDir(certs, fqdn));
             Assert.Equal(
-                Path.Combine(certs, "journal", fqdn + ".json"),
+                Path.Join(certs, "journal", fqdn + ".json"),
                 AcmePaths.TransactionJournalPath(certs, fqdn));
             Assert.Equal(
-                Path.Combine(certs, "live", fqdn, ".issuance.lock"),
+                Path.Join(certs, "live", fqdn, ".issuance.lock"),
                 AcmePaths.IssuanceLockPath(certs, fqdn));
             Assert.Equal(
-                Path.Combine(certs, "account", "private_key.der"),
+                Path.Join(certs, "account", "private_key.der"),
                 AcmePaths.AccountKeyPath(certs));
             Assert.DoesNotContain(
-                Path.Combine("live", "gens"),
+                Path.Join("live", "gens"),
                 AcmePaths.GenerationsDir(certs, fqdn),
                 StringComparison.Ordinal);
             Assert.DoesNotContain(
-                Path.Combine("live", "current"),
+                Path.Join("live", "current"),
                 AcmePaths.CurrentGenerationPointerPath(certs, fqdn),
                 StringComparison.Ordinal);
         }

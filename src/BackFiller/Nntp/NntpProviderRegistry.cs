@@ -468,7 +468,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 await Consumers!.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
             {
                 NntpLogMessages.SessionReplenishFailed(_logger, "consumers", ex.Message);
             }

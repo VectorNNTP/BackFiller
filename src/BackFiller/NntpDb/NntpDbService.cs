@@ -1,3 +1,4 @@
+using MySqlConnector;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Core;
 
@@ -189,7 +190,7 @@ namespace VectorNNTP.BackFiller.NntpDb
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is NntpDbUnavailableException or MySqlException or IOException or TimeoutException)
                 {
                     if (_timeProvider.GetUtcNow() >= deadline)
                     {

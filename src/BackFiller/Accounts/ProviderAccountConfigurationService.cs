@@ -410,12 +410,9 @@ namespace VectorNNTP.BackFiller.Accounts
                 }
             }
 
-            foreach (var removed in previous)
+            foreach (var removed in previous.Where(candidate => !currentByBackbone.ContainsKey(candidate.Backbone)))
             {
-                if (!currentByBackbone.ContainsKey(removed.Backbone))
-                {
-                    ProviderAccountLogMessages.ProviderRemoved(_logger, removed.Backbone);
-                }
+                ProviderAccountLogMessages.ProviderRemoved(_logger, removed.Backbone);
             }
         }
 

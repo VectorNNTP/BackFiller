@@ -1,3 +1,5 @@
+using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
 
@@ -211,6 +213,71 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        [Fact]
+        public async Task Unexpected_replenish_failure_is_logged_and_does_not_fault_the_unobserved_fill()
+        {
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 1);
+            await using var pool = CreatePool(factory, max: 1, logger: logger);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+            factory.ConnectException = new NotSupportedException("observed replenish fault");
+            await using (var lease = await pool.AcquireAsync(CancellationToken.None))
+            {
+                lease.Retire();
+            }
+
+            await WaitUntilAsync(() => logger.Messages.Any(static message =>
+                message.Contains("NNTP session replenish failed", StringComparison.Ordinal)
+                && message.Contains("Giganews", StringComparison.Ordinal)
+                && message.Contains("observed replenish fault", StringComparison.Ordinal)));
+            Assert.Equal(0, pool.ActiveSessionCount);
+        }
+
+        [Fact]
+        public async Task Shutdown_during_observed_fill_is_logged_separately_from_replenishment_failure()
+        {
+            var logger = new CollectingLogger<NntpSessionPool>();
+            using var gate = CreateEstablishmentGate(1);
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            await using var pool = CreatePool(factory, max: 1, establishment: gate, logger: logger);
+            var gateHeld = false;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                await gate.WaitAsync(CancellationToken.None);
+                gateHeld = true;
+
+                await using (var lease = await pool.AcquireAsync(CancellationToken.None))
+                {
+                    lease.Retire();
+                }
+
+                await WaitUntilAsync(() => pool.LiveSessionCount == 1);
+                var shutdownField = typeof(NntpSessionPool).GetField(
+                    "_shutdown",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var shutdown = Assert.IsType<CancellationTokenSource>(shutdownField?.GetValue(pool));
+                await shutdown.CancelAsync();
+                await WaitUntilAsync(() => logger.Messages.Any(static message =>
+                    message.Contains(
+                        "Shutdown continued after observed session fill was canceled",
+                        StringComparison.Ordinal)));
+                Assert.DoesNotContain(
+                    logger.Messages,
+                    static message => message.Contains("NNTP session replenish failed", StringComparison.Ordinal));
+            }
+            finally
+            {
+                if (gateHeld)
+                {
+                    gate.Release();
+                }
+            }
+        }
+
         internal static ProviderSessionEstablishmentGate CreateEstablishmentGate(int maxConcurrent = 1024) =>
             new(maxConcurrent);
 
@@ -222,7 +289,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             TimeProvider? time = null,
             TimeSpan? commandTimeout = null,
             ProviderSessionEstablishmentGate? establishment = null,
-            string backbone = "Giganews")
+            string backbone = "Giganews",
+            ILogger? logger = null)
         {
             return new NntpSessionPool(
                 new BackFillerProviderDefinition(
@@ -242,7 +310,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                     ReceiveTimeout = TimeSpan.FromSeconds(2),
                 },
                 factory,
-                NullLogger.Instance,
+                logger ?? NullLogger.Instance,
                 establishment ?? CreateEstablishmentGate(),
                 shutdownGrace: TimeSpan.FromSeconds(2),
                 timeProvider: time);
@@ -282,6 +350,16 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 return "430 missing\r\n";
             });
             return server;
+        }
+
+        private static async Task WaitUntilAsync(Func<bool> predicate)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            while (!predicate())
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                await Task.Yield();
+            }
         }
     }
 }

@@ -1,4 +1,6 @@
+using RabbitMQ.Client.Exceptions;
 using VectorNNTP.BackFiller.Core;
+using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
@@ -248,6 +250,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                 }
                 catch (OperationCanceledException)
                 {
+                    ShutdownObservations.Canceled(_logger, "RabbitMQ connection watch");
                 }
             }
 
@@ -277,6 +280,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                ShutdownObservations.Canceled(_logger, "RabbitMQ reconnect wait");
             }
         }
 
@@ -321,7 +325,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is BrokerUnreachableException or IOException or TimeoutException or AlreadyClosedException or OperationInterruptedException)
                 {
                     if (attempt == 1)
                     {
@@ -583,7 +587,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             {
                 await connection.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is AlreadyClosedException or OperationInterruptedException or IOException or ObjectDisposedException or TimeoutException)
             {
                 RabbitMqLogMessages.ConnectionDisposeFailed(_logger, ex);
             }

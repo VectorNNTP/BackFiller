@@ -59,7 +59,9 @@ namespace VectorNNTP.BackFiller.Logging
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The gzip file is complete. A later open deletes the source once it can.
+                Serilog.Debugging.SelfLog.WriteLine(
+                    "Compressed log was kept and the source log could not be deleted: {0}",
+                    ex);
             }
 
             return File.Exists(destination);
@@ -76,6 +78,7 @@ namespace VectorNNTP.BackFiller.Logging
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                Serilog.Debugging.SelfLog.WriteLine("Temporary log file could not be deleted: {0}", ex);
             }
         }
     }

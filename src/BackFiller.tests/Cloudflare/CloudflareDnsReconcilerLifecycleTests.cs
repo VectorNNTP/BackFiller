@@ -31,7 +31,7 @@ namespace VectorNNTP.BackFiller.Tests.Cloudflare
         public void Dispose_is_idempotent()
         {
             var options = BackFillerTestOptions.CreateValidAcme();
-            var reconciler = new CloudflareDnsReconciler(
+            using var reconciler = new CloudflareDnsReconciler(
                 new NoOpDnsClient(),
                 Options.Create<AcmeCloudflareOptions>(options),
                 NullLogger<CloudflareDnsReconciler>.Instance);

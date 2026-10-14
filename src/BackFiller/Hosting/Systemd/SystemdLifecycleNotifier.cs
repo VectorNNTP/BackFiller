@@ -210,7 +210,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                 _notify.NotifyReady();
                 SystemdLogMessages.ReadinessReported(_logger);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or UnauthorizedAccessException)
             {
                 SystemdLogMessages.NotificationFailed(_logger, ex, "READY=1");
             }
@@ -248,7 +248,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                 _notify.NotifyStopping();
                 SystemdLogMessages.StoppingReported(_logger);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or UnauthorizedAccessException)
             {
                 SystemdLogMessages.NotificationFailed(_logger, ex, "STOPPING=1");
             }
@@ -284,7 +284,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                 _notify.NotifyStatus(status);
                 SystemdLogMessages.StatusReported(_logger, status);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or UnauthorizedAccessException)
             {
                 SystemdLogMessages.NotificationFailed(_logger, ex, "STATUS");
             }

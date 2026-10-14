@@ -471,23 +471,27 @@ namespace VectorNNTP.BackFiller.Acme
         }
 
         /// <summary>
-        /// Deletes TXT records after a failed issuance.
-        /// Cancellation is ignored unless <paramref name="cancellationToken"/> itself is already cancelled. Other failures are ignored.
+        /// Deletes TXT records after a failed issuance without replacing the failure the caller is about to throw.
         /// </summary>
-        /// <param name="cancellationToken">Passed to cleanup. <see cref="CancellationToken.None"/> is used when the caller was cancelled.</param>
+        /// <param name="cancellationToken">
+        /// Passed to <see cref="Dns01Solver.CleanupAsync"/>. A cancelled issuance passes
+        /// <see cref="CancellationToken.None"/> so deletion is not aborted by that token.
+        /// </param>
+        /// <remarks>
+        /// Every exception is contained and logged, including <see cref="OperationCanceledException"/> when
+        /// <paramref name="cancellationToken"/> is already cancelled. Callers then rethrow the original
+        /// issuance failure. Successful issuance uses <see cref="CleanupDnsAsync"/>, which propagates cancellation
+        /// and reports other failures as <c>txt_cleanup_failed</c>.
+        /// </remarks>
         private async Task BestEffortDnsCleanupAsync(CancellationToken cancellationToken)
         {
             try
             {
                 await _dnsSolver.CleanupAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception ex)
             {
-                // Ignore clean-up cancel during best-effort.
-            }
-            catch
-            {
-                // Best-effort.
+                AcmeLogMessages.Dns01BestEffortCleanupFailed(_logger, ex);
             }
         }
     }

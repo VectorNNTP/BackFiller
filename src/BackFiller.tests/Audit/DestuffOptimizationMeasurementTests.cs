@@ -27,11 +27,11 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 return;
             }
 
-            var reportDir = Path.Combine(
+            var reportDir = Path.Join(
                 ".artifacts",
                 "backfiller-realworld-audit");
             Directory.CreateDirectory(reportDir);
-            var reportPath = Path.Combine(reportDir, $"destuff-opt-{phase}.txt");
+            var reportPath = Path.Join(reportDir, $"destuff-opt-{phase}.txt");
             await using var report = new StreamWriter(File.Create(reportPath));
             report.AutoFlush = true;
             void Line(string text)

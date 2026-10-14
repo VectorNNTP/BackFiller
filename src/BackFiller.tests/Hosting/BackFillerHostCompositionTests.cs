@@ -229,7 +229,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
 
         private static int GetFreePort()
         {
-            var listener = new TcpListener(IPAddress.Loopback, 0);
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();

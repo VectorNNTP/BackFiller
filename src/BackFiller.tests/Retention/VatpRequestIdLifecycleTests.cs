@@ -105,7 +105,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var second = RetentionTestArticles.Create("<concurrent-aw@example.test>", "second-bytes\r\n");
             Assert.NotEqual(first.ArtData, second.ArtData);
 
-            var barrier = new Barrier(2);
+            using var barrier = new Barrier(2);
             var results = new ArticleRetentionResult[2];
             var tasks = new[]
             {
@@ -150,7 +150,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             var opened = 0;
             var rejected = 0;
-            var barrier = new Barrier(2);
+            using var barrier = new Barrier(2);
             var tasks = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
             {
                 barrier.SignalAndWait();

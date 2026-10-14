@@ -855,17 +855,10 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <returns>A case-insensitive set of normalized contents.</returns>
         private static HashSet<string> ToObservedContentSet(IReadOnlyList<CloudflareDnsRecord> records, string type)
         {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var record in records)
-            {
-                var content = NormalizeContent(record.Content, type);
-                if (content is not null)
-                {
-                    set.Add(content);
-                }
-            }
-
-            return set;
+            return records
+                .Select(record => NormalizeContent(record.Content, type))
+                .OfType<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>

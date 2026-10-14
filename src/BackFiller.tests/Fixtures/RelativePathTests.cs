@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 var child = RelativePath.Under(root, "src", "BackFiller", "Nntp");
 
                 Assert.Equal(Path.Join(root, "src", "BackFiller", "Nntp"), child);
-                Assert.StartsWith(root, child, StringComparison.Ordinal);
+                Assert.StartsWith(root + Path.DirectorySeparatorChar, child, StringComparison.Ordinal);
                 Assert.EndsWith(
                     Path.Join("src", "BackFiller", "Nntp"),
                     child,
@@ -39,6 +39,37 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             finally
             {
                 Directory.Delete(root);
+            }
+        }
+
+        [Fact]
+        public void Under_rejects_parent_segment_traversal()
+        {
+            var root = Directory.CreateTempSubdirectory("bf-rel-dotdot-").FullName;
+            try
+            {
+                var error = Assert.Throws<ArgumentException>(() => RelativePath.Under(root, ".."));
+                Assert.Equal("relativeSegments", error.ParamName);
+                Assert.Throws<ArgumentException>(() => RelativePath.Under(root, "child", "..", ".."));
+            }
+            finally
+            {
+                Directory.Delete(root);
+            }
+        }
+
+        [Fact]
+        public void Under_rejects_a_sibling_prefix_escape()
+        {
+            var parent = Directory.CreateTempSubdirectory("bf-rel-prefix-").FullName;
+            var root = Directory.CreateDirectory(Path.Join(parent, "bf")).FullName;
+            try
+            {
+                Assert.Throws<ArgumentException>(() => RelativePath.Under(root, "..", "bf-extra"));
+            }
+            finally
+            {
+                Directory.Delete(parent, recursive: true);
             }
         }
     }

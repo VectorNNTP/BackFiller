@@ -132,7 +132,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 Log.CloseAndFlush();
 
                 Assert.True(Directory.Exists(expected));
-                Assert.False(Directory.Exists(Path.Combine(cwd, relative)));
+                Assert.False(Directory.Exists(Path.Join(cwd, relative)));
                 Assert.StartsWith(
                     Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                     expected,
@@ -153,7 +153,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         [Fact]
         public void FileLog_CreatesDirectory_FromConfiguredLogDirectory()
         {
-            var logDir = Path.Combine(Path.GetTempPath(), "vectornntp-bf-roll-" + Guid.NewGuid().ToString("N"));
+            var logDir = Path.Join(Path.GetTempPath(), "vectornntp-bf-roll-" + Guid.NewGuid().ToString("N"));
             IHost? host = null;
             try
             {
@@ -248,7 +248,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var logDir = CreateTempLogDir();
             try
             {
-                var configuration = new ConfigurationManager();
+                using var configuration = new ConfigurationManager();
                 configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:File:{nameof(BackFillerFileLoggingTargetOptions.LogDir)}"] = logDir;
                 configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:{nameof(BackFillerLoggingOptions.LogRetentionDays)}"] = "9";
 
@@ -287,7 +287,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                         ["Serilog:WriteTo:0:Name"] = "Console",
                         ["Serilog:WriteTo:1:Name"] = "Async",
                         ["Serilog:WriteTo:1:Args:configure:0:Name"] = "File",
-                        ["Serilog:WriteTo:1:Args:configure:0:Args:path"] = Path.Combine(decoy, "evil-.log"),
+                        ["Serilog:WriteTo:1:Args:configure:0:Args:path"] = Path.Join(decoy, "evil-.log"),
                         ["Serilog:WriteTo:1:Args:configure:0:Args:retainedFileCountLimit"] = "99",
                         ["Serilog:WriteTo:1:Args:configure:0:Args:rollingInterval"] = "Hour",
                         ["Serilog:WriteTo:1:Args:configure:0:Args:flushToDiskInterval"] = "00:05:00",
@@ -325,7 +325,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var logDir = CreateTempLogDir();
             try
             {
-                var configuration = new ConfigurationManager();
+                using var configuration = new ConfigurationManager();
                 configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:File:{nameof(BackFillerFileLoggingTargetOptions.LogDir)}"] = logDir;
                 configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:{nameof(BackFillerLoggingOptions.LogLevel)}"] = configured;
 
@@ -346,7 +346,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var logDir = CreateTempLogDir();
             try
             {
-                var configuration = new ConfigurationManager();
+                using var configuration = new ConfigurationManager();
                 configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:File:{nameof(BackFillerFileLoggingTargetOptions.LogDir)}"] = logDir;
 
                 var loggerConfiguration = new LoggerConfiguration();
@@ -391,7 +391,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public void ConsoleReceivesDebug_FileReceivesDebugNotTrace()
         {
             var logDir = CreateTempLogDir();
-            var captured = new StringWriter();
+            using var captured = new StringWriter();
             var previous = Console.Out;
             IHost? host = null;
             try
@@ -543,7 +543,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
         private static string CreateTempLogDir()
         {
-            var dir = Path.Combine(Path.GetTempPath(), "vectornntp-bf-filelog-" + Guid.NewGuid().ToString("N"));
+            var dir = Path.Join(Path.GetTempPath(), "vectornntp-bf-filelog-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             return dir;
         }
@@ -597,7 +597,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         {
             var flush = Assert.Single(
                 sinks,
-                static n => n.GetType().Name.Equals("PeriodicFlushToDiskSink", StringComparison.Ordinal));
+                static n => n.GetType().Name.Equals("PeriodicFileFlushSink", StringComparison.Ordinal));
             var timer = ReadInstanceField(flush, "_timer")
                         ?? throw new InvalidOperationException("PeriodicFlushToDiskSink._timer was not found.");
             var holder = timer.GetType().GetField("_timer", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(timer)

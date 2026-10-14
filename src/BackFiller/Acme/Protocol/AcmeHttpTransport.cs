@@ -458,12 +458,9 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
                 return;
             }
 
-            foreach (string value in values)
+            foreach (string value in values.Where(static value => !string.IsNullOrEmpty(value)))
             {
-                if (!string.IsNullOrEmpty(value))
-                {
-                    _nonces.Push(value);
-                }
+                _nonces.Push(value);
             }
         }
 

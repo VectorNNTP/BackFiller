@@ -318,9 +318,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         public void Production_retention_code_does_not_block_synchronously()
         {
             var directory = FindSourceDirectory();
-            foreach (var file in Directory.GetFiles(directory, "*.cs"))
+            foreach (var text in Directory.GetFiles(directory, "*.cs").Select(static file => File.ReadAllText(file)))
             {
-                var text = File.ReadAllText(file);
                 Assert.DoesNotContain("Thread.Sleep", text, StringComparison.Ordinal);
                 Assert.DoesNotContain(".GetAwaiter().GetResult()", text, StringComparison.Ordinal);
                 Assert.DoesNotContain(".Wait();", text, StringComparison.Ordinal);

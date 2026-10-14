@@ -478,17 +478,16 @@ namespace VectorNNTP.BackFiller.Core
             var monitor = Interlocked.Exchange(ref _executionMonitor, null);
             if (cts is not null)
             {
-                try
+                using (cts)
                 {
-                    await cts.CancelAsync().ConfigureAwait(false);
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Already disposed.
-                }
-                finally
-                {
-                    cts.Dispose();
+                    try
+                    {
+                        await cts.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Already disposed.
+                    }
                 }
             }
 

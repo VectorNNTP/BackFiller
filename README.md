@@ -8,6 +8,7 @@ Standalone migration of `VectorNNTP.BackFiller` into an independent repository.
 - `src/BackFiller/` - production code organized by responsibility (for example `Acme`, `Articles`, `Configuration`, `Core`, `Hosting`, `Nntp`, `Transport`)
 - `src/BackFiller.tests/BackFiller.Tests.csproj` - xUnit test suite, namespace `VectorNNTP.BackFiller.Tests`
 - `BackFiller.slnx` - solution including app + tests
+- `tools/Invoke-CodeQlAnalysis.ps1` - local traced C# CodeQL analysis
 
 ## Build
 
@@ -38,3 +39,14 @@ dotnet publish .\src\BackFiller\BackFiller.csproj -c Release -p:Platform=x64 -r 
 The production project references the `StuDev.AotAnywhere` 1.0.4 MSBuild SDK. On Windows that SDK links `linux-x64` with the Zig toolchain restored by NuGet. A globalization-enabled Linux host still needs `libicu`.
 
 The standalone project has no external build/runtime dependency on a separate `VectorNNTP.Common` project or assembly.
+
+## CodeQL
+
+Local analysis uses the installed CodeQL CLI. It traces the Release x64 restore and build, then runs the `security-extended` and `security-and-quality` suites shipped with that CLI. Those are the suites selected by `.github/codeql/codeql-config.yml`. The database, SARIF, and logs are written under `.artifacts/codeql/`, which Git ignores.
+
+```powershell
+.\tools\Invoke-CodeQlAnalysis.ps1
+.\tools\Invoke-CodeQlAnalysis.ps1 -CodeQl C:\Tools\codeql\codeql.exe
+```
+
+A local SARIF file does not update or clear GitHub code scanning alerts. For a traced C# build, `paths-ignore` in the repository config does not exclude compiled files; the CLI records that limitation while creating the database.

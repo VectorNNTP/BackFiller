@@ -834,12 +834,10 @@ namespace VectorNNTP.BackFiller.Retention
         /// </remarks>
         private void ClearAllRequestIdsLocked(RetainedEntry entry)
         {
-            foreach (var requestId in entry.TakeAllOpenableRequestIds())
+            foreach (var requestId in entry.TakeAllOpenableRequestIds().Where(candidate =>
+                         _byRequestId.TryGetValue(candidate, out var owner) && ReferenceEquals(owner, entry)))
             {
-                if (_byRequestId.TryGetValue(requestId, out var owner) && ReferenceEquals(owner, entry))
-                {
-                    _byRequestId.Remove(requestId);
-                }
+                _byRequestId.Remove(requestId);
             }
         }
 

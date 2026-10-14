@@ -153,7 +153,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                        """;
 
             var builder = CreateIsolatedBuilder();
-            builder.Configuration.AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)));
+            using var jsonStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+            builder.Configuration.AddJsonStream(jsonStream);
             builder.Configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {

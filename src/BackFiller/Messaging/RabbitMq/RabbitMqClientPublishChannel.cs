@@ -119,18 +119,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                 return;
             }
 
-            try
-            {
-                if (_channel.IsOpen)
-                {
-                    await _channel.CloseAsync().ConfigureAwait(false);
-                }
-            }
-            catch (Exception)
-            {
-            }
-
-            await _channel.DisposeAsync().ConfigureAwait(false);
+            await RabbitMqChannelShutdown.CloseIfOpenThenDisposeAsync(_channel).ConfigureAwait(false);
         }
 
         /// <summary>

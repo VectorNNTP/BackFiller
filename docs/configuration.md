@@ -19,7 +19,7 @@ Section name: `BackFiller` (`BackFillerOptions.SectionName`).
 | `BindPortTls` | Yes | `int?`, range 1–65535. BackFiller is TLS-only. There is no `BackFiller:BindPort`. |
 | `AcmeDirectoryUrl` | No | Default Let's Encrypt staging directory URL. |
 | `AcmeRenewalThresholdDays` | No | Default 30. |
-| `AcmeStateDir` | No | Default `certs/`. Relative paths resolve against the content root. |
+| `AcmeStateDir` | No | Default `certs/`. Relative paths resolve against the application binary directory and must stay inside it after canonicalization. Rooted paths stay rooted. |
 | `CertificateDirectory` | No | Default `certs`. Old key `DirCerts`. |
 | `BackFillerAccountRefreshIntervalSeconds` | No | Default 60. Range 5–3600. This is the NntpDB account poll. It is not the per-account NNTP `DATE` keepalive. |
 
@@ -80,3 +80,4 @@ That name has no `VECTOR__` prefix. Do not log the connection string. The same k
 - `BindPortTls` missing, `0`, or outside 1–65535 fails. TLS disabled is not a valid BackFiller mode.
 - `nntpd__cloudflareapikey` and `nntpd__CloudFlareZoneId` are not current environment variables.
 - Do not log `BackFillerOptions`, `AcmeCloudflareOptions`, or `RabbitMqOptions` as a whole object.
+- `AcmeStateDir` and `BackFiller:Logging:File:LogDir` use the same rule. A relative value, including one that contains `..`, is rejected when its canonical path leaves the application binary directory. A rooted value is an explicit location and is not forced back under that directory.

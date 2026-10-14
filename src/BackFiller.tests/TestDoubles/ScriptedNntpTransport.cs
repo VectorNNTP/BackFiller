@@ -131,6 +131,12 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>When set, the server closes after reading DATE without writing a status.</summary>
         public bool CompleteAfterDateWithoutResponse { get; set; }
 
+        /// <summary>
+        /// When set, the client stream throws <see cref="NotSupportedException"/> on a DATE write.
+        /// Connect commands are unaffected.
+        /// </summary>
+        public bool FaultClientDateWrite { get; set; }
+
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
         public string StartTlsCapabilityLabel { get; set; } = "STARTTLS";
 
@@ -169,7 +175,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             if (CompleteWithoutGreeting)
             {
                 await _toClient.Writer.CompleteAsync().ConfigureAwait(false);
-                return new DuplexPipeStream(_toClient.Reader, _toServer.Writer);
+                return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
             }
 
             var greeting = Encoding.ASCII.GetBytes(Greeting.EndsWith("\r\n", StringComparison.Ordinal)
@@ -178,7 +184,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             _toClient.Writer.Write(greeting);
             await _toClient.Writer.FlushAsync().ConfigureAwait(false);
             _ = RunServerAsync();
-            return new DuplexPipeStream(_toClient.Reader, _toServer.Writer);
+            return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
         }
 
         private async Task RunServerAsync()
@@ -301,7 +307,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
     }
 
-    internal sealed class DuplexPipeStream(PipeReader reader, PipeWriter writer) : Stream
+    internal sealed class DuplexPipeStream(PipeReader reader, PipeWriter writer, ScriptedNntpServer? owner = null) : Stream
     {
         public override bool CanRead => true;
 
@@ -352,6 +358,12 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner?.FaultClientDateWrite == true
+                && buffer.Span.IndexOf("DATE"u8) >= 0)
+            {
+                throw new NotSupportedException("DATE write fault");
+            }
+
             writer.Write(buffer.Span);
             await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }

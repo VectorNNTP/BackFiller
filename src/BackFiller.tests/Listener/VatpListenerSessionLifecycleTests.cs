@@ -141,7 +141,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await client.Stream.WriteAsync(EncodeHello());
             // Do not read server responses — fill the TCP send buffer so the listener writer times out.
             // Keep the inbound side open and continue writing so the original hang can reproduce without the fix.
-            var floodCts = new CancellationTokenSource();
+            using var floodCts = new CancellationTokenSource();
             var flood = Task.Run(async () =>
             {
                 var window = EncodeWindow(999, 1);
@@ -405,7 +405,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
         private static int GetFreePort()
         {
-            var listener = new TcpListener(IPAddress.Loopback, 0);
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();

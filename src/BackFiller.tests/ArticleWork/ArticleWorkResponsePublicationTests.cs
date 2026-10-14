@@ -527,9 +527,8 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 FindSourceDirectory("ArticleWork"),
                 FindSourceDirectory("RabbitMq"),
             };
-            foreach (var file in directories.SelectMany(static directory => Directory.GetFiles(directory, "*.cs")))
+            foreach (var text in directories.SelectMany(static directory => Directory.GetFiles(directory, "*.cs")).Select(static file => File.ReadAllText(file)))
             {
-                var text = File.ReadAllText(file);
                 Assert.DoesNotContain("Thread.Sleep", text, StringComparison.Ordinal);
                 Assert.DoesNotContain(".GetAwaiter().GetResult()", text, StringComparison.Ordinal);
                 Assert.DoesNotContain(".Wait();", text, StringComparison.Ordinal);

@@ -30,11 +30,11 @@ namespace VectorNNTP.BackFiller.Tests.Audit
 
             var files = Directory.EnumerateFiles(CorpusRoot, "*", SearchOption.AllDirectories).ToArray();
             Array.Sort(files, StringComparer.Ordinal);
-            var reportDir = Path.Combine(
+            var reportDir = Path.Join(
                 ".artifacts",
                 "backfiller-realworld-audit");
             Directory.CreateDirectory(reportDir);
-            var reportPath = Path.Combine(reportDir, "MEASUREMENTS.txt");
+            var reportPath = Path.Join(reportDir, "MEASUREMENTS.txt");
             await using var report = new StreamWriter(File.Create(reportPath));
             report.AutoFlush = true;
             void Line(string text)

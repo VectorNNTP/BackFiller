@@ -62,15 +62,16 @@ namespace VectorNNTP.BackFiller.Accounts
             }
 
             var trimmed = backbone.Trim();
-            foreach (var candidate in BackFillerRabbitMqTopology.ProviderBackbones)
+            var match = BackFillerRabbitMqTopology.ProviderBackbones.FirstOrDefault(candidate =>
+                string.Equals(candidate, trimmed, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
             {
-                if (!string.Equals(candidate, trimmed, StringComparison.OrdinalIgnoreCase)) continue;
-                canonical = candidate;
-                return true;
+                canonical = trimmed;
+                return false;
             }
 
-            canonical = trimmed;
-            return false;
+            canonical = match;
+            return true;
         }
 
         /// <summary>Parses the persisted <c>usessl</c> enum.</summary>
@@ -183,17 +184,9 @@ namespace VectorNNTP.BackFiller.Accounts
         /// <returns></returns>
         private static bool ContainsAsciiControlCharacters(string? value)
         {
-            if (string.IsNullOrEmpty(value)) return false;
-            foreach (var ch in value)
-            {
-                var code = ch;
-                // Reject C0 control range 0x00-0x1F and DEL 0x7F.
-                if (code <= 0x1F || code == 0x7F)
-                {
-                    return true;
-                }
-            }
-            return false;
+            // C0 controls (0x00–0x1F) and DEL (0x7F).
+            return !string.IsNullOrEmpty(value)
+                && value.Any(static ch => ch <= 0x1F || ch == 0x7F);
         }
     }
 }

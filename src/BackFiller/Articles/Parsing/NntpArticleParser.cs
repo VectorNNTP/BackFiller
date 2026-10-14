@@ -480,38 +480,28 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
                     continue;
                 }
 
-                if (currentHeaderNameOffset >= 0)
-                {
-                    if (!TryAddHeader(
-                            ref headers,
-                            ref headerCount,
-                            ref rentedHeaders,
-                            options.MaxHeaderCount,
-                            new NntpArticleHeaderEntry(
-                                currentKnownName,
-                                currentHeaderNameOffset,
-                                currentHeaderNameLength,
-                                currentHeaderValueOffset,
-                                currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0)))
-                    {
-                        return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.TooManyHeaders, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
-                    }
-                }
-
-                if (headerCount >= options.MaxHeaderCount)
+                if (currentHeaderNameOffset >= 0 && !TryAddHeader(
+                        ref headers,
+                        ref headerCount,
+                        ref rentedHeaders,
+                        options.MaxHeaderCount,
+                        new NntpArticleHeaderEntry(
+                            currentKnownName,
+                            currentHeaderNameOffset,
+                            currentHeaderNameLength,
+                            currentHeaderValueOffset,
+                            currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0)) || headerCount >= options.MaxHeaderCount)
                 {
                     return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.TooManyHeaders, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
                 }
 
                 var colonIndex = line.IndexOf((byte)':');
-                if (colonIndex < 0)
+                switch (colonIndex)
                 {
-                    return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.MissingHeaderBodySeparator, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
-                }
-
-                if (colonIndex == 0)
-                {
-                    return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.MalformedHeader, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
+                    case < 0:
+                        return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.MissingHeaderBodySeparator, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
+                    case 0:
+                        return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.MalformedHeader, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
                 }
 
                 if (colonIndex > options.MaxHeaderNameBytes)

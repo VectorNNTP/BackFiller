@@ -164,7 +164,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             var opened = 0;
             var rejected = 0;
-            var barrier = new Barrier(2);
+            using var barrier = new Barrier(2);
             var tasks = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
             {
                 barrier.SignalAndWait();
@@ -261,18 +261,10 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
         private static int CountFailFrames(ControllableCacheListenerTransport transport)
         {
-            var count = 0;
-            foreach (var chunk in transport.WrittenFrames)
-            {
-                // VATP header: flags at [0], type at [1].
-                if (chunk.Length >= VatpProtocol.HeaderLengthBytes
-                    && (VatpFrameType)chunk[1] == VatpFrameType.Fail)
-                {
-                    count++;
-                }
-            }
-
-            return count;
+            // VATP header: flags at [0], type at [1].
+            return transport.WrittenFrames.Count(static chunk =>
+                chunk.Length >= VatpProtocol.HeaderLengthBytes
+                && (VatpFrameType)chunk[1] == VatpFrameType.Fail);
         }
 
         private static string BuildBody(int minimumBytes)

@@ -21,13 +21,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 prepared.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, retained.Kind);
 
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
             Assert.NotNull(open.Lease);
             Assert.Equal(prepared.Record.ArtSize, open.Lease!.Record.ArtSize);
             Assert.True(open.Lease.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
             Assert.Equal(prepared.Record.ArtSize, authority.RetainedPayloadBytes);
-            open.Dispose();
         }
 
         [Fact]

@@ -42,15 +42,16 @@ namespace VectorNNTP.BackFiller.Accounts
         public bool TryGetProvider(string backbone, out BackFillerProviderDefinition provider)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(backbone);
-            foreach (var candidate in _providers)
+            var match = _providers.FirstOrDefault(candidate =>
+                string.Equals(candidate.Backbone, backbone, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
             {
-                if (!string.Equals(candidate.Backbone, backbone, StringComparison.OrdinalIgnoreCase)) continue;
-                provider = candidate;
-                return true;
+                provider = null!;
+                return false;
             }
 
-            provider = null!;
-            return false;
+            provider = match;
+            return true;
         }
     }
 }

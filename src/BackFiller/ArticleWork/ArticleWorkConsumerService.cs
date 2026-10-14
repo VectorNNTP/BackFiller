@@ -484,12 +484,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
                     return;
                 }
 
-                foreach (var pair in desired.ToArray())
+                foreach (var pair in desired.ToArray().Where(pair => !readyBackbones.Contains(pair.Value.Backbone)))
                 {
-                    if (!readyBackbones.Contains(pair.Value.Backbone))
-                    {
-                        desired.Remove(pair.Key);
-                    }
+                    desired.Remove(pair.Key);
                 }
             }
 
@@ -566,12 +563,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
         {
             var ready = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var backbone in backbones)
+            foreach (var backbone in backbones.Where(candidate => !string.IsNullOrWhiteSpace(candidate)))
             {
-                if (!string.IsNullOrWhiteSpace(backbone))
-                {
-                    unique.Add(backbone);
-                }
+                unique.Add(backbone);
             }
 
             if (unique.Count == 0)

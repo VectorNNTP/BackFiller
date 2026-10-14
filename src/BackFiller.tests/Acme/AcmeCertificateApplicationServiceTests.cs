@@ -215,7 +215,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
         private sealed class TempAcmeDir : IDisposable
         {
-            public string Path { get; } = System.IO.Path.Combine(
+            public string Path { get; } = System.IO.Path.Join(
                 System.IO.Path.GetTempPath(),
                 "vectornntp-bf-acme-" + Guid.NewGuid().ToString("N"));
 

@@ -105,6 +105,13 @@ namespace VectorNNTP.BackFiller.Logging
             _directory = Path.GetFullPath(pathDirectory);
             _filenamePrefix = Path.GetFileNameWithoutExtension(path);
             _filenameSuffix = Path.GetExtension(path);
+            if (string.IsNullOrEmpty(_filenamePrefix)
+                || _filenamePrefix is "." or ".."
+                || _filenamePrefix.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0
+                || _filenameSuffix.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0)
+            {
+                throw new ArgumentException("The log path file name must be a single relative segment.", nameof(path));
+            }
             _filenameMatcher = new Regex(
                 "^" +
                 Regex.Escape(_filenamePrefix) +
@@ -236,7 +243,7 @@ namespace VectorNNTP.BackFiller.Logging
                 {
                     _onCompletedFile?.Invoke(path);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     SelfLog.WriteLine("Completed-log handler failed for {0}: {1}", path, ex);
                 }
@@ -246,7 +253,7 @@ namespace VectorNNTP.BackFiller.Logging
                 {
                     compressed = _compressor.TryCompressAndReplace(path);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     SelfLog.WriteLine("Log compression threw for {0}: {1}", path, ex);
                 }
@@ -307,12 +314,9 @@ namespace VectorNNTP.BackFiller.Logging
 
             for (var index = _retainedFileCountLimit.Value; index < ranked.Count; index++)
             {
-                foreach (var path in ranked[index].Paths)
+                foreach (var path in ranked[index].Paths.Where(candidate => !IsCurrent(candidate)))
                 {
-                    if (!IsCurrent(path))
-                    {
-                        TryDelete(path);
-                    }
+                    TryDelete(path);
                 }
             }
         }
@@ -336,13 +340,13 @@ namespace VectorNNTP.BackFiller.Logging
                 token += "_" + sequence.Value.ToString("000", CultureInfo.InvariantCulture);
             }
 
-            return Path.Combine(_directory, _filenamePrefix + token + _filenameSuffix);
+            return Path.Join(_directory, _filenamePrefix + token + _filenameSuffix);
         }
 
         private bool IsCurrent(string path) =>
             _currentPath is not null && string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase);
 
-        private DateTime? Checkpoint(DateTime instant) => _interval switch
+        internal DateTime? Checkpoint(DateTime instant) => _interval switch
         {
             RollingInterval.Infinite => null,
             RollingInterval.Year => new DateTime(instant.Year, 1, 1, 0, 0, 0, instant.Kind),
@@ -360,13 +364,11 @@ namespace VectorNNTP.BackFiller.Logging
             _ => throw new InvalidOperationException($"Unsupported rolling interval {_interval}."),
         };
 
-        private DateTime? NextCheckpoint(DateTime instant) => _interval switch
+        internal DateTime? NextCheckpoint(DateTime instant) => _interval switch
         {
             RollingInterval.Infinite => null,
-            RollingInterval.Year => new DateTime(instant.Year + 1, 1, 1, 0, 0, 0, instant.Kind),
-            RollingInterval.Month => instant.Month == 12
-                ? new DateTime(instant.Year + 1, 1, 1, 0, 0, 0, instant.Kind)
-                : new DateTime(instant.Year, instant.Month + 1, 1, 0, 0, 0, instant.Kind),
+            RollingInterval.Year => new DateTime(instant.Year, 1, 1, 0, 0, 0, instant.Kind).AddYears(1),
+            RollingInterval.Month => new DateTime(instant.Year, instant.Month, 1, 0, 0, 0, instant.Kind).AddMonths(1),
             RollingInterval.Day => instant.Date.AddDays(1),
             RollingInterval.Hour => new DateTime(instant.Year, instant.Month, instant.Day, instant.Hour, 0, 0, instant.Kind).AddHours(1),
             RollingInterval.Minute => new DateTime(

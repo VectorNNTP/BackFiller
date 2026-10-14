@@ -111,7 +111,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                 _notifier.Notify(state);
                 SystemdLogMessages.NotificationSent(_logger, label);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or UnauthorizedAccessException)
             {
                 SystemdLogMessages.NotificationFailed(_logger, ex, label);
             }

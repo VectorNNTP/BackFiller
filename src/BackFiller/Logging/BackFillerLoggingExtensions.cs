@@ -45,6 +45,15 @@ namespace VectorNNTP.BackFiller.Logging
             return configuration.CreateBootstrapLogger();
         }
 
+        /// <summary>Writer installed by <see cref="UseAutoFlushConsoleOutput"/>.</summary>
+        private static StreamWriter? _autoFlushConsoleOut;
+
+        /// <summary><see cref="Console.Out"/> replaced by <see cref="UseAutoFlushConsoleOutput"/>.</summary>
+        private static TextWriter? _previousConsoleOut;
+
+        /// <summary><c>1</c> after auto-flush stdout is installed and before <see cref="RestoreConsoleOutput"/>.</summary>
+        private static int _consoleOutConfigured;
+
         /// <summary>
         /// Makes <see cref="Console.Out"/> flush every write.
         /// </summary>
@@ -55,14 +64,64 @@ namespace VectorNNTP.BackFiller.Logging
         /// becomes visible, then later Information events sit unseen until the buffer fills
         /// again or the process exits. Serilog's Console sink writes to <see cref="Console.Out"/>
         /// and does not Flush. This must run before the first Serilog Console sink is created.
+        /// The writer leaves the standard output stream open. A second call does nothing.
+        /// <see cref="RestoreConsoleOutput"/> puts the previous writer back and disposes this one.
         /// </remarks>
         internal static void UseAutoFlushConsoleOutput()
         {
-            var writer = new StreamWriter(Console.OpenStandardOutput(), Console.OutputEncoding)
+            if (Interlocked.Exchange(ref _consoleOutConfigured, 1) != 0)
+            {
+                return;
+            }
+
+            var previous = Console.Out;
+            var writer = new StreamWriter(
+                Console.OpenStandardOutput(),
+                Console.OutputEncoding,
+                bufferSize: 1024,
+                leaveOpen: true)
             {
                 AutoFlush = true,
             };
+            _previousConsoleOut = previous;
+            _autoFlushConsoleOut = writer;
             Console.SetOut(writer);
+        }
+
+        /// <summary>
+        /// Restores the <see cref="Console.Out"/> replaced by <see cref="UseAutoFlushConsoleOutput"/> and disposes that writer.
+        /// </summary>
+        /// <remarks>
+        /// The standard output stream stays open because the writer was created with <c>leaveOpen: true</c>.
+        /// A call with no installed writer does nothing.
+        /// </remarks>
+        internal static void RestoreConsoleOutput()
+        {
+            if (Interlocked.Exchange(ref _consoleOutConfigured, 0) == 0)
+            {
+                return;
+            }
+
+            var previous = Interlocked.Exchange(ref _previousConsoleOut, null);
+            var writer = Interlocked.Exchange(ref _autoFlushConsoleOut, null);
+            if (writer is null)
+            {
+                if (previous is not null)
+                {
+                    Console.SetOut(previous);
+                }
+
+                return;
+            }
+
+            // leaveOpen was true, so disposing the writer does not close standard output.
+            using (writer)
+            {
+                if (previous is not null)
+                {
+                    Console.SetOut(previous);
+                }
+            }
         }
 
         /// <summary>

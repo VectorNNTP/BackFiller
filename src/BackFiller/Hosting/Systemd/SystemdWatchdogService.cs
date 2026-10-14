@@ -97,6 +97,9 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
         /// <exception cref="InvalidOperationException">
         /// Thrown when activation checks passed and <see cref="ISystemdRuntime.WatchdogTimeout"/> is then <see langword="null"/>.
         /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when the systemd deadline is shorter than <see cref="SystemdWatchdogInterval.MinimumTimeout"/>.
+        /// </exception>
         /// <remarks>
         /// A disabled watchdog does not call <see cref="BackgroundService.StartAsync"/>, so <see cref="ExecuteAsync"/> is not started.
         /// </remarks>
@@ -166,7 +169,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                         _notify.NotifyWatchdog();
                         SystemdLogMessages.WatchdogKeepAliveSent(_logger);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or TimeoutException)
                     {
                         // Unlike NNTPD, notify failures must not stop BackFiller. Missing
                         // keep-alives still trip systemd when WatchdogSec is configured.

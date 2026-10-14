@@ -227,9 +227,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         public void Production_nntp_code_does_not_mention_compress_negotiation()
         {
             var directory = NntpProviderSessionTests.FindSourceDirectory();
-            foreach (var file in Directory.GetFiles(directory, "*.cs"))
+            foreach (var text in Directory.GetFiles(directory, "*.cs").Select(static file => File.ReadAllText(file)))
             {
-                var text = File.ReadAllText(file);
                 Assert.DoesNotContain("COMPRESS", text, StringComparison.Ordinal);
             }
         }

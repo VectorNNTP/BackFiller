@@ -49,9 +49,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.False(section.TryGetProperty("BindPort", out _));
             var bindAddress = section.GetProperty("BindAddress");
             Assert.True(bindAddress.GetArrayLength() >= 1, "BackFiller:BindAddress must declare at least one listen address.");
-            foreach (var entry in bindAddress.EnumerateArray())
+            foreach (var value in bindAddress.EnumerateArray().Select(static entry => entry.GetString()))
             {
-                var value = entry.GetString();
                 Assert.False(string.IsNullOrWhiteSpace(value));
                 Assert.True(
                     value is "*" or "+" || System.Net.IPAddress.TryParse(value, out _),

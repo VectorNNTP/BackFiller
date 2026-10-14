@@ -103,7 +103,16 @@ namespace VectorNNTP.BackFiller.Logging
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(logDirectory);
             ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
-            return Path.Combine(logDirectory, applicationName.Trim() + RollingPathSuffix);
+            var fileName = applicationName.Trim() + RollingPathSuffix;
+            if (Path.IsPathRooted(fileName)
+                || fileName is "." or ".."
+                || fileName.Contains("..", StringComparison.Ordinal)
+                || fileName.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0)
+            {
+                throw new ArgumentException("The log file name must stay inside the log directory.", nameof(applicationName));
+            }
+
+            return Path.Join(logDirectory, fileName);
         }
 
         /// <summary>

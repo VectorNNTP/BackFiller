@@ -186,7 +186,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             {
                 await _connection.CloseAsync().ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is RabbitMQ.Client.Exceptions.AlreadyClosedException or RabbitMQ.Client.Exceptions.OperationInterruptedException or IOException or ObjectDisposedException or TimeoutException)
             {
                 RabbitMqLogMessages.ConnectionCloseFailed(_logger, ex);
             }

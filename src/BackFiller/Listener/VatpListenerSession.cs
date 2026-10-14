@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
@@ -143,7 +144,7 @@ namespace VectorNNTP.BackFiller.Listener
         /// </remarks>
         internal async Task RunAsync(CancellationToken cancellationToken)
         {
-            var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _runCts = linked;
             var token = linked.Token;
             var writer = RunWriterAsync(token);
@@ -177,16 +178,15 @@ namespace VectorNNTP.BackFiller.Listener
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
+                    ShutdownObservations.Canceled(_logger, "VATP outbound writer");
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException or ChannelClosedException or InvalidOperationException or TimeoutException)
                 {
-                    // Preserve the transport fault for the caller, but never skip stream/lease cleanup.
                     writerError = ex;
                 }
 
                 DisposeAllStreams();
                 VatpListenerLogMessages.ConnectionClosed(_logger);
-                linked.Dispose();
                 _runCts = null;
 
                 if (writerError is not null)
@@ -236,6 +236,7 @@ namespace VectorNNTP.BackFiller.Listener
             }
             catch (ObjectDisposedException)
             {
+                ShutdownObservations.AlreadyDisposed(_logger, "VATP session token");
             }
 
             _ = _outbound.Writer.TryComplete();

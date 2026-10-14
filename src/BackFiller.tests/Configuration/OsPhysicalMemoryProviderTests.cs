@@ -62,7 +62,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         [Fact]
         public void ReadLinuxMemTotalBytes_reads_MemTotal_from_a_file()
         {
-            var path = Path.Combine(Path.GetTempPath(), "vectornntp-meminfo-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Join(Path.GetTempPath(), "vectornntp-meminfo-" + Guid.NewGuid().ToString("N"));
             File.WriteAllText(
                 path,
                 """
@@ -83,7 +83,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         [Fact]
         public void ReadLinuxMemTotalBytes_fails_when_the_file_is_missing()
         {
-            var path = Path.Combine(Path.GetTempPath(), "vectornntp-meminfo-missing-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Join(Path.GetTempPath(), "vectornntp-meminfo-missing-" + Guid.NewGuid().ToString("N"));
             var ex = Assert.Throws<InvalidOperationException>(
                 () => OsPhysicalMemoryProvider.ReadLinuxMemTotalBytes(path));
             Assert.Contains("file does not exist", ex.Message, StringComparison.Ordinal);

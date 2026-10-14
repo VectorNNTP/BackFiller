@@ -71,6 +71,31 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         [Fact]
+        public async Task Unexpected_date_write_failure_still_retires_the_session()
+        {
+            var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
+            var factory = new ScriptedNntpTransportFactory();
+            var failing = NntpSessionPoolTests.CreateDateAwareServer();
+            failing.FaultClientDateWrite = true;
+            factory.Enqueue(failing);
+            factory.Enqueue(NntpSessionPoolTests.CreateDateAwareServer());
+            await using var pool = NntpSessionPoolTests.CreatePool(
+                factory,
+                max: 1,
+                min: 1,
+                keepAliveSeconds: 2,
+                time: time);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+            time.Advance(TimeSpan.FromSeconds(2));
+            await WaitUntilAsync(() => factory.ConnectAttempts.Count >= 2 && pool.ActiveSessionCount >= 1);
+
+            await using var replacement = await pool.AcquireAsync(CancellationToken.None);
+            Assert.Equal(2, factory.ConnectAttempts.Count);
+            Assert.True(replacement.Session.IsReusable);
+        }
+
+        [Fact]
         public async Task Date_protocol_failure_retires_the_session()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));

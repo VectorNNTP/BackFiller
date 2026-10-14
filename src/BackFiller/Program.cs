@@ -1,3 +1,4 @@
+using System.Security.Authentication;
 using Serilog;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Logging;
@@ -46,7 +47,13 @@ internal class Program
             Log.Information("{Application} host stopped cleanly", ApplicationJsonConfiguration.EntryAssemblyName);
             return 0;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException
+            or InvalidOperationException
+            or UnauthorizedAccessException
+            or AuthenticationException
+            or SocketException
+            or OptionsValidationException
+            or HostAbortedException)
         {
             Log.Fatal(ex, "{Application} host terminated unexpectedly", ApplicationJsonConfiguration.EntryAssemblyName);
             return 1;
@@ -54,6 +61,7 @@ internal class Program
         finally
         {
             await Log.CloseAndFlushAsync().ConfigureAwait(false);
+            BackFillerLoggingExtensions.RestoreConsoleOutput();
         }
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Nntp
 {
@@ -170,17 +171,7 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             get
             {
-                var count = 0;
-                foreach (var session in _live.Keys)
-                {
-                    var state = session.State;
-                    if (state is NntpSessionState.Ready or NntpSessionState.Busy)
-                    {
-                        count++;
-                    }
-                }
-
-                return count;
+                return _live.Keys.Count(session => session.State is NntpSessionState.Ready or NntpSessionState.Busy);
             }
         }
 
@@ -347,6 +338,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 }
                 catch (ObjectDisposedException)
                 {
+                    ShutdownObservations.AlreadyDisposed(_logger, "session lease release");
                 }
             }
         }
@@ -464,6 +456,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 }
                 catch (OperationCanceledException)
                 {
+                    ShutdownObservations.Canceled(_logger, "session replenish");
                 }
             }
 
@@ -481,9 +474,11 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             catch (TimeoutException)
             {
+                ShutdownObservations.TimedOut(_logger, "pool dispose grace");
             }
             catch (OperationCanceledException)
             {
+                ShutdownObservations.Canceled(_logger, "pool dispose grace");
             }
 
             while (_idle.TryDequeue(out var idle))
@@ -629,6 +624,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 }
                 catch (ObjectDisposedException)
                 {
+                    ShutdownObservations.AlreadyDisposed(_logger, "duplicate DATE keepalive");
                 }
             }
         }
@@ -648,6 +644,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             catch (ObjectDisposedException)
             {
+                ShutdownObservations.AlreadyDisposed(_logger, "DATE keepalive stop");
             }
         }
 
@@ -666,41 +663,42 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             var token = cts.Token;
             var interval = TimeSpan.FromSeconds(_provider.KeepAliveSeconds);
-            try
-            {
-                while (!token.IsCancellationRequested)
+            using (cts)
+                try
                 {
-                    await Task.Delay(interval, _time, token).ConfigureAwait(false);
-                    if (token.IsCancellationRequested)
+                    while (!token.IsCancellationRequested)
                     {
-                        return;
-                    }
+                        await Task.Delay(interval, _time, token).ConfigureAwait(false);
+                        if (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
 
-                    if (!session.IsReusable)
-                    {
-                        await RetireSessionAsync(session, "keepalive found a non-reusable session").ConfigureAwait(false);
-                        return;
-                    }
+                        if (!session.IsReusable)
+                        {
+                            await RetireSessionAsync(session, "keepalive found a non-reusable session").ConfigureAwait(false);
+                            return;
+                        }
 
-                    if (!await session.SendDateKeepAliveAsync(_shutdown.Token).ConfigureAwait(false))
-                    {
-                        await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
-                        return;
+                        if (!await session.SendDateKeepAliveAsync(_shutdown.Token).ConfigureAwait(false))
+                        {
+                            await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
+                            return;
+                        }
                     }
                 }
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-            }
-            catch (Exception)
-            {
-                await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
-            }
-            finally
-            {
-                _ = _keepAlives.TryRemove(session, out _);
-                cts.Dispose();
-            }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    ShutdownObservations.Canceled(_logger, "DATE keepalive");
+                }
+                catch (Exception)
+                {
+                    await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
+                }
+                finally
+                {
+                    _ = _keepAlives.TryRemove(session, out _);
+                }
         }
 
         /// <summary>Waits for current DATE loops up to <see cref="_shutdownGrace"/>, then returns even if they are still running.</summary>
@@ -719,9 +717,11 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             catch (TimeoutException)
             {
+                ShutdownObservations.TimedOut(_logger, "DATE keepalive drain");
             }
             catch (OperationCanceledException)
             {
+                ShutdownObservations.Canceled(_logger, "DATE keepalive drain");
             }
         }
 
@@ -786,11 +786,19 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                ShutdownObservations.Canceled(_logger, "session fill");
             }
         }
 
-        /// <summary>Runs <see cref="FillDeficitAsync"/> and logs failures other than cancellation of <paramref name="cancellationToken"/>.</summary>
-        /// <param name="cancellationToken">Forwarded to the fill. Cancellation is swallowed.</param>
+        /// <summary>
+        /// Runs one unawaited fill started by <see cref="RequestReplenish"/>.
+        /// </summary>
+        /// <param name="cancellationToken">Shutdown token forwarded to the fill.</param>
+        /// <remarks>
+        /// Nothing awaits this task, so every exception is contained here. Cancellation of
+        /// <paramref name="cancellationToken"/> is logged as shutdown and is not a replenishment failure.
+        /// Any other exception is logged and does not replace an exception already thrown to an awaited caller.
+        /// </remarks>
         private async Task FillDeficitObservedAsync(CancellationToken cancellationToken)
         {
             try
@@ -799,6 +807,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                ShutdownObservations.Canceled(_logger, "observed session fill");
             }
             catch (Exception ex)
             {

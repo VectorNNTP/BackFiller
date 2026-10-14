@@ -135,7 +135,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         private static Dictionary<string, long> SnapshotLogs(string applicationPath)
         {
             var snapshot = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            var logDir = Path.Combine(Path.GetDirectoryName(applicationPath)!, "logs");
+            var logDir = Path.Join(Path.GetDirectoryName(applicationPath)!, "logs");
             if (!Directory.Exists(logDir))
             {
                 return snapshot;
@@ -151,7 +151,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
 
         private static string ReadNewLogs(string applicationPath, Dictionary<string, long> before)
         {
-            var logDir = Path.Combine(Path.GetDirectoryName(applicationPath)!, "logs");
+            var logDir = Path.Join(Path.GetDirectoryName(applicationPath)!, "logs");
             if (!Directory.Exists(logDir))
             {
                 return string.Empty;
@@ -179,14 +179,14 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         {
             foreach (var directory in EnumerateApplicationDirectories())
             {
-                var exe = Path.Combine(directory, "VectorNNTP.BackFiller.exe");
-                var settings = Path.Combine(directory, "VectorNNTP.BackFiller.json");
+                var exe = Path.Join(directory, "VectorNNTP.BackFiller.exe");
+                var settings = Path.Join(directory, "VectorNNTP.BackFiller.json");
                 if (File.Exists(exe) && File.Exists(settings))
                 {
                     return (exe, []);
                 }
 
-                var dll = Path.Combine(directory, "VectorNNTP.BackFiller.dll");
+                var dll = Path.Join(directory, "VectorNNTP.BackFiller.dll");
                 if (File.Exists(dll) && File.Exists(settings))
                 {
                     return ("dotnet", [dll]);

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Authentication;
+using System.Threading.Channels;
+using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Retention;
@@ -309,6 +311,7 @@ namespace VectorNNTP.BackFiller.Listener
                 }
                 catch (OperationCanceledException)
                 {
+                    ShutdownObservations.Canceled(_logger, "cache listener accept loop");
                 }
             }
 
@@ -526,7 +529,7 @@ namespace VectorNNTP.BackFiller.Listener
             {
                 CacheListenerLogMessages.ConnectionIoClosed(_logger, remote, ex.GetType().Name);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or ChannelClosedException)
             {
                 CacheListenerLogMessages.ConnectionFailed(_logger, remote, ex.GetType().Name);
             }
@@ -597,7 +600,7 @@ namespace VectorNNTP.BackFiller.Listener
             {
                 await Task.WhenAll(tasks).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or TimeoutException)
             {
                 CacheListenerLogMessages.ConnectionDrainFailed(_logger, ex.GetType().Name);
             }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Authentication;
 using System.Runtime.ExceptionServices;
 using VectorNNTP.BackFiller.Articles;
 
@@ -177,7 +178,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, null, "NNTP connect timed out.", reusable: false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or FormatException or InvalidDataException or TimeoutException)
             {
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, null, ex.GetType().Name, reusable: false);
             }
@@ -347,9 +348,8 @@ namespace VectorNNTP.BackFiller.Nntp
                                     {
                                         return consumePayload(memory);
                                     }
-                                    catch (Exception ex)
+                                    catch (Exception ex) when (ex is not PayloadConsumerException)
                                     {
-                                        // Leave the network-failure catches. The original exception is rethrown after _busy is released.
                                         consumerError = ExceptionDispatchInfo.Capture(ex);
                                         throw new PayloadConsumerException();
                                     }
@@ -413,8 +413,9 @@ namespace VectorNNTP.BackFiller.Nntp
 
                 return MarkUnhealthy(ArticleRetrievalKind.ProviderFailure, code, text);
             }
-            catch (PayloadConsumerException)
+            catch (PayloadConsumerException) when (consumerError is not null)
             {
+                _ = consumerError.SourceException;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -424,7 +425,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 return MarkUnhealthy(ArticleRetrievalKind.ProviderFailure, null, "ARTICLE timed out.");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or FormatException or InvalidDataException or TimeoutException)
             {
                 return MarkUnhealthy(ArticleRetrievalKind.ProviderFailure, null, ex.GetType().Name);
             }
@@ -537,7 +538,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 _ = MarkUnhealthy(ArticleRetrievalKind.ProviderFailure, null, "DATE keepalive timed out.");
                 return false;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or FormatException or InvalidDataException or TimeoutException)
             {
                 _ = MarkUnhealthy(ArticleRetrievalKind.ProviderFailure, null, ex.GetType().Name);
                 return false;
@@ -746,7 +747,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 _reader = null;
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or TimeoutException)
             {
                 _stream = null;
                 _reader = null;

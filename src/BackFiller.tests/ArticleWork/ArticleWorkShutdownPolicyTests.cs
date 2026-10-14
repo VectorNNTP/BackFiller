@@ -633,9 +633,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         public void Shutdown_policy_is_not_read_from_mutable_options_per_request()
         {
             var directory = FindArticleWorkSourceDirectory();
-            foreach (var name in new[] { "ArticleWorkConsumerSession.cs", "ArticleWorkConsumerService.cs" })
+            foreach (var text in new[] { "ArticleWorkConsumerSession.cs", "ArticleWorkConsumerService.cs" }
+                .Select(name => File.ReadAllText(RelativePath.Under(directory, name))))
             {
-                var text = File.ReadAllText(RelativePath.Under(directory, name));
                 Assert.DoesNotContain("IOptions<", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("GetRequiredService<BackFillerOptions>", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Thread.Sleep", text, StringComparison.Ordinal);

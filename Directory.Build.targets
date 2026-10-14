@@ -11,7 +11,7 @@
   <!--
     Production executable copyright. GenerateAssemblyInfo emits AssemblyCopyrightAttribute from $(Copyright).
   -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'VectorNNTP.NNTPD' OR '$(MSBuildProjectName)' == 'VectorNNTP.StorageServer' OR '$(MSBuildProjectName)' == 'VectorNNTP.BackFiller' OR '$(MSBuildProjectName)' == 'BackFiller' OR '$(MSBuildProjectName)' == 'VectorNNTP.NNTPCancelMessage'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'BackFiller'">
     <Copyright>©2026 Chris Knipe &lt;cknipe@opticnetworks.net&gt;</Copyright>
   </PropertyGroup>
 
@@ -38,7 +38,7 @@
     Production publish is self-contained Native AOT for win-x64 and linux-x64 only.
     A normal build does not set RuntimeIdentifier, so libraries, tests, and tools stay portable.
   -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'VectorNNTP.NNTPD' OR '$(MSBuildProjectName)' == 'VectorNNTP.StorageServer' OR '$(MSBuildProjectName)' == 'VectorNNTP.BackFiller' OR '$(MSBuildProjectName)' == 'BackFiller' OR '$(MSBuildProjectName)' == 'VectorNNTP.NNTPCancelMessage'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'VectorNNTP.BackFiller'">
     <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     <SelfContained Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'linux-x64'">true</SelfContained>
     <PublishAot Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'linux-x64'">true</PublishAot>
@@ -62,7 +62,7 @@
 
   <Target Name="RejectUnsupportedProductionRuntimeIdentifier"
           BeforeTargets="Restore;Build;Publish"
-          Condition="('$(MSBuildProjectName)' == 'VectorNNTP.NNTPD' OR '$(MSBuildProjectName)' == 'VectorNNTP.StorageServer' OR '$(MSBuildProjectName)' == 'VectorNNTP.BackFiller' OR '$(MSBuildProjectName)' == 'BackFiller' OR '$(MSBuildProjectName)' == 'VectorNNTP.NNTPCancelMessage') AND '$(RuntimeIdentifier)' != '' AND '$(RuntimeIdentifier)' != 'win-x64' AND '$(RuntimeIdentifier)' != 'linux-x64'">
+          Condition="'$(MSBuildProjectName)' == 'VectorNNTP.BackFiller' AND '$(RuntimeIdentifier)' != '' AND '$(RuntimeIdentifier)' != 'win-x64' AND '$(RuntimeIdentifier)' != 'linux-x64'">
     <Error Text="Production applications publish only win-x64 and linux-x64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported." />
   </Target>
 

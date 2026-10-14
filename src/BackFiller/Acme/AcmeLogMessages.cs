@@ -261,5 +261,17 @@ namespace VectorNNTP.BackFiller.Acme
             Level = LogLevel.Debug,
             Message = "ACME server status={StatusCode}; retrying in {Delay}")]
         internal static partial void AcmeServerErrorRetry(ILogger logger, int StatusCode, TimeSpan Delay);
+
+        /// <summary>
+        /// Written when DNS-01 deletion after a failed issuance throws, including cancellation of the cleanup token.
+        /// The exception is contained so the caller can rethrow the original issuance failure.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="exception">Cleanup failure. Not rethrown.</param>
+        [LoggerMessage(
+            EventId = 1923,
+            Level = LogLevel.Warning,
+            Message = "DNS-01 best-effort cleanup failed after issuance failure")]
+        internal static partial void Dns01BestEffortCleanupFailed(ILogger logger, Exception exception);
     }
 }

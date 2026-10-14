@@ -112,9 +112,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                     BackFillerTestOptions.CreateValidNntpDb(),
                     contentRoot);
 
-                Assert.Equal(Path.GetFullPath(Path.Combine(contentRoot, "logs")), runtime.LogDirectory);
-                Assert.Equal(Path.GetFullPath(Path.Combine(contentRoot, "certs")), runtime.CertificateDirectory);
-                Assert.NotEqual(Path.GetFullPath(Path.Combine(otherCwd, "certs")), runtime.CertificateDirectory);
+                Assert.Equal(Path.GetFullPath(Path.Join(contentRoot, "logs")), runtime.LogDirectory);
+                Assert.Equal(Path.GetFullPath(Path.Join(contentRoot, "certs")), runtime.CertificateDirectory);
+                Assert.NotEqual(Path.GetFullPath(Path.Join(otherCwd, "certs")), runtime.CertificateDirectory);
             }
             finally
             {

@@ -602,14 +602,11 @@ namespace VectorNNTP.BackFiller.Acme
             if (root.TryGetProperty("identifiers", out var identifiersElement)
                 && identifiersElement.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in identifiersElement.EnumerateArray())
-                {
-                    var value = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        identifiers.Add(value);
-                    }
-                }
+                identifiers.AddRange(
+                    identifiersElement.EnumerateArray()
+                        .Select(static item => item.GetString())
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Select(static value => value!));
             }
 
             var events = new List<AcmeJournalEvent>();

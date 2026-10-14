@@ -21,7 +21,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         [Fact]
         public void Defaults_EnableFile_AndDisableRabbitMq_Syslog_AndJson()
         {
-            var configuration = new ConfigurationManager();
+            using var configuration = new ConfigurationManager();
             var logging = new BackFillerLoggingOptions();
             configuration.GetSection($"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}").Bind(logging);
             Assert.True(logging.File.Enabled);
@@ -40,7 +40,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         [Fact]
         public void File_CanBeDisabled_WithoutCreatingTheLogDirectory()
         {
-            var logDir = Path.Combine(Path.GetTempPath(), "vectornntp-bf-nolog-" + Guid.NewGuid().ToString("N"));
+            var logDir = Path.Join(Path.GetTempPath(), "vectornntp-bf-nolog-" + Guid.NewGuid().ToString("N"));
             try
             {
                 var configuration = Configuration(logDir);
@@ -186,7 +186,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             finally
             {
                 udp?.Dispose();
-                tcp?.Stop();
+                tcp?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -196,7 +196,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public async Task JsonFormatter_AppliesToFile_Console_AndSyslog_WithoutPerTargetSettings()
         {
             var logDir = NewLogDir();
-            var captured = new StringWriter();
+            using var captured = new StringWriter();
             var previous = Console.Out;
             UdpClient? udp = null;
             try
@@ -224,7 +224,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 (logger as IDisposable)?.Dispose();
                 var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
                 Assert.Equal(RabbitMqLogEventSink.JsonContentType, rabbitSink.ContentType);
-                var rabbitJson = new StringWriter();
+                using var rabbitJson = new StringWriter();
                 rabbitSink.Formatter.Format(
                     SourceContextEvent("VectorNNTP.BackFiller.SourceContextProbe", "json-formatter-marker"),
                     rabbitJson);
@@ -312,7 +312,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.False(present.EnrichFromLogContext);
 
             var logDir = NewLogDir();
-            var captured = new StringWriter();
+            using var captured = new StringWriter();
             var previous = Console.Out;
             try
             {
@@ -438,7 +438,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             string marker)
         {
             var logDir = NewLogDir();
-            var captured = new StringWriter();
+            using var captured = new StringWriter();
             var previous = Console.Out;
             try
             {
@@ -453,7 +453,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 {
                     logger.ForContext(Constants.SourceContextPropertyName, category).Debug(marker);
                     var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
-                    var writer = new StringWriter();
+                    using var writer = new StringWriter();
                     rabbitSink.Formatter.Format(SourceContextEvent(category, marker), writer);
                     rabbit = writer.ToString();
                 }
@@ -499,7 +499,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 {
                     logger.ForContext(Constants.SourceContextPropertyName, category).Debug(marker);
                     var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
-                    var writer = new StringWriter();
+                    using var writer = new StringWriter();
                     var probe = SourceContextEvent(category, marker);
                     probe.AddOrUpdateProperty(new LogEventProperty("Application", new ScalarValue("json-probe-application")));
                     rabbitSink.Formatter.Format(probe, writer);
@@ -522,7 +522,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
         private static string RenderBootstrap(BackFillerLoggingCommandLine commandLine, string category, string marker)
         {
-            var captured = new StringWriter();
+            using var captured = new StringWriter();
             var previous = Console.Out;
             try
             {
@@ -624,7 +624,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
         private static ConfigurationManager Configuration(string logDir)
         {
-            var configuration = new ConfigurationManager();
+            using var configuration = new ConfigurationManager();
             configuration[$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:File:{nameof(BackFillerFileLoggingTargetOptions.LogDir)}"] = logDir;
             return configuration;
         }
@@ -698,7 +698,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
         private static string NewLogDir()
         {
-            var dir = Path.Combine(Path.GetTempPath(), "vectornntp-bf-target-" + Guid.NewGuid().ToString("N"));
+            var dir = Path.Join(Path.GetTempPath(), "vectornntp-bf-target-" + Guid.NewGuid().ToString("N"));
             return dir;
         }
 

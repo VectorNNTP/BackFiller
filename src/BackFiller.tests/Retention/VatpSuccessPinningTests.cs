@@ -219,7 +219,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 authority.RetainCanonical(
                     prepared.MessageId, prepared.RequestId, prepared.Record, prepared.SelectedDateHeaderName).Kind);
 
-            var barrier = new Barrier(2);
+            using var barrier = new Barrier(2);
             var openTask = Task.Run(() =>
             {
                 barrier.SignalAndWait(TestTimeout);
@@ -268,7 +268,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var attach = RetentionTestArticles.Create("<att0@ex>", body);
             var pressure = RetentionTestArticles.Create("<prs0@ex>", body);
             Assert.Equal(first.Record.ArtSize, pressure.Record.ArtSize);
-            var barrier = new Barrier(2);
+            using var barrier = new Barrier(2);
             var attachTask = Task.Run(() =>
             {
                 barrier.SignalAndWait(TestTimeout);

@@ -117,6 +117,79 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         }
 
         [Fact]
+        public void Relative_parent_segments_cannot_leave_the_application_base()
+        {
+            var root = CreateTempDir("bf-base-");
+            var sibling = Path.GetFileName(root) + "-sibling";
+            try
+            {
+                var error = Assert.Throws<ArgumentException>(
+                    () => ApplicationLocalPath.ResolveApplicationLocalPath(
+                        ".." + Path.DirectorySeparatorChar + sibling,
+                        root));
+                Assert.Equal("path", error.ParamName);
+                Assert.Throws<ArgumentException>(
+                    () => ApplicationLocalPath.ResolveApplicationLocalPath("certs/../../" + sibling, root));
+            }
+            finally
+            {
+                TryDelete(root);
+            }
+        }
+
+        [Fact]
+        public void Relative_dot_segments_that_remain_inside_the_base_are_kept()
+        {
+            var root = CreateTempDir("bf-inside-");
+            try
+            {
+                var resolved = ApplicationLocalPath.ResolveApplicationLocalPath(
+                    "nested" + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "certs",
+                    root);
+                Assert.Equal(
+                    ApplicationLocalPath.ResolveApplicationLocalPath("certs", root),
+                    resolved);
+            }
+            finally
+            {
+                TryDelete(root);
+            }
+        }
+
+        [Fact]
+        public void Rooted_paths_may_leave_the_application_base()
+        {
+            var root = CreateTempDir("bf-root-boundary-");
+            var absolute = CreateTempDir(Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar)) + "-sibling-");
+            try
+            {
+                Assert.Equal(
+                    Normalized(absolute),
+                    ApplicationLocalPath.ResolveApplicationLocalPath(absolute, root));
+
+                if (OperatingSystem.IsWindows())
+                {
+                    var driveRoot = Path.GetPathRoot(root)!;
+                    var drivePath = Path.Join(driveRoot, "bf-drive-rooted");
+                    Assert.Equal(
+                        Normalized(drivePath),
+                        ApplicationLocalPath.ResolveApplicationLocalPath(drivePath, root));
+                }
+
+                var unixRooted = "/bf-unix-rooted";
+                Assert.True(Path.IsPathRooted(unixRooted));
+                Assert.Equal(
+                    Normalized(Path.GetFullPath(unixRooted)),
+                    ApplicationLocalPath.ResolveApplicationLocalPath(unixRooted, root));
+            }
+            finally
+            {
+                TryDelete(root);
+                TryDelete(absolute);
+            }
+        }
+
+        [Fact]
         public void Backfiller_uses_the_same_common_path_resolution_as_nntpd()
         {
             using var host = CreateHost();
@@ -154,8 +227,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 Environment.CurrentDirectory = cwd;
                 using var host = CreateHost();
                 _ = host.Services.GetRequiredService<BackFillerRuntimeOptions>();
-                Assert.False(Directory.Exists(Path.Combine(cwd, "certs")));
-                Assert.False(Directory.Exists(Path.Combine(cwd, "logs")));
+                Assert.False(Directory.Exists(Path.Join(cwd, "certs")));
+                Assert.False(Directory.Exists(Path.Join(cwd, "logs")));
             }
             finally
             {

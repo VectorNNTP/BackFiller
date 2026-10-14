@@ -94,10 +94,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal([expected], runtime.CertificateDomainNames);
             Assert.DoesNotContain(CertificateIdentities.NewsHostname, runtime.CertificateDomainNames);
             Assert.Equal(
-                Path.Combine("certs", "journal", expected + ".json"),
+                Path.Join("certs", "journal", expected + ".json"),
                 AcmePaths.TransactionJournalPath("certs", runtime.Fqdn));
             Assert.Equal(
-                Path.Combine("certs", "live", expected),
+                Path.Join("certs", "live", expected),
                 AcmePaths.LiveDir("certs", runtime.Fqdn));
         }
 

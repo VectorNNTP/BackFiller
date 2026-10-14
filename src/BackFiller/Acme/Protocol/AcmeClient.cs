@@ -241,14 +241,10 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
                 _accountKey, KeyId, certificateUrl, PemChainContentType, cancellationToken)
                 .ConfigureAwait(false);
 
-            var alternates = new List<Uri>();
-            foreach (AcmeLink link in response.Links)
-            {
-                if (string.Equals(link.Relation, "alternate", StringComparison.OrdinalIgnoreCase))
-                {
-                    alternates.Add(link.Url);
-                }
-            }
+            var alternates = response.Links
+                .Where(static link => string.Equals(link.Relation, "alternate", StringComparison.OrdinalIgnoreCase))
+                .Select(static link => link.Url)
+                .ToList();
 
             return new AcmeCertificate(response.Body, alternates);
         }
