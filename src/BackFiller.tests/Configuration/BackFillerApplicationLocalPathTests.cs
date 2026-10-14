@@ -132,15 +132,15 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 runtime.LogDirectory);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Hosting", "BackFillerServiceCollectionExtensions.cs"))),
+                File.ReadAllText(FindRepoFile(RelativePath.Under("src", "BackFiller", "Hosting", "BackFillerServiceCollectionExtensions.cs"))),
                 StringComparison.Ordinal);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Configuration", "BackFillerRuntimeOptionsFactory.cs"))),
+                File.ReadAllText(FindRepoFile(RelativePath.Under("src", "BackFiller", "Configuration", "BackFillerRuntimeOptionsFactory.cs"))),
                 StringComparison.Ordinal);
             Assert.Contains(
                 "ApplicationLocalPath.ResolveApplicationLocalPath",
-                File.ReadAllText(FindRepoFile(Path.Combine("src", "BackFiller", "Logging", "BackFillerFileLogging.cs"))),
+                File.ReadAllText(FindRepoFile(RelativePath.Under("src", "BackFiller", "Logging", "BackFillerFileLogging.cs"))),
                 StringComparison.Ordinal);
         }
 
@@ -207,7 +207,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, relativePath);
+                var candidate = RelativePath.Under(directory.FullName, relativePath);
                 if (File.Exists(candidate))
                 {
                     return candidate;

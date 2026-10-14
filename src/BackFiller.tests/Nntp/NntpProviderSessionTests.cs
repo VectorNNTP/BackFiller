@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
@@ -582,14 +583,14 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 NntpSessionOptions.Default with { CommandTimeout = TimeSpan.FromSeconds(2), ReceiveTimeout = TimeSpan.FromSeconds(2), ConnectTimeout = TimeSpan.FromSeconds(2) },
                 NullLogger.Instance);
 
-        private static string FindSource(string fileName) => Path.Combine(FindSourceDirectory(), fileName);
+        private static string FindSource(string fileName) => RelativePath.Under(FindSourceDirectory(), fileName);
 
         internal static string FindSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Nntp");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "Nntp");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

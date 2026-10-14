@@ -635,7 +635,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var directory = FindArticleWorkSourceDirectory();
             foreach (var name in new[] { "ArticleWorkConsumerSession.cs", "ArticleWorkConsumerService.cs" })
             {
-                var text = File.ReadAllText(Path.Combine(directory, name));
+                var text = File.ReadAllText(RelativePath.Under(directory, name));
                 Assert.DoesNotContain("IOptions<", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("GetRequiredService<BackFillerOptions>", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Thread.Sleep", text, StringComparison.Ordinal);
@@ -669,7 +669,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "ArticleWork");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "ArticleWork");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

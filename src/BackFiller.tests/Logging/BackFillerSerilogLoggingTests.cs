@@ -553,7 +553,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir is not null)
             {
-                var candidate = Path.Combine(dir.FullName, "src", "BackFiller", "VectorNNTP.BackFiller.json");
+                var candidate = RelativePath.Under(dir.FullName, "src", "BackFiller", "VectorNNTP.BackFiller.json");
                 if (File.Exists(candidate))
                 {
                     return candidate;

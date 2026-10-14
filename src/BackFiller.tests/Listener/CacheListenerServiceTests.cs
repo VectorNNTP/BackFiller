@@ -362,7 +362,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Listener");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "Listener");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

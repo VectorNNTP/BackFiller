@@ -363,7 +363,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "ArticleWork");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "ArticleWork");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

@@ -65,14 +65,14 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         }
 
         private static string FindPlatformHostingSource() =>
-            FindSource(Path.Combine("Hosting", "BackFillerServiceCollectionExtensions.cs"));
+            FindSource(RelativePath.Under("Hosting", "BackFillerServiceCollectionExtensions.cs"));
 
         private static string FindSource(string relativePath)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", relativePath);
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", relativePath);
                 if (File.Exists(candidate))
                 {
                     return candidate;

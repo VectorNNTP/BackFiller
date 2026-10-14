@@ -361,7 +361,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "Retention");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "Retention");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

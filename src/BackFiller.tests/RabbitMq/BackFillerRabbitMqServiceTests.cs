@@ -442,7 +442,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "RabbitMq");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "RabbitMq");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;

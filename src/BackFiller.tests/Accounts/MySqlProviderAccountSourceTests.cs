@@ -64,7 +64,7 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)
             {
-                var candidate = Path.Combine(
+                var candidate = RelativePath.Under(
                     directory.FullName,
                     "src",
                     "BackFiller",

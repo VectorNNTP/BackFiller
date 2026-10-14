@@ -198,7 +198,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             string? path = null;
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "src", "BackFiller", "VectorNNTP.BackFiller.json");
+                var candidate = RelativePath.Under(directory.FullName, "src", "BackFiller", "VectorNNTP.BackFiller.json");
                 if (File.Exists(candidate))
                 {
                     path = candidate;
