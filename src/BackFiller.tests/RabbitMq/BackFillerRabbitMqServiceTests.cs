@@ -181,14 +181,31 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             {
                 var previous = factory.LastConnection!;
                 var connected = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var published = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
                 factory.Connected = connected;
-                previous.SimulateLost();
+                void OnReplaced(object? sender, RabbitMqConnectionReplacedEventArgs args)
+                {
+                    if (args.ConnectionGeneration == expected)
+                    {
+                        published.TrySetResult(args.ConnectionGeneration);
+                    }
+                }
 
-                using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await connected.Task.WaitAsync(safety.Token);
-                Assert.Equal(expected, service.ConnectionGeneration);
-                Assert.True(service.IsReady);
-                Assert.Equal(1, previous.DisposeCount);
+                service.ConnectionReplaced += OnReplaced;
+                try
+                {
+                    previous.SimulateLost();
+                    using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await connected.Task.WaitAsync(safety.Token);
+                    await published.Task.WaitAsync(safety.Token);
+                    Assert.Equal(expected, service.ConnectionGeneration);
+                    Assert.True(service.IsReady);
+                    Assert.Equal(1, previous.DisposeCount);
+                }
+                finally
+                {
+                    service.ConnectionReplaced -= OnReplaced;
+                }
             }
 
             await service.DisposeAsync();
@@ -298,6 +315,107 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             {
                 Assert.Equal(1, connection.DisposeCount);
             }
+        }
+
+        [Fact]
+        public async Task Shutdown_before_recovery_install_does_not_fault_the_watcher()
+        {
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var logger = new CollectingLogger<RabbitMqService>();
+            var service = CreateService(factory, logger);
+            await service.StartAsync(CancellationToken.None);
+            var first = factory.LastConnection!;
+            var disposeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDispose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            first.DisposeStarted = disposeEntered;
+            first.BlockDispose = releaseDispose;
+
+            first.SimulateLost();
+            using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await disposeEntered.Task.WaitAsync(safety.Token);
+            Assert.False(service.IsStopping);
+            Assert.Equal(0, first.DisposeCount);
+            Assert.Equal(1, factory.AttemptCount);
+
+            var dispose = Task.Run(() => service.DisposeAsync().AsTask());
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => service.IsStopping, TimeSpan.FromSeconds(2));
+            releaseDispose.TrySetResult();
+            await dispose.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.False(service.Execution!.IsFaulted);
+            Assert.True(service.Execution.IsCompletedSuccessfully);
+            Assert.Equal(1, factory.ConnectCount);
+            Assert.Equal(1, factory.AttemptCount);
+            Assert.Equal(1, service.ConnectionCount);
+            Assert.Equal(1, service.ConnectionGeneration);
+            Assert.Equal(1, first.DisposeCount);
+            Assert.False(service.IsReady);
+            Assert.False(service.TryGetCurrent(out _));
+            AssertInstallCanceled(logger);
+        }
+
+        [Fact]
+        public async Task Shutdown_after_recovery_connect_does_not_publish_or_fault()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new HoldSecondConnectFactory(entered, release);
+            var logger = new CollectingLogger<RabbitMqService>();
+            var service = CreateService(factory, logger);
+            await service.StartAsync(CancellationToken.None);
+            var first = factory.Inner.LastConnection!;
+
+            first.SimulateLost();
+            using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await entered.Task.WaitAsync(safety.Token);
+            Assert.False(service.IsStopping);
+            Assert.Equal(1, first.DisposeCount);
+
+            var dispose = Task.Run(() => service.DisposeAsync().AsTask());
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => service.IsStopping, TimeSpan.FromSeconds(2));
+            release.TrySetResult();
+            await dispose.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.False(service.Execution!.IsFaulted);
+            Assert.True(service.Execution.IsCompletedSuccessfully);
+            Assert.Equal(1, service.ConnectionCount);
+            Assert.Equal(1, service.ConnectionGeneration);
+            Assert.Equal(2, factory.Inner.ConnectCount);
+            var second = factory.Inner.Connections[1];
+            Assert.NotSame(first, second);
+            Assert.Equal(1, first.DisposeCount);
+            Assert.Equal(1, second.DisposeCount);
+            Assert.False(service.IsReady);
+            Assert.False(service.TryGetCurrent(out _));
+            AssertInstallCanceled(logger);
+            Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 2809);
+        }
+
+        [Fact]
+        public async Task Unexpected_recovery_failure_faults_the_watcher_and_disposal()
+        {
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var logger = new CollectingLogger<RabbitMqService>();
+            var service = CreateService(factory, logger);
+            await service.StartAsync(CancellationToken.None);
+            var first = factory.LastConnection!;
+            factory.ConnectException = new InvalidOperationException("broker exploded");
+
+            first.SimulateLost();
+
+            var fault = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => service.Execution!.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal("broker exploded", fault.Message);
+            Assert.True(service.Execution!.IsFaulted);
+
+            var disposed = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DisposeAsync().AsTask());
+            Assert.Equal("broker exploded", disposed.Message);
+            Assert.Equal(1, factory.ConnectCount);
+            Assert.Equal(2, factory.AttemptCount);
+            Assert.Equal(1, service.ConnectionCount);
+            Assert.Equal(1, first.DisposeCount);
+            Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 2816);
+            Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 9100);
         }
 
         [Fact]
@@ -411,7 +529,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
         }
 
         internal static RabbitMqService CreateService(
-            FakeBackFillerRabbitMqConnectionFactory factory,
+            IRabbitMqConnectionFactory factory,
             ILogger<RabbitMqService>? logger = null)
         {
             var options = BackFillerTestOptions.CreateValidRabbitMq();
@@ -451,6 +569,59 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
 
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/RabbitMq.");
+        }
+
+        private static void AssertInstallCanceled(CollectingLogger<RabbitMqService> logger)
+        {
+            Assert.Contains(
+                logger.Entries,
+                static entry => entry.EventId.Id == 9100
+                    && entry.Message.Contains("RabbitMQ connection install", StringComparison.Ordinal));
+            Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 2810);
+        }
+
+        /// <summary>
+        /// Recovery connect waits until the test releases it and does not observe shutdown cancellation,
+        /// so publication can lose the race after the broker connect returns.
+        /// </summary>
+        private sealed class HoldSecondConnectFactory : IRabbitMqConnectionFactory
+        {
+            private readonly FakeBackFillerRabbitMqConnectionFactory _inner = new();
+            private readonly TaskCompletionSource _secondConnectEntered;
+            private readonly TaskCompletionSource _releaseSecondConnect;
+            private int _attempts;
+
+            public HoldSecondConnectFactory(
+                TaskCompletionSource secondConnectEntered,
+                TaskCompletionSource releaseSecondConnect)
+            {
+                _secondConnectEntered = secondConnectEntered;
+                _releaseSecondConnect = releaseSecondConnect;
+            }
+
+            public FakeBackFillerRabbitMqConnectionFactory Inner => _inner;
+
+            public Task<IRabbitMqConnection> ConnectAsync(
+                RabbitMqOptions options,
+                string connectionName,
+                CancellationToken cancellationToken)
+            {
+                if (Interlocked.Increment(ref _attempts) == 1)
+                {
+                    return _inner.ConnectAsync(options, connectionName, cancellationToken);
+                }
+
+                return ConnectSecondAsync(options, connectionName);
+            }
+
+            private async Task<IRabbitMqConnection> ConnectSecondAsync(
+                RabbitMqOptions options,
+                string connectionName)
+            {
+                _secondConnectEntered.TrySetResult();
+                await _releaseSecondConnect.Task.ConfigureAwait(false);
+                return await _inner.ConnectAsync(options, connectionName, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
 }

@@ -23,7 +23,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                     await channel.CloseAsync().ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (ex is AlreadyClosedException or OperationInterruptedException or IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is AlreadyClosedException or OperationInterruptedException
+                                           or IOException or ObjectDisposedException or TimeoutException)
             {
                 SelfLog.WriteLine("RabbitMQ channel close failed and disposal will continue: {0}", ex);
             }

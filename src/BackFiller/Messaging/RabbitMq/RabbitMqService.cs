@@ -13,7 +13,9 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// <see cref="StartAsync"/> fails if an initial usable connection cannot be established, and it
     /// disposes any partial connect before returning. After start, a lost connection is not terminal:
     /// one watch task reconnects with backoff until a new generation is installed or shutdown cancels
-    /// the loop. RabbitMQ.Client automatic recovery is disabled; this service is the only lifecycle owner.
+    /// the loop. An install that observes <see cref="_stopping"/> throws <see cref="StoppingException"/>.
+    /// The watch task contains that exception so shutdown does not look like a recovery fault.
+    /// RabbitMQ.Client automatic recovery is disabled; this service is the only lifecycle owner.
     /// </para>
     /// <para>
     /// Callers obtain a generation snapshot with <see cref="TryGetCurrent"/>. A handle does not
@@ -154,6 +156,21 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>Gets the number of times a usable connection was installed (tests).</summary>
         internal int ConnectionCount { get; private set; }
 
+        /// <summary>
+        /// Gets whether shutdown has started refusing publication and recovery installation (tests).
+        /// </summary>
+        /// <remarks>Reads <see cref="_stopping"/> under <see cref="_gate"/>. This is not a connection pin.</remarks>
+        internal bool IsStopping
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _stopping;
+                }
+            }
+        }
+
         /// <inheritdoc />
         public bool TryGetCurrent(out RabbitMqConnectionHandle handle)
         {
@@ -227,6 +244,10 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// <see cref="WatchConnectionAsync"/> contains cancellation and <see cref="StoppingException"/>.
+        /// Any other fault from that task propagates from this method after <see cref="_stopping"/> is set.
+        /// </remarks>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1)
@@ -263,6 +284,10 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// Waits for each recovery signal and runs <see cref="RecoverAsync"/> until <paramref name="cancellationToken"/> is cancelled.
         /// </summary>
         /// <param name="cancellationToken">Shutdown token from <see cref="_runCts"/>. Cancellation ends the loop without a failure.</param>
+        /// <remarks>
+        /// Cancellation and <see cref="StoppingException"/> complete this task successfully.
+        /// Any other exception faults it so <see cref="DisposeAsync"/> still surfaces an unexpected recovery failure.
+        /// </remarks>
         private async Task WatchConnectionAsync(CancellationToken cancellationToken)
         {
             try
@@ -282,6 +307,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             {
                 ShutdownObservations.Canceled(_logger, "RabbitMQ reconnect wait");
             }
+            catch (StoppingException)
+            {
+                // Shutdown won the race with an in-flight install. ThrowIfStopping and Publish
+                // use this exception instead of the run token, which may not be canceled yet.
+                ShutdownObservations.Canceled(_logger, "RabbitMQ connection install");
+            }
         }
 
         /// <summary>
@@ -291,6 +322,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <remarks>
         /// There is no attempt limit. The first failure is logged as a reconnect failure; later failures are logged
         /// only when <see cref="ShouldAnnounceReconnect"/> is true. A failed attempt does not leave a partial connection published.
+        /// <see cref="StoppingException"/> is not retried and is not logged as a reconnect failure. It propagates to
+        /// <see cref="WatchConnectionAsync"/>.
         /// </remarks>
         private async Task RecoverAsync(CancellationToken cancellationToken)
         {
@@ -350,8 +383,9 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <param name="cancellationToken">Cancels the broker connect. A cancelled connect disposes any connection not yet published.</param>
         /// <returns>The generation installed by <see cref="Publish"/>.</returns>
         /// <exception cref="InvalidOperationException">
-        /// The service is stopping, runtime options were not projected, or the opened connection is not usable.
+        /// The service is stopping (<see cref="StoppingException"/>), runtime options were not projected, or the opened connection is not usable.
         /// The unusable connection is disposed before the exception is thrown.
+        /// During recovery, <see cref="WatchConnectionAsync"/> contains <see cref="StoppingException"/> only.
         /// </exception>
         private async Task<long> ConnectAndInstallAsync(
             bool startup,
@@ -449,7 +483,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// </summary>
         /// <param name="connection">Open connection to make current. The caller must not dispose it after a successful return.</param>
         /// <returns>The installed generation and the previous generation, if one was still published.</returns>
-        /// <exception cref="InvalidOperationException">The service is stopping. The loss handler is removed and the connection is not published.</exception>
+        /// <exception cref="StoppingException">The service is stopping. The loss handler is removed and the connection is not published.</exception>
         /// <remarks>
         /// Does not dispose <paramref name="connection"/> or the previous generation. The caller disposes the previous one.
         /// A close that races this method is still observed because the handler is attached before the publish.
@@ -465,7 +499,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                 if (_stopping)
                 {
                     connection.ConnectionLost -= OnConnectionLost;
-                    throw new InvalidOperationException("RabbitMQ service is stopping.");
+                    throw new StoppingException();
                 }
 
                 var previous = _current;
@@ -594,14 +628,14 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <summary>Throws when shutdown has started.</summary>
-        /// <exception cref="InvalidOperationException">The service is stopping.</exception>
+        /// <exception cref="StoppingException">The service is stopping. Recovery must not treat this as a broker failure.</exception>
         private void ThrowIfStopping()
         {
             lock (_gate)
             {
                 if (_stopping)
                 {
-                    throw new InvalidOperationException("RabbitMQ service is stopping.");
+                    throw new StoppingException();
                 }
             }
         }
@@ -639,6 +673,23 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <returns>An incomplete <see cref="TaskCompletionSource"/>.</returns>
         private static TaskCompletionSource NewRecoverySource() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Shutdown refused to open or publish a connection.
+        /// </summary>
+        /// <remarks>
+        /// Thrown only while <see cref="_stopping"/> is set, from <see cref="ThrowIfStopping"/> and <see cref="Publish"/>.
+        /// <see cref="WatchConnectionAsync"/> contains it. <see cref="StartAsync"/> still propagates it when disposal overlaps the initial connect.
+        /// Other <see cref="InvalidOperationException"/> values remain recovery faults.
+        /// </remarks>
+        private sealed class StoppingException : InvalidOperationException
+        {
+            /// <summary>Creates the shutdown refusal. The message is the historical gate text.</summary>
+            public StoppingException()
+                : base("RabbitMQ service is stopping.")
+            {
+            }
+        }
 
         /// <summary>One published connection and the generation assigned to it. This type does not dispose the connection.</summary>
         /// <param name="connection">Open connection that is current for <paramref name="generation"/>.</param>
