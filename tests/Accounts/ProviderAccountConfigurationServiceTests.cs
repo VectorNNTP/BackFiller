@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Accounts;
@@ -355,6 +356,83 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
         }
 
         [Fact]
+        public async Task Dispose_with_completed_poll_task_completes()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            SetPollTask(harness.Service, Task.CompletedTask);
+
+            await harness.Service.DisposeAsync();
+        }
+
+        [Fact]
+        public async Task Dispose_waits_for_pending_poll_task_to_complete()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            var pollCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            SetPollTask(harness.Service, pollCompletion.Task);
+
+            var disposing = harness.Service.DisposeAsync().AsTask();
+            try
+            {
+                var pendingCheck = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMilliseconds(100)));
+                Assert.NotSame(disposing, pendingCheck);
+
+                pollCompletion.SetResult();
+
+                var completionCheck = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromSeconds(2)));
+                Assert.Same(disposing, completionCheck);
+                await disposing;
+            }
+            finally
+            {
+                pollCompletion.TrySetResult();
+                await disposing.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        [Fact]
+        public async Task Dispose_ignores_canceled_poll_task()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            using var canceledTokenSource = new CancellationTokenSource();
+            canceledTokenSource.Cancel();
+            SetPollTask(harness.Service, Task.FromCanceled(canceledTokenSource.Token));
+
+            await harness.Service.DisposeAsync();
+        }
+
+        [Fact]
+        public async Task Dispose_ignores_operation_canceled_exception_from_poll_task()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            SetPollTask(harness.Service, Task.FromException(new OperationCanceledException("poll canceled")));
+
+            await harness.Service.DisposeAsync();
+        }
+
+        [Fact]
+        public async Task Dispose_propagates_non_cancellation_poll_fault()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            SetPollTask(harness.Service, Task.FromException(new InvalidOperationException("poll fault")));
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Service.DisposeAsync().AsTask());
+            Assert.Equal("poll fault", ex.Message);
+        }
+
+        [Fact]
+        public async Task Dispose_is_idempotent_and_logs_stopped_once()
+        {
+            await using var harness = CreateHarness(new FakeProviderAccountSource());
+            SetPollTask(harness.Service, Task.CompletedTask);
+
+            await harness.Service.DisposeAsync();
+            await harness.Service.DisposeAsync();
+
+            Assert.Equal(1, harness.Logger.Entries.Count(entry => entry.EventId.Id == 5609));
+        }
+
+        [Fact]
         public async Task Concurrent_refresh_is_skipped()
         {
             var source = new FakeProviderAccountSource
@@ -472,6 +550,15 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
                 timeout.Token.ThrowIfCancellationRequested();
                 await Task.Delay(1, timeout.Token);
             }
+        }
+
+        private static void SetPollTask(ProviderAccountConfigurationService service, Task pollTask)
+        {
+            ArgumentNullException.ThrowIfNull(service);
+            ArgumentNullException.ThrowIfNull(pollTask);
+            var pollTaskField = typeof(ProviderAccountConfigurationService).GetField("_pollTask", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(pollTaskField);
+            pollTaskField.SetValue(service, pollTask);
         }
 
         private sealed class ServiceHarness : IAsyncDisposable

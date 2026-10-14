@@ -486,8 +486,10 @@ namespace VectorNNTP.BackFiller.Core
                 {
                     // Already disposed.
                 }
-
-                cts.Dispose();
+                finally
+                {
+                    cts.Dispose();
+                }
             }
 
             if (monitor is not null)

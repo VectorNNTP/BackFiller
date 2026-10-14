@@ -101,6 +101,7 @@ namespace VectorNNTP.BackFiller.Articles.Validation
             var start = index;
             while (TryConsumeAtext(messageId, end, ref index))
             {
+                // Intentionally empty: the callee advances index while consumed octets remain.
             }
 
             return index > start;
@@ -121,6 +122,7 @@ namespace VectorNNTP.BackFiller.Articles.Validation
             index++;
             while (TryConsumeMdtext(messageId, end, ref index))
             {
+                // Intentionally empty: the callee advances index while mdtext octets remain.
             }
 
             if ((uint)index >= (uint)end || messageId[index] != (byte)']')

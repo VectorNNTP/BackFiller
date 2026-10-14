@@ -579,8 +579,17 @@ namespace VectorNNTP.BackFiller.Nntp
                     await _stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
                     await _stream.FlushAsync(cts.Token).ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (OperationCanceledException ex)
                 {
+                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
+                }
+                catch (IOException ex)
+                {
+                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
                 }
 
                 await _stream.DisposeAsync().ConfigureAwait(false);

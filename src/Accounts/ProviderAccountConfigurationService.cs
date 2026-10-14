@@ -202,12 +202,12 @@ namespace VectorNNTP.BackFiller.Accounts
             var poll = _pollTask;
             if (poll is not null)
             {
-                try
+                await Task.WhenAny(poll).ConfigureAwait(false);
+                if (poll.IsFaulted
+                    && poll.Exception is { } pollException
+                    && pollException.Flatten().InnerExceptions.Any(static ex => ex is not OperationCanceledException))
                 {
                     await poll.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
                 }
             }
 

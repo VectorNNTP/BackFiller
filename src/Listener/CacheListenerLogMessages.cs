@@ -131,5 +131,39 @@ namespace VectorNNTP.BackFiller.Listener
             Level = LogLevel.Warning,
             Message = "Cache Listener connection failed remote={Remote} error={ErrorType}")]
         internal static partial void ConnectionFailed(ILogger logger, string Remote, string ErrorType);
+
+        /// <summary>
+        /// Written when a connection ends with an <see cref="IOException"/> that is expected to be recoverable per-connection noise.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="Remote">Remote endpoint text, or <c>&lt;unknown&gt;</c> when unavailable.</param>
+        /// <param name="ErrorType">Runtime exception type name.</param>
+        [LoggerMessage(
+            EventId = 5412,
+            Level = LogLevel.Debug,
+            Message = "Cache Listener connection io closed remote={Remote} error={ErrorType}")]
+        internal static partial void ConnectionIoClosed(ILogger logger, string Remote, string ErrorType);
+
+        /// <summary>
+        /// Written when best-effort disposal of a listen socket throws a socket-level failure.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="Reason">Socket error name from the dispose failure.</param>
+        [LoggerMessage(
+            EventId = 5413,
+            Level = LogLevel.Debug,
+            Message = "Cache Listener listen socket dispose failed reason={Reason}")]
+        internal static partial void ListenSocketDisposeFailed(ILogger logger, string Reason);
+
+        /// <summary>
+        /// Written when draining tracked connection tasks observes a non-cancellation fault.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="ErrorType">Runtime exception type name from the aggregated drain fault.</param>
+        [LoggerMessage(
+            EventId = 5414,
+            Level = LogLevel.Warning,
+            Message = "Cache Listener connection drain observed fault error={ErrorType}")]
+        internal static partial void ConnectionDrainFailed(ILogger logger, string ErrorType);
     }
 }

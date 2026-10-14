@@ -236,5 +236,18 @@ namespace VectorNNTP.BackFiller.Nntp
             Level = LogLevel.Debug,
             Message = "{Session}: TLS handshake completed")]
         internal static partial void WireTlsHandshakeCompleted(ILogger logger, string Session);
+
+        /// <summary>
+        /// Written at Debug when best-effort QUIT write or flush fails during dispose.
+        /// The session still disposes the transport and transitions to closed.
+        /// </summary>
+        /// <param name="logger">Logger that receives the debug event.</param>
+        /// <param name="Session"><see cref="NntpProviderSession.WireLogIdentity"/> for the session.</param>
+        /// <param name="ErrorType">Runtime exception type from the QUIT write/flush failure.</param>
+        [LoggerMessage(
+            EventId = 5417,
+            Level = LogLevel.Debug,
+            Message = "{Session}: QUIT failed during dispose error={ErrorType}")]
+        internal static partial void WireQuitFailed(ILogger logger, string Session, string ErrorType);
     }
 }

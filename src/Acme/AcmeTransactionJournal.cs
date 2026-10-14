@@ -727,10 +727,9 @@ namespace VectorNNTP.BackFiller.Acme
         /// <returns>The inspected fields. Serial and thumbprint come from <see cref="X509Certificate2"/>.</returns>
         private static CertificateInspection InspectCertificate(byte[] pfxBytes, string password)
         {
-            X509Certificate2? cert = null;
             try
             {
-                cert = PfxCrypto.LoadCertificate(pfxBytes, password);
+                using var cert = PfxCrypto.LoadCertificate(pfxBytes, password);
                 return new CertificateInspection(
                     cert.SerialNumber,
                     cert.Thumbprint,
@@ -740,10 +739,6 @@ namespace VectorNNTP.BackFiller.Acme
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 throw new AcmeCertificateException("journal_certificate_inspect_failed", ex.GetType().Name);
-            }
-            finally
-            {
-                cert?.Dispose();
             }
         }
 

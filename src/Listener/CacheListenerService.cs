@@ -509,6 +509,7 @@ namespace VectorNNTP.BackFiller.Listener
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                // Service shutdown canceled this connection path.
             }
             catch (AuthenticationException)
             {
@@ -521,8 +522,9 @@ namespace VectorNNTP.BackFiller.Listener
                     handshakeCompleted ? "io-progress" : ex.Message,
                     remote);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                CacheListenerLogMessages.ConnectionIoClosed(_logger, remote, ex.GetType().Name);
             }
             catch (Exception ex)
             {
@@ -567,8 +569,13 @@ namespace VectorNNTP.BackFiller.Listener
                     {
                         socket.Dispose();
                     }
-                    catch (Exception)
+                    catch (ObjectDisposedException)
                     {
+                        // Socket may already be closed by a concurrent listener shutdown path.
+                    }
+                    catch (SocketException ex)
+                    {
+                        CacheListenerLogMessages.ListenSocketDisposeFailed(_logger, ex.SocketErrorCode.ToString());
                     }
                 }
 
@@ -590,8 +597,9 @@ namespace VectorNNTP.BackFiller.Listener
             {
                 await Task.WhenAll(tasks).ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                CacheListenerLogMessages.ConnectionDrainFailed(_logger, ex.GetType().Name);
             }
         }
 

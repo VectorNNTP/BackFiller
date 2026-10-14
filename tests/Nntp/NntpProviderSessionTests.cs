@@ -543,6 +543,21 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         [Fact]
+        public async Task Dispose_still_closes_when_quit_write_fails()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+
+            server.CompleteAfterResponse = true;
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+        }
+
+        [Fact]
         public void Production_nntp_code_does_not_block_synchronously()
         {
             var directory = FindSourceDirectory();
