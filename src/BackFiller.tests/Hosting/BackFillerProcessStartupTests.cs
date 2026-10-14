@@ -65,6 +65,62 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         }
 
         [Fact]
+        public async Task Startup_smoke_binds_configuration_and_exits_before_hosted_services()
+        {
+            var (fileName, arguments) = ResolveApplicationStart();
+            var workingDirectory = Directory.CreateTempSubdirectory("bf-startup-smoke-").FullName;
+            var fixture = FindStartupSmokeFixture();
+            try
+            {
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = fileName,
+                        WorkingDirectory = workingDirectory,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                    },
+                };
+                foreach (var argument in arguments)
+                {
+                    process.StartInfo.ArgumentList.Add(argument);
+                }
+
+                process.StartInfo.Environment[BackFillerStartupSmoke.EnvironmentVariable] =
+                    BackFillerStartupSmoke.EnabledValue;
+                process.StartInfo.Environment[BackFillerStartupSmoke.ConfigurationPathVariable] = fixture;
+
+                Assert.True(process.Start());
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                var stderr = process.StandardError.ReadToEndAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    TryKill(process);
+                    Assert.Fail("Startup smoke did not exit within 30s.");
+                }
+
+                var output = string.Concat(await stdout, await stderr);
+                Assert.Equal(0, process.ExitCode);
+                Assert.Contains(
+                    "BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01.usenet.ninja",
+                    output,
+                    StringComparison.Ordinal);
+            }
+            finally
+            {
+                TryDelete(workingDirectory);
+            }
+        }
+
+        [Fact]
         public async Task Process_loads_appsettings_from_the_application_base_not_the_working_directory()
         {
             var (fileName, arguments) = ResolveApplicationStart();
@@ -173,6 +229,28 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
 
             return text.ToString();
+        }
+
+        private static string FindStartupSmokeFixture()
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory is not null)
+            {
+                var candidate = Path.Join(
+                    directory.FullName,
+                    "src",
+                    "BackFiller.tests",
+                    "Fixtures",
+                    "startup-smoke.json");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = directory.Parent;
+            }
+
+            throw new InvalidOperationException("startup-smoke.json was not found.");
         }
 
         private static (string FileName, string[] Arguments) ResolveApplicationStart()

@@ -261,6 +261,35 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke-test linux-x64 Native AOT startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=./artifacts/linux-x64/VectorNNTP.BackFiller
+          config="$PWD/src/BackFiller.tests/Fixtures/startup-smoke.json"
+          test -f "$exe"
+          test -f "$config"
+          export VECTORNNTP_BACKFILLER_STARTUP_SMOKE=1
+          export VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG="$config"
+          set +e
+          timeout 30 "$exe" >./artifacts/linux-x64-smoke-stdout.txt 2>./artifacts/linux-x64-smoke-stderr.txt
+          code=$?
+          set -e
+          echo "linux-x64 startup smoke exit=$code"
+          echo "----- stdout -----"
+          cat ./artifacts/linux-x64-smoke-stdout.txt
+          echo "----- stderr -----"
+          cat ./artifacts/linux-x64-smoke-stderr.txt
+          if [ "$code" -eq 124 ]; then
+            echo "linux-x64 startup smoke timed out."
+            exit 1
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "linux-x64 startup smoke failed."
+            exit 1
+          fi
+          grep -q "BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01.usenet.ninja" ./artifacts/linux-x64-smoke-stdout.txt
+
       - name: Upload Linux build artifact
         uses: actions/upload-artifact@v7
         with:
@@ -332,6 +361,44 @@ jobs:
           if ($magic -ne 0x20B) { throw "Expected PE32+ and found magic 0x$('{0:X4}' -f $magic)." }
           $clrSize = [System.BitConverter]::ToUInt32($bytes, $optional + 112 + (14 * 8) + 4)
           if ($clrSize -ne 0) { throw "Executable still has a CLR runtime header, so it is not Native AOT." }
+
+      - name: Smoke-test win-x64 Native AOT startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path (Resolve-Path './artifacts/win-x64') 'VectorNNTP.BackFiller.exe'
+          $config = (Resolve-Path './src/BackFiller.tests/Fixtures/startup-smoke.json').Path
+          $stdoutPath = Join-Path (Resolve-Path './artifacts') 'win-x64-smoke-stdout.txt'
+          $stderrPath = Join-Path (Resolve-Path './artifacts') 'win-x64-smoke-stderr.txt'
+          $process = [System.Diagnostics.Process]::new()
+          $process.StartInfo.FileName = $exe
+          $process.StartInfo.WorkingDirectory = Split-Path -Parent $exe
+          $process.StartInfo.UseShellExecute = $false
+          $process.StartInfo.RedirectStandardOutput = $true
+          $process.StartInfo.RedirectStandardError = $true
+          $process.StartInfo.Environment['VECTORNNTP_BACKFILLER_STARTUP_SMOKE'] = '1'
+          $process.StartInfo.Environment['VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG'] = $config
+          if (-not $process.Start()) { throw 'Failed to start the win-x64 startup smoke process.' }
+          $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+          $stderrTask = $process.StandardError.ReadToEndAsync()
+          if (-not $process.WaitForExit(30000)) {
+            try { $process.Kill($true) } catch { }
+            throw 'win-x64 startup smoke timed out.'
+          }
+          $process.WaitForExit()
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          Set-Content -LiteralPath $stdoutPath -Value $stdout
+          Set-Content -LiteralPath $stderrPath -Value $stderr
+          Write-Host "win-x64 startup smoke exit=$($process.ExitCode)"
+          Write-Host '----- stdout -----'
+          Write-Host $stdout
+          Write-Host '----- stderr -----'
+          Write-Host $stderr
+          if ($process.ExitCode -ne 0) { throw 'win-x64 startup smoke failed.' }
+          if ($stdout -notmatch 'BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01\.usenet\.ninja') {
+            throw 'win-x64 startup smoke did not reach the configuration checkpoint.'
+          }
 
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v7

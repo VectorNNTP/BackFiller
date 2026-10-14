@@ -33,6 +33,12 @@ internal class Program
             ApplicationJsonConfiguration.AddSharedRabbitMqJsonFile(
                 builder.Configuration,
                 builder.Environment.EnvironmentName);
+            var startupSmoke = BackFillerStartupSmoke.IsRequested(
+                Environment.GetEnvironmentVariable(BackFillerStartupSmoke.EnvironmentVariable));
+            if (startupSmoke)
+            {
+                BackFillerStartupSmoke.UseIsolatedConfiguration(builder.Configuration);
+            }
 
             builder.ConfigureBackFillerLogging(commandLine: loggingCommandLine);
             builder.ConfigureBackFillerPlatformHosting();
@@ -43,9 +49,15 @@ internal class Program
                 host.Services,
                 builder.Environment.EnvironmentName,
                 builder.Environment.ContentRootPath);
-            await host.RunAsync().ConfigureAwait(false);
-
-            Log.Information("{Application} host stopped cleanly", ApplicationJsonConfiguration.EntryAssemblyName);
+            if (startupSmoke)
+            {
+                exitCode = BackFillerStartupSmoke.Complete(host, Console.Out);
+            }
+            else
+            {
+                await host.RunAsync().ConfigureAwait(false);
+                Log.Information("{Application} host stopped cleanly", ApplicationJsonConfiguration.EntryAssemblyName);
+            }
         }
         // codeql[cs/catch-of-all-exceptions] The process boundary must log every host failure and still return the documented exit code.
         catch (Exception ex)
