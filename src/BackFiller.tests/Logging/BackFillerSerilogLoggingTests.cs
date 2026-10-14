@@ -40,45 +40,47 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(LogEventLevel.Debug, BackFillerFileLogging.SinkMinimumLevel);
 
             var logDir = CreateTempLogDir();
-            IHost? host = null;
             try
             {
-                host = CreateLoggingHost(logDir);
-                var omitted = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller.Hosting");
-                Assert.True(omitted.IsEnabled(LogLevel.Information));
-                Assert.False(omitted.IsEnabled(LogLevel.Debug));
-                host.Dispose();
-                host = null;
+                using (var host = CreateLoggingHost(logDir))
+                {
+                    var omitted = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller.Hosting");
+                    Assert.True(omitted.IsEnabled(LogLevel.Information));
+                    Assert.False(omitted.IsEnabled(LogLevel.Debug));
+                }
+
                 Log.CloseAndFlush();
 
-                host = CreateLoggingHost(
+                using (var host = CreateLoggingHost(
                     logDir,
                     settings: new Dictionary<string, string?>
                     {
                         [$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:{nameof(BackFillerLoggingOptions.LogLevel)}"] = "Debug",
-                    });
-                var debug = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller.Hosting");
-                Assert.True(debug.IsEnabled(LogLevel.Debug));
-                host.Dispose();
-                host = null;
+                    }))
+                {
+                    var debug = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller.Hosting");
+                    Assert.True(debug.IsEnabled(LogLevel.Debug));
+                }
+
                 Log.CloseAndFlush();
 
-                host = CreateLoggingHost(
+                using (var host = CreateLoggingHost(
                     logDir,
                     settings: new Dictionary<string, string?>
                     {
                         [$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:{nameof(BackFillerLoggingOptions.LogLevel)}"] = "Information",
-                    });
-                var information = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller.Hosting");
-                Assert.True(information.IsEnabled(LogLevel.Information));
-                Assert.False(information.IsEnabled(LogLevel.Debug));
+                    }))
+                {
+                    var information = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller.Hosting");
+                    Assert.True(information.IsEnabled(LogLevel.Information));
+                    Assert.False(information.IsEnabled(LogLevel.Debug));
+                }
             }
             finally
             {
-                host?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -88,15 +90,15 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public void FileSink_IsConfigured_BeneathApplicationLocalLogs()
         {
             var logDir = CreateTempLogDir();
-            IHost? host = null;
             try
             {
-                host = CreateLoggingHost(logDir);
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
-                logger.LogInformation("backfiller-file-sink-marker");
-                host.Dispose();
-                host = null;
+                using (var host = CreateLoggingHost(logDir))
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
+                    logger.LogInformation("backfiller-file-sink-marker");
+                }
+
                 Log.CloseAndFlush();
 
                 var expectedDir = ApplicationLocalPath.ResolveApplicationLocalPath(logDir, AppContext.BaseDirectory);
@@ -107,7 +109,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 TryDelete(logDir);
             }
         }
@@ -119,16 +120,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var cwd = Directory.CreateTempSubdirectory("bf-serilog-cwd-").FullName;
             var relative = "bf-rel-" + Guid.NewGuid().ToString("N");
             var expected = ApplicationLocalPath.ResolveApplicationLocalPath(relative, AppContext.BaseDirectory);
-            IHost? host = null;
             try
             {
                 Environment.CurrentDirectory = cwd;
-                host = CreateLoggingHost(relative);
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
-                logger.LogInformation("backfiller-relative-log-marker");
-                host.Dispose();
-                host = null;
+                using (var host = CreateLoggingHost(relative))
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
+                    logger.LogInformation("backfiller-relative-log-marker");
+                }
+
                 Log.CloseAndFlush();
 
                 Assert.True(Directory.Exists(expected));
@@ -143,7 +144,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 Environment.CurrentDirectory = previous;
                 TryDelete(cwd);
                 TryDelete(expected);
@@ -154,16 +154,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public void FileLog_CreatesDirectory_FromConfiguredLogDirectory()
         {
             var logDir = Path.Join(Path.GetTempPath(), "vectornntp-bf-roll-" + Guid.NewGuid().ToString("N"));
-            IHost? host = null;
             try
             {
                 Assert.False(Directory.Exists(logDir));
-                host = CreateLoggingHost(logDir);
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
-                logger.LogInformation("backfiller-created-dir-marker");
-                host.Dispose();
-                host = null;
+                using (var host = CreateLoggingHost(logDir))
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
+                    logger.LogInformation("backfiller-created-dir-marker");
+                }
+
                 Log.CloseAndFlush();
 
                 Assert.True(Directory.Exists(logDir));
@@ -177,7 +177,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 TryDelete(logDir);
             }
         }
@@ -217,10 +216,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public void LogLevel_ControlsSerilogMinimumLevel(string configured, LogLevel enabled)
         {
             var logDir = CreateTempLogDir();
-            IHost? host = null;
             try
             {
-                host = CreateLoggingHost(
+                using var host = CreateLoggingHost(
                     logDir,
                     settings: new Dictionary<string, string?>
                     {
@@ -236,7 +234,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -273,10 +270,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         {
             var logDir = CreateTempLogDir();
             var decoy = CreateTempLogDir();
-            IHost? host = null;
             try
             {
-                host = CreateLoggingHost(
+                using (var host = CreateLoggingHost(
                     logDir,
                     settings: new Dictionary<string, string?>
                     {
@@ -291,17 +287,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                         ["Serilog:WriteTo:1:Args:configure:0:Args:retainedFileCountLimit"] = "99",
                         ["Serilog:WriteTo:1:Args:configure:0:Args:rollingInterval"] = "Hour",
                         ["Serilog:WriteTo:1:Args:configure:0:Args:flushToDiskInterval"] = "00:05:00",
-                    });
+                    }))
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
+                    Assert.True(logger.IsEnabled(LogLevel.Warning));
+                    Assert.False(logger.IsEnabled(LogLevel.Information));
+                    logger.LogWarning("serilog-section-ignored-marker");
+                }
 
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
-                Assert.True(logger.IsEnabled(LogLevel.Warning));
-                Assert.False(logger.IsEnabled(LogLevel.Information));
-                logger.LogWarning("serilog-section-ignored-marker");
-                host.Dispose();
-                host = null;
                 Log.CloseAndFlush();
-
                 Assert.Contains(
                     Directory.GetFiles(logDir, ApplicationJsonConfiguration.EntryAssemblyName + "-*.log"),
                     path => File.ReadAllText(path).Contains("serilog-section-ignored-marker", StringComparison.Ordinal));
@@ -309,7 +304,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 TryDelete(logDir);
                 TryDelete(decoy);
             }
@@ -393,32 +387,30 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var logDir = CreateTempLogDir();
             using var captured = new StringWriter();
             var previous = Console.Out;
-            IHost? host = null;
             try
             {
                 Console.SetOut(captured);
-                host = CreateLoggingHost(
+                using (var host = CreateLoggingHost(
                     logDir,
                     configure: static lc => lc.MinimumLevel.Override("VectorNNTP.BackFiller", LogEventLevel.Verbose),
-                    commandLine: new BackFillerLoggingCommandLine(Console: true, EnrichFromLogContext: false));
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
+                    commandLine: new BackFillerLoggingCommandLine(Console: true, EnrichFromLogContext: false)))
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
 
-                Assert.True(logger.IsEnabled(LogLevel.Debug));
-                Assert.True(logger.IsEnabled(LogLevel.Trace));
+                    Assert.True(logger.IsEnabled(LogLevel.Debug));
+                    Assert.True(logger.IsEnabled(LogLevel.Trace));
 
-                logger.LogInformation("backfiller-console-info-marker");
-                logger.LogDebug("backfiller-console-debug-marker");
-                logger.LogTrace("backfiller-file-trace-marker");
+                    logger.LogInformation("backfiller-console-info-marker");
+                    logger.LogDebug("backfiller-console-debug-marker");
+                    logger.LogTrace("backfiller-file-trace-marker");
+                }
 
-                host.Dispose();
-                host = null;
                 Log.CloseAndFlush();
             }
             finally
             {
                 Console.SetOut(previous);
-                host?.Dispose();
             }
 
             var console = captured.ToString();
@@ -480,7 +472,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public void HostLogger_DoesNotRequireSerilogWriteToConfigurationKeys()
         {
             var logDir = CreateTempLogDir();
-            IHost? host = null;
             try
             {
                 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
@@ -493,13 +484,13 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                         [$"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:File:{nameof(BackFillerFileLoggingTargetOptions.LogDir)}"] = logDir,
                     });
                 builder.ConfigureBackFillerLogging();
-                host = builder.Build();
+                using (var host = builder.Build())
+                {
+                    var logger = host.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("VectorNNTP.BackFiller");
+                    logger.LogInformation("no-serilog-writeto-keys-marker");
+                }
 
-                var logger = host.Services.GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("VectorNNTP.BackFiller");
-                logger.LogInformation("no-serilog-writeto-keys-marker");
-                host.Dispose();
-                host = null;
                 Log.CloseAndFlush();
 
                 Assert.Contains(
@@ -508,7 +499,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                host?.Dispose();
                 TryDelete(logDir);
             }
         }
@@ -576,6 +566,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             catch (IOException)
             {
+                /* A directory that is still in use must not fail the test. */
             }
         }
 
@@ -623,9 +614,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 }
 
                 yield return current;
-                foreach (var field in current.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                foreach (var value in current.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Select(field => field.GetValue(current)))
                 {
-                    var value = field.GetValue(current);
                     if (value is ILogEventSink sink)
                     {
                         pending.Push(sink);

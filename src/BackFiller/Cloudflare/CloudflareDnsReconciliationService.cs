@@ -224,6 +224,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
                     FailedStartCleanupTimeout);
                 // Preserve the original startup failure; do not replace it with clean-up failure.
             }
+            // codeql[cs/catch-of-all-exceptions] A reconciliation failure must be logged and must not tear down the hosted service.
             catch (Exception cleanupEx)
             {
                 CloudflareLogMessages.PostFailureCleanupFailed(_logger, cleanupEx, fqdn);

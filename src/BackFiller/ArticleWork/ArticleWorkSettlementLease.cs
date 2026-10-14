@@ -93,6 +93,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 
                 return true;
             }
+            // codeql[cs/catch-of-all-exceptions] Settlement cleanup must finish even when an unexpected exception is thrown.
             catch (Exception)
             {
                 return false;

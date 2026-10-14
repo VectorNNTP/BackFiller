@@ -268,8 +268,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                     }
                 }
             }
+            // codeql[cs/catch-of-all-exceptions] The scripted peer must finish the pipe after any read or command failure.
             catch (Exception)
             {
+                /* The caller observes the closed pipe rather than this task. */
             }
             finally
             {

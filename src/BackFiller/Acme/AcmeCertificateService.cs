@@ -155,6 +155,7 @@ namespace VectorNNTP.BackFiller.Acme
             {
                 // Expected on cancel.
             }
+            // codeql[cs/catch-of-all-exceptions] Certificate issuance must record every failure and continue the documented recovery path.
             catch (Exception ex)
             {
                 AcmeLogMessages.RenewalLoopStopError(_logger, ex);
@@ -217,6 +218,7 @@ namespace VectorNNTP.BackFiller.Acme
                 {
                     break;
                 }
+                // codeql[cs/catch-of-all-exceptions] Certificate issuance must record every failure and continue the documented recovery path.
                 catch (Exception ex)
                 {
                     AcmeLogMessages.RenewalCheckFailed(_logger, AcmeFailureSanitizer.Sanitize(ex));

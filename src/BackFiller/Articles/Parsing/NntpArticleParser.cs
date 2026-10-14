@@ -409,20 +409,25 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
 
                 if (lineLength == 0)
                 {
-                    if (currentHeaderNameOffset >= 0
-                        && !TryAddHeader(
-                            ref headers,
-                            ref headerCount,
-                            ref rentedHeaders,
+                    if (currentHeaderNameOffset >= 0)
+                    {
+                        var assembly = new HeaderAssembly(headers, headerCount, rentedHeaders);
+                        var added = TryAddHeader(
+                            ref assembly,
                             options.MaxHeaderCount,
                             new NntpArticleHeaderEntry(
                                 currentKnownName,
                                 currentHeaderNameOffset,
                                 currentHeaderNameLength,
                                 currentHeaderValueOffset,
-                                currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0)))
-                    {
-                        return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.TooManyHeaders, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
+                                currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0));
+                        headers = assembly.Headers;
+                        headerCount = assembly.Count;
+                        rentedHeaders = assembly.Rented;
+                        if (!added)
+                        {
+                            return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.TooManyHeaders, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
+                        }
                     }
 
                     var bodyOffset = lineEnd >= 0 ? AdvancePastTerminator(articleSpan, lineEnd) : lineContentEnd;
@@ -480,17 +485,25 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
                     continue;
                 }
 
-                if (currentHeaderNameOffset >= 0 && !TryAddHeader(
-                        ref headers,
-                        ref headerCount,
-                        ref rentedHeaders,
+                var headerAdded = true;
+                if (currentHeaderNameOffset >= 0)
+                {
+                    var assembly = new HeaderAssembly(headers, headerCount, rentedHeaders);
+                    headerAdded = TryAddHeader(
+                        ref assembly,
                         options.MaxHeaderCount,
                         new NntpArticleHeaderEntry(
                             currentKnownName,
                             currentHeaderNameOffset,
                             currentHeaderNameLength,
                             currentHeaderValueOffset,
-                            currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0)) || headerCount >= options.MaxHeaderCount)
+                            currentHeaderHasValue ? currentHeaderValueEndExclusive - currentHeaderValueOffset : 0));
+                    headers = assembly.Headers;
+                    headerCount = assembly.Count;
+                    rentedHeaders = assembly.Rented;
+                }
+
+                if (!headerAdded || headerCount >= options.MaxHeaderCount)
                 {
                     return HeaderParseOutcome.Fail(NntpArticleParseFailureCode.TooManyHeaders, articleBytes, headerStart, lineContentEnd, headers[..headerCount]);
                 }
@@ -545,40 +558,62 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         }
 
         /// <summary>
+        /// Header span, live count, and rented array-pool buffer updated together by <see cref="TryAddHeader"/>.
+        /// </summary>
+        private ref struct HeaderAssembly
+        {
+            /// <summary>Initializes the assembly from the caller's current buffer.</summary>
+            /// <param name="headers">Inline or previously rented header span.</param>
+            /// <param name="count">Live header count.</param>
+            /// <param name="rented">Rented buffer, or null while the inline span is in use.</param>
+            public HeaderAssembly(Span<NntpArticleHeaderEntry> headers, int count, NntpArticleHeaderEntry[]? rented)
+            {
+                Headers = headers;
+                Count = count;
+                Rented = rented;
+            }
+
+            /// <summary>Current header span. Replaced when a larger buffer is rented.</summary>
+            public Span<NntpArticleHeaderEntry> Headers;
+
+            /// <summary>Live header count.</summary>
+            public int Count;
+
+            /// <summary>Rented buffer. Null while the inline span is in use.</summary>
+            public NntpArticleHeaderEntry[]? Rented;
+        }
+
+        /// <summary>
         /// Appends one header, renting an array-pool buffer of <paramref name="maxHeaderCount"/> when the inline span is full.
         /// </summary>
-        /// <param name="headers">Current header span. Replaced with the rented buffer when growth is required.</param>
-        /// <param name="headerCount">Live count. Incremented on success.</param>
-        /// <param name="rentedHeaders">Previous rented buffer, returned to the pool when a new one is rented.</param>
+        /// <param name="assembly">Header span, live count, and rented buffer. All three are updated together.</param>
         /// <param name="maxHeaderCount">Hard cap. The rented array is this long.</param>
         /// <param name="entry">Header to store.</param>
-        /// <returns><see langword="false"/> when <paramref name="headerCount"/> is already at <paramref name="maxHeaderCount"/>.</returns>
+        /// <returns><see langword="false"/> when the live count is already at <paramref name="maxHeaderCount"/>.</returns>
         private static bool TryAddHeader(
-            ref Span<NntpArticleHeaderEntry> headers,
-            ref int headerCount,
-            ref NntpArticleHeaderEntry[]? rentedHeaders,
+            ref HeaderAssembly assembly,
             int maxHeaderCount,
             NntpArticleHeaderEntry entry)
         {
-            if (headerCount >= maxHeaderCount)
+            if (assembly.Count >= maxHeaderCount)
             {
                 return false;
             }
 
-            if (headerCount >= headers.Length)
+            if (assembly.Count >= assembly.Headers.Length)
             {
                 var rented = ArrayPool<NntpArticleHeaderEntry>.Shared.Rent(maxHeaderCount);
-                headers.CopyTo(rented);
-                if (rentedHeaders is not null)
+                assembly.Headers.CopyTo(rented);
+                if (assembly.Rented is not null)
                 {
-                    ArrayPool<NntpArticleHeaderEntry>.Shared.Return(rentedHeaders, clearArray: true);
+                    ArrayPool<NntpArticleHeaderEntry>.Shared.Return(assembly.Rented, clearArray: true);
                 }
 
-                rentedHeaders = rented;
-                headers = rented;
+                assembly.Rented = rented;
+                assembly.Headers = rented;
             }
 
-            headers[headerCount++] = entry;
+            assembly.Headers[assembly.Count++] = entry;
             return true;
         }
 

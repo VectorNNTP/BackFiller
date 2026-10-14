@@ -42,7 +42,9 @@ The standalone project has no external build/runtime dependency on a separate `V
 
 ## CodeQL
 
-Local analysis uses the installed CodeQL CLI. It traces the Release x64 restore and build, then runs the `security-extended` and `security-and-quality` suites shipped with that CLI. Those are the suites selected by `.github/codeql/codeql-config.yml`. The database, SARIF, and logs are written under `.artifacts/codeql/`, which Git ignores.
+Local analysis uses the installed CodeQL CLI. It traces the Release x64 restore and build, then runs the queries selected by `.github/codeql/codeql-config.yml`. That file selects `.github/codeql/csharp-with-alert-suppression.qls`, which imports the `security-extended` and `security-and-quality` suites and adds `AlertSuppression.ql` from the same query pack. The suites themselves do not include that query, and CodeQL CLI 2.27.2 does not record in-source suppressions unless it is analyzed with them. The database, SARIF, and logs are written under `.artifacts/codeql/`, which Git ignores.
+
+A suppression is a `// codeql[rule-id]` comment on the line immediately before the alert, with no other code on that line. A same-line `// codeql[...]` comment is not recognized. A recognized suppression stays in the SARIF with `suppressions.kind` set to `inSource`. Each `cs/catch-of-all-exceptions` suppression is on a boundary that must contain every exception, including types the method cannot enumerate, and the comment states that contract. Generated System.Text.Json and regex sources are not edited and are not suppressed.
 
 ```powershell
 .\tools\Invoke-CodeQlAnalysis.ps1

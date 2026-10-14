@@ -222,9 +222,11 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
             catch (IOException)
             {
+                /* A directory that is still in use must not fail the test. */
             }
             catch (UnauthorizedAccessException)
             {
+                /* A directory that cannot be deleted must not fail the test. */
             }
         }
 
@@ -239,6 +241,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
             catch (InvalidOperationException)
             {
+                /* The process may already have exited. Cleanup must not fail the test. */
             }
         }
     }

@@ -9,7 +9,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     {
         /// <summary>
         /// Closes <paramref name="channel"/> when it is open, then disposes it.
-        /// A close that fails because the channel is already gone is logged and disposal still runs.
+        /// A close that fails because the channel is already gone, or because close times out, is logged and disposal still runs.
         /// </summary>
         /// <param name="channel">Channel owned by the caller.</param>
         /// <returns>A task that completes after disposal.</returns>

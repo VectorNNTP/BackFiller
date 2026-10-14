@@ -208,6 +208,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             ConnectionLost?.Invoke(this, new RabbitMqConnectionLostEventArgs(replyCode, replyText, initiator));
         }
 
+        public Exception? DisposeException { get; set; }
+
         public async ValueTask DisposeAsync()
         {
             DisposeStarted?.TrySetResult();
@@ -217,6 +219,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
 
             DisposeCount++;
+            if (DisposeException is { } disposeException)
+            {
+                throw disposeException;
+            }
             IsOpen = false;
         }
     }

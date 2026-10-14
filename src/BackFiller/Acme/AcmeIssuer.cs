@@ -445,10 +445,17 @@ namespace VectorNNTP.BackFiller.Acme
             }
             finally
             {
-                foreach (var intermediate in intermediates)
-                {
-                    intermediate.Dispose();
-                }
+                DisposeIntermediates(intermediates);
+            }
+        }
+
+        /// <summary>Disposes certificate intermediates rented for the PFX export.</summary>
+        /// <param name="intermediates">Certificates owned by the export. The leaf is disposed by its own using declaration.</param>
+        private static void DisposeIntermediates(List<X509Certificate2> intermediates)
+        {
+            foreach (var intermediate in intermediates)
+            {
+                intermediate.Dispose();
             }
         }
 
@@ -489,6 +496,7 @@ namespace VectorNNTP.BackFiller.Acme
             {
                 await _dnsSolver.CleanupAsync(cancellationToken).ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] Best-effort DNS cleanup must not replace the issuance failure the caller is about to throw.
             catch (Exception ex)
             {
                 AcmeLogMessages.Dns01BestEffortCleanupFailed(_logger, ex);

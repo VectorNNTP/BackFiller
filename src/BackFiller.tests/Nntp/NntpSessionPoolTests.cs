@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
@@ -352,6 +353,49 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             return server;
         }
 
+        [Fact]
+        public async Task Keepalive_cancellation_is_logged_and_disposal_completes()
+        {
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 1);
+            await using var pool = CreatePool(
+                factory,
+                max: 1,
+                keepAliveSeconds: 30,
+                time: new IdleTimeProvider(),
+                logger: logger);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+            await pool.DisposeAsync();
+
+            Assert.Contains(
+                logger.Messages,
+                static message => message.Contains(
+                    "Shutdown continued after DATE keepalive was canceled",
+                    StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task Unexpected_keepalive_failure_retires_the_session()
+        {
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            await using var pool = CreatePool(
+                factory,
+                max: 1,
+                keepAliveSeconds: 30,
+                time: new OnceFailingTimeProvider(),
+                logger: logger);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+            await WaitUntilAsync(() => logger.Messages.Any(static message =>
+                message.Contains("NNTP session retired", StringComparison.Ordinal)
+                && message.Contains("DATE keepalive failed", StringComparison.Ordinal)));
+            Assert.Equal(0, pool.ActiveLeaseCount);
+        }
+
         private static async Task WaitUntilAsync(Func<bool> predicate)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -360,6 +404,38 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 cts.Token.ThrowIfCancellationRequested();
                 await Task.Yield();
             }
+        }
+
+        private sealed class IdleTimeProvider : TimeProvider
+        {
+            public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+                new IdleTimer();
+        }
+
+        private sealed class OnceFailingTimeProvider : TimeProvider
+        {
+            private int _calls;
+
+            public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            {
+                if (Interlocked.Increment(ref _calls) == 1)
+                {
+                    throw new NotSupportedException("keepalive clock");
+                }
+
+                return new IdleTimer();
+            }
+        }
+
+        private sealed class IdleTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => false;
+
+            public void Dispose()
+            {
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 }

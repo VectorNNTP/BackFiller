@@ -42,16 +42,17 @@ namespace VectorNNTP.BackFiller.Accounts
         public bool TryGetProvider(string backbone, out BackFillerProviderDefinition provider)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(backbone);
-            var match = _providers.FirstOrDefault(candidate =>
-                string.Equals(candidate.Backbone, backbone, StringComparison.OrdinalIgnoreCase));
-            if (match is null)
+            var providers = _providers;
+            // codeql[cs/linq/missed-where] Per-article lookup must stay allocation-free. Where would allocate a delegate and an iterator.
+            foreach (var candidate in providers)
             {
-                provider = null!;
-                return false;
+                if (!string.Equals(candidate.Backbone, backbone, StringComparison.OrdinalIgnoreCase)) continue;
+                provider = candidate;
+                return true;
             }
 
-            provider = match;
-            return true;
+            provider = null!;
+            return false;
         }
     }
 }

@@ -1,4 +1,5 @@
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.RabbitMq;
 
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
@@ -226,6 +227,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 await replace.ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A publish or replacement failure must not escape this publisher boundary.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.PublisherReplaceFailed(_logger, ex.Message);
@@ -246,10 +248,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             finally
             {
                 _replaceGate.Release();
-                _replaceGate.Dispose();
-                _publishGate.Dispose();
-                _runCts.Dispose();
+                DisposeShutdownHandles();
             }
+        }
+
+        /// <summary>Releases the replacement gate, the publish gate, and the run cancellation source.</summary>
+        private void DisposeShutdownHandles()
+        {
+            _replaceGate.Dispose();
+            _publishGate.Dispose();
+            _runCts.Dispose();
         }
 
         /// <summary>
@@ -457,6 +465,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 
                 await ReplaceChannelAsync(startup: false, _runCts.Token).ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A publish or replacement failure must not escape this publisher boundary.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.PublisherReplaceFailed(_logger, ex.Message);
@@ -545,6 +554,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
             catch (OperationCanceledException)
             {
+                ShutdownObservations.Canceled(_logger, "response publisher gate release");
             }
         }
 

@@ -345,6 +345,7 @@ namespace VectorNNTP.BackFiller.Core
                 {
                     await service.StopAsync(timeoutCts.Token).ConfigureAwait(false);
                 }
+                // codeql[cs/catch-of-all-exceptions] A service start or stop failure must be recorded without abandoning the remaining services.
                 catch (Exception ex)
                 {
                     ApplicationServiceManagerLogMessages.ServiceRollbackFailed(_logger, ex, service.Name);

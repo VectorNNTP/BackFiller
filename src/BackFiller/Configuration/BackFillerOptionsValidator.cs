@@ -352,6 +352,7 @@ namespace VectorNNTP.BackFiller.Configuration
             {
                 totalPhysicalMemoryBytes = _physicalMemoryProvider.GetTotalPhysicalMemoryBytes();
             }
+            // codeql[cs/catch-of-all-exceptions] Validation must report every rejected value and continue checking the remaining options.
             catch (Exception)
             {
                 failures.Add("BackFiller:ArticleRetention:MaximumRetainedPayloadGigabytes cannot be validated because total physical memory could not be determined.");

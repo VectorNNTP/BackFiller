@@ -170,6 +170,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 outcome = ArticleWorkOutcome.Cancelled;
                 error = null;
             }
+            // codeql[cs/catch-of-all-exceptions] A delivery failure must be settled or logged by this pipeline boundary.
             catch (Exception ex)
             {
                 outcome = ArticleWorkOutcome.UnexpectedFailure;
@@ -347,6 +348,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 return ArticleWorkPublishAttempt.Cancelled;
             }
+            // codeql[cs/catch-of-all-exceptions] A delivery failure must be settled or logged by this pipeline boundary.
             catch (Exception)
             {
                 return ArticleWorkPublishAttempt.Failed;

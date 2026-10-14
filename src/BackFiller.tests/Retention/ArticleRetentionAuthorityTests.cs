@@ -304,11 +304,13 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         {
             var authority = Create(new ManualTimeProvider(Start), maxBytes: 1024 * 1024);
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            authority.BeginShutdown();
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
-            open.Dispose();
+            using (var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            {
+                authority.BeginShutdown();
+                Assert.Equal(VatpOpenKind.Opened, open.Kind);
+                Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
+            }
+
             var later = RetentionTestArticles.Create("<c@d>");
             Assert.Equal(ArticleRetentionKind.ShuttingDown, authority.RetainCanonical(
                 "<c@d>", later.RequestId, later.Record, later.SelectedDateHeaderName).Kind);

@@ -115,18 +115,19 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         {
             await using var context = await VatpListenerContext.StartAsync();
             var frame = VatpFrameEncoder.ToSingleBuffer(VatpFrameEncoder.EncodeHello(VatpProtocol.DefaultMaxFramePayload));
-            using var tcp = new TcpClient();
-            await tcp.ConnectAsync(IPAddress.Loopback, context.Port);
-            var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false, static (_, _, _, _) => true);
-            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            using (var tcp = new TcpClient())
             {
-                TargetHost = "localhost",
-                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-            });
-            await ssl.WriteAsync(frame.AsMemory(0, 8));
-            ssl.Dispose();
-            tcp.Close();
+                await tcp.ConnectAsync(IPAddress.Loopback, context.Port);
+                using var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false, static (_, _, _, _) => true);
+                await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+                {
+                    TargetHost = "localhost",
+                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                });
+                await ssl.WriteAsync(frame.AsMemory(0, 8));
+            }
+
             await WaitForIdleAsync(context);
             Assert.Equal(CacheListenerState.Running, context.Service.State);
         }
@@ -255,11 +256,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             var cancelReceiver = new ManualTransferReceiver(cancelled.Record.ArtId);
             var completeReceiver = new ManualTransferReceiver(completes.Record.ArtId);
-            var sentCancel = false;
-            var secondDone = false;
-            var cancelBytes = 0L;
+            var progress = new CancelProgress();
 
-            while (!secondDone)
+            while (!progress.SecondDone)
             {
                 var frame = await ReadVatpFrameAsync(client.Stream);
                 AcceptCancelTestFrame(
@@ -267,9 +266,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                     frame,
                     cancelReceiver,
                     completeReceiver,
-                    ref sentCancel,
-                    ref secondDone,
-                    ref cancelBytes,
+                    progress,
                     cancelled.Record.ArtSize);
             }
 
@@ -291,16 +288,14 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                     frame,
                     cancelReceiver,
                     completeReceiver,
-                    ref sentCancel,
-                    ref secondDone,
-                    ref cancelBytes,
+                    progress,
                     cancelled.Record.ArtSize);
             }
 
-            Assert.True(sentCancel);
+            Assert.True(progress.SentCancel);
             Assert.True(completeReceiver.IsComplete);
             Assert.False(cancelReceiver.IsComplete);
-            Assert.True(cancelBytes < cancelled.Record.ArtSize);
+            Assert.True(progress.CancelBytes < cancelled.Record.ArtSize);
             Assert.True(completeReceiver.Record!.Value.ArtData.Span.SequenceEqual(completes.ExpectedArtData));
 
             await client.Stream.WriteAsync(VatpFrameEncoder.ToSingleBuffer(
@@ -477,37 +472,44 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(secondRecord.ArtData.Span.SequenceEqual(second.ExpectedArtData));
         }
 
+        private sealed class CancelProgress
+        {
+            public bool SentCancel { get; set; }
+
+            public bool SecondDone { get; set; }
+
+            public long CancelBytes { get; set; }
+        }
+
         private static void AcceptCancelTestFrame(
             Stream stream,
             VatpParsedFrame frame,
             ManualTransferReceiver cancelReceiver,
             ManualTransferReceiver completeReceiver,
-            ref bool sentCancel,
-            ref bool secondDone,
-            ref long cancelBytes,
+            CancelProgress progress,
             long artSize)
         {
             if (frame.Header.StreamId == 1)
             {
-                if (frame.Header.Type == VatpFrameType.Data && !sentCancel)
+                if (frame.Header.Type == VatpFrameType.Data && !progress.SentCancel)
                 {
-                    sentCancel = true;
+                    progress.SentCancel = true;
                     stream.Write(VatpFrameEncoder.ToSingleBuffer(VatpFrameEncoder.EncodeCancel(1)));
                 }
 
                 if (frame.Header.Type == VatpFrameType.Data)
                 {
-                    cancelBytes += frame.Header.PayloadLength;
+                    progress.CancelBytes += frame.Header.PayloadLength;
                     Assert.False(
                         frame.Header.HasFin,
-                        $"fin bytes={cancelBytes} payload={frame.Header.PayloadLength} art={artSize}");
+                        $"fin bytes={progress.CancelBytes} payload={frame.Header.PayloadLength} art={artSize}");
                 }
 
                 ApplyFrame(stream, frame, cancelReceiver, grantServerWindow: false);
             }
             else if (frame.Header.StreamId == 2)
             {
-                secondDone = ApplyFrame(stream, frame, completeReceiver, grantServerWindow: true);
+                progress.SecondDone = ApplyFrame(stream, frame, completeReceiver, grantServerWindow: true);
             }
         }
 

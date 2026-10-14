@@ -154,7 +154,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var tasks = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
             {
                 barrier.SignalAndWait();
-                var result = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+                using var result = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
                 if (result.Kind == VatpOpenKind.Opened)
                 {
                     Interlocked.Increment(ref opened);
@@ -163,8 +163,6 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 {
                     Interlocked.Increment(ref rejected);
                 }
-
-                result.Dispose();
             })).ToArray();
 
             await Task.WhenAll(tasks).WaitAsync(TestTimeout);

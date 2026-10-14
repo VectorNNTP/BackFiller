@@ -284,7 +284,8 @@ namespace VectorNNTP.BackFiller.Listener
         /// State moves to <see cref="CacheListenerState.Retiring"/> before cancel, then to
         /// <see cref="CacheListenerState.Stopped"/> after drain. <see cref="OperationCanceledException"/> from the
         /// accept task is ignored. Any other accept-task exception propagates. Connection-task exceptions are
-        /// ignored by <see cref="DrainConnectionsAsync"/>. The run token source is disposed before the stopped state.
+        /// logged and ignored by <see cref="DrainConnectionsAsync"/> so socket release and the stopped state still run.
+        /// The run token source is disposed before the stopped state.
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
@@ -586,7 +587,7 @@ namespace VectorNNTP.BackFiller.Listener
             }
         }
 
-        /// <summary>Waits for connection tasks currently in <see cref="_connections"/>. Exceptions from those tasks are ignored.</summary>
+        /// <summary>Waits for connection tasks currently in <see cref="_connections"/>. Every fault from those tasks is logged and ignored.</summary>
         /// <returns>A task that completes when the sampled tasks finish, or immediately when none are tracked.</returns>
         private async Task DrainConnectionsAsync()
         {
@@ -600,9 +601,28 @@ namespace VectorNNTP.BackFiller.Listener
             {
                 await Task.WhenAll(tasks).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or TimeoutException)
+            // codeql[cs/catch-of-all-exceptions] A connection-task fault during drain must not skip the remaining listener cleanup.
+            catch (Exception ex)
             {
-                CacheListenerLogMessages.ConnectionDrainFailed(_logger, ex.GetType().Name);
+                try
+                {
+                    CacheListenerLogMessages.ConnectionDrainFailed(_logger, ex.GetBaseException().GetType().Name);
+                }
+                // codeql[cs/catch-of-all-exceptions] A connection-task fault during drain must not skip the remaining listener cleanup.
+                catch (Exception logFailure)
+                {
+                    try
+                    {
+                        Serilog.Debugging.SelfLog.WriteLine(
+                            "Cache listener connection drain failure log failed: {0}",
+                            logFailure);
+                    }
+                    // codeql[cs/catch-of-all-exceptions] A connection-task fault during drain must not skip the remaining listener cleanup.
+                    catch (Exception)
+                    {
+                        // Drain logging is best-effort. Remaining dispose work still runs.
+                    }
+                }
             }
         }
 

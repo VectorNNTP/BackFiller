@@ -289,6 +289,28 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
         }
 
         [Fact]
+        public async Task Unexpected_connection_disposal_failure_does_not_stop_shutdown()
+        {
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var logger = new CollectingLogger<RabbitMqService>();
+            var service = CreateService(factory, logger);
+            await service.StartAsync(CancellationToken.None);
+            var connection = factory.LastConnection!;
+            connection.DisposeException = new NotSupportedException("dispose boom");
+
+            await service.DisposeAsync();
+
+            Assert.False(service.IsReady);
+            Assert.False(service.TryGetCurrent(out _));
+            Assert.Equal(1, connection.DisposeCount);
+            Assert.False(service.Execution!.IsFaulted);
+            Assert.Contains(
+                logger.Entries,
+                entry => entry.EventId.Id == 2815 && entry.Message.Contains("dispose boom", StringComparison.Ordinal));
+            Assert.Contains(logger.Entries, static entry => entry.EventId.Id == 2816);
+        }
+
+        [Fact]
         public async Task Cancellation_during_recovery_does_not_install_a_replacement()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();

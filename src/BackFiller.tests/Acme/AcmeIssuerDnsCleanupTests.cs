@@ -36,6 +36,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Contains(
                 logger.Entries,
                 entry => entry.Level == LogLevel.Warning && entry.EventId.Id == 1923);
+            AssertResponsesDisposed(scope);
         }
 
         [Fact]
@@ -60,6 +61,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 logger.Messages,
                 static message => message.Contains("DNS-01 best-effort cleanup failed", StringComparison.Ordinal));
             Assert.DoesNotContain("txt_cleanup_failed", ex.Message, StringComparison.Ordinal);
+            AssertResponsesDisposed(scope);
         }
 
         [Fact]
@@ -78,6 +80,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                 scope.Issuer.IssueAsync(["example.com"], cts.Token));
             Assert.Equal(1, dns.DeleteCalls);
+            AssertResponsesDisposed(scope);
         }
 
         private static IssuerScope CreateIssuer(
@@ -93,9 +96,11 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 DirectoryUrl,
                 rsa.ExportPkcs8PrivateKey(),
                 "{}"));
+            var http = new ScriptedAcmeHttpFactory();
 
             return new IssuerScope(
                 stateDir,
+                http,
                 new AcmeIssuer(
                 Options.Create(new AcmeCloudflareOptions
                 {
@@ -106,13 +111,21 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 }),
                 store,
                 new Dns01Solver(dns, "zone", resolver, "example.com", propagationTimeout: TimeSpan.FromSeconds(2)),
-                new ScriptedAcmeHttpFactory(),
+                http,
                 logger));
         }
 
-        private sealed class IssuerScope(string stateDir, AcmeIssuer issuer) : IDisposable
+        private static void AssertResponsesDisposed(IssuerScope scope)
+        {
+            Assert.NotEmpty(scope.Http.Responses);
+            Assert.All(scope.Http.Responses, static response => Assert.True(response.WasDisposed));
+        }
+
+        private sealed class IssuerScope(string stateDir, ScriptedAcmeHttpFactory http, AcmeIssuer issuer) : IDisposable
         {
             public AcmeIssuer Issuer { get; } = issuer;
+
+            public ScriptedAcmeHttpFactory Http { get; } = http;
 
             public void Dispose() => Directory.Delete(stateDir, recursive: true);
         }
@@ -125,24 +138,47 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
         private sealed class ScriptedAcmeHttpFactory : IHttpClientFactory
         {
-            private readonly HttpMessageHandler _handler = new ScriptedAcmeHandler();
+            private readonly ScriptedAcmeHandler _handler = new();
+
+            public IReadOnlyList<ScriptedAcmeHandler.TrackedResponse> Responses => _handler.Responses;
 
             public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
         }
 
         private sealed class ScriptedAcmeHandler : HttpMessageHandler
         {
+            private readonly List<TrackedResponse> _responses = [];
+
+            public IReadOnlyList<TrackedResponse> Responses
+            {
+                get
+                {
+                    lock (_responses)
+                    {
+                        return [.. _responses];
+                    }
+                }
+            }
+
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
-                CancellationToken cancellationToken)
+                CancellationToken cancellationToken) =>
+                Task.FromResult<HttpResponseMessage>(CreateResponse(request));
+
+            private TrackedResponse CreateResponse(HttpRequestMessage request)
             {
                 var path = request.RequestUri?.AbsolutePath ?? string.Empty;
-                var response = new HttpResponseMessage(HttpStatusCode.OK);
+                var response = new TrackedResponse(HttpStatusCode.OK);
+                lock (_responses)
+                {
+                    _responses.Add(response);
+                }
+
                 response.Headers.TryAddWithoutValidation("Replay-Nonce", "nonce");
                 if (request.Method == HttpMethod.Head)
                 {
                     response.Content = new ByteArrayContent([]);
-                    return Task.FromResult(response);
+                    return response;
                 }
 
                 var json = path.EndsWith("/directory", StringComparison.Ordinal)
@@ -165,7 +201,27 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 }
 
                 response.Content = new StringContent(json, Encoding.UTF8, "application/json");
-                return Task.FromResult(response);
+                return response;
+            }
+
+            internal sealed class TrackedResponse : HttpResponseMessage
+            {
+                public TrackedResponse(HttpStatusCode statusCode)
+                    : base(statusCode)
+                {
+                }
+
+                public bool WasDisposed { get; private set; }
+
+                protected override void Dispose(bool disposing)
+                {
+                    if (disposing)
+                    {
+                        WasDisposed = true;
+                    }
+
+                    base.Dispose(disposing);
+                }
             }
         }
 

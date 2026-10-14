@@ -116,6 +116,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 }
                 catch (IOException)
                 {
+                    /* A directory that is still in use must not fail the test. */
                 }
             }
         }

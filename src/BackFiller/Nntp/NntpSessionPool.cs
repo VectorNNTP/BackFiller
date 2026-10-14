@@ -437,6 +437,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="cancellationToken">Drain budget when <paramref name="forceAfterGrace"/> is false. Ignored for the lease wait when it is true.</param>
         /// <remarks>
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
+        /// An unexpected replenish-task failure is logged and does not skip retirement.
         /// Keepalive tasks are given <see cref="_shutdownGrace"/> and then abandoned if they are still running.
         /// </remarks>
         private async Task DisposeCoreAsync(bool forceAfterGrace, CancellationToken cancellationToken)
@@ -457,6 +458,11 @@ namespace VectorNNTP.BackFiller.Nntp
                 catch (OperationCanceledException)
                 {
                     ShutdownObservations.Canceled(_logger, "session replenish");
+                }
+                // codeql[cs/catch-of-all-exceptions] Keepalive and replenishment failures must retire or log the session and must not escape the background task.
+                catch (Exception ex)
+                {
+                    NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
                 }
             }
 
@@ -691,8 +697,11 @@ namespace VectorNNTP.BackFiller.Nntp
                 {
                     ShutdownObservations.Canceled(_logger, "DATE keepalive");
                 }
+                // codeql[cs/catch-of-all-exceptions] Keepalive and replenishment failures must retire or log the session and must not escape the background task.
                 catch (Exception)
                 {
+                    // DATE keepalive owns this session. Any transport or clock failure retires it here so the
+                    // loop task stays observed and the pool can replace the session. Cancellation is handled above.
                     await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
                 }
                 finally
@@ -809,6 +818,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 ShutdownObservations.Canceled(_logger, "observed session fill");
             }
+            // codeql[cs/catch-of-all-exceptions] Keepalive and replenishment failures must retire or log the session and must not escape the background task.
             catch (Exception ex)
             {
                 NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);

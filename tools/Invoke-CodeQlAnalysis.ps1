@@ -5,16 +5,22 @@
 
 .DESCRIPTION
     Creates a CodeQL database by tracing the repository's Release x64 restore and
-    build, then analyzes that database with the security-extended and
-    security-and-quality suites from the CodeQL CLI already installed on the machine.
+    build, then analyzes that database with the queries selected by
+    .github/codeql/codeql-config.yml. That config selects
+    .github/codeql/csharp-with-alert-suppression.qls, which imports the
+    security-extended and security-and-quality suites and adds AlertSuppression.ql.
+    Analyze is invoked with no extra query arguments, so it uses the queries
+    stored from that config at database creation. That is the same selection the
+    GitHub Action analyzes with database run-queries.
 
-    The query suites are resolved from that CLI. This script does not download
-    query packs. Evidence is written under .artifacts/codeql/, which Git ignores.
-    A successful database build is not treated as a finished analysis: the script
-    also requires database analyze to exit 0.
+    The script checks that the local suite resolves to those two suites plus
+    AlertSuppression.ql exactly once. It does not download query packs. Evidence
+    is written under .artifacts/codeql/, which Git ignores. A successful database
+    build is not treated as a finished analysis: the script also requires
+    database analyze to exit 0.
 
-    The repository CodeQL config is passed at database creation. For a traced C#
-    build, the CLI records that paths and paths-ignore do not filter compiled files.
+    For a traced C# build, the CLI records that paths and paths-ignore do not
+    filter compiled files.
 
 .PARAMETER CodeQl
     Path to codeql.exe. Defaults to C:\Tools\codeql\codeql.exe.
@@ -56,55 +62,6 @@ function Invoke-CodeQl {
     }
 }
 
-function Get-InstalledPackRoot {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $PackName,
-
-        [Parameter(Mandatory = $true)]
-        $Node
-    )
-
-    if ($null -eq $Node) {
-        return $null
-    }
-
-    if ($Node -is [System.Array]) {
-        foreach ($item in $Node) {
-            $found = Get-InstalledPackRoot -PackName $PackName -Node $item
-            if ($found) {
-                return $found
-            }
-        }
-
-        return $null
-    }
-
-    if ($Node -isnot [System.Management.Automation.PSCustomObject]) {
-        return $null
-    }
-
-    foreach ($property in $Node.PSObject.Properties) {
-        if ($property.Name -eq $PackName) {
-            $entry = $property.Value
-            if ($entry -is [System.Array]) {
-                $entry = $entry | Where-Object { $_.PSObject.Properties.Name -contains "path" } | Select-Object -First 1
-            }
-
-            if ($entry -and ($entry.PSObject.Properties.Name -contains "path") -and $entry.path) {
-                return Split-Path -Parent $entry.path
-            }
-        }
-
-        $nested = Get-InstalledPackRoot -PackName $PackName -Node $property.Value
-        if ($nested) {
-            return $nested
-        }
-    }
-
-    return $null
-}
-
 if (-not (Test-Path -LiteralPath $CodeQl)) {
     throw "CodeQL CLI was not found at $CodeQl"
 }
@@ -135,31 +92,47 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "codeql version exited with code $LASTEXITCODE"
     }
-
-    $resolveLog = Join-Path $evidenceRoot "resolve-packs.json"
-    & $CodeQl resolve packs --format=json | Set-Content -LiteralPath $resolveLog -Encoding utf8
-    if ($LASTEXITCODE -ne 0) {
-        throw "codeql resolve packs exited with code $LASTEXITCODE. See $resolveLog"
-    }
 }
 finally {
     $ErrorActionPreference = $previousErrorAction
 }
 
-$packs = Get-Content -Raw -LiteralPath $resolveLog | ConvertFrom-Json
-$queriesRoot = Get-InstalledPackRoot -PackName "codeql/csharp-queries" -Node $packs
-if (-not $queriesRoot) {
-    throw "The installed CodeQL CLI does not contain codeql/csharp-queries. See $resolveLog"
+$suite = Join-Path $repoRoot ".github\codeql\csharp-with-alert-suppression.qls"
+if (-not (Test-Path -LiteralPath $suite)) {
+    throw "Query suite was not found at $suite"
 }
 
-$suites = @(
-    (Join-Path $queriesRoot "codeql-suites\csharp-security-extended.qls")
-    (Join-Path $queriesRoot "codeql-suites\csharp-security-and-quality.qls")
-)
-foreach ($suite in $suites) {
-    if (-not (Test-Path -LiteralPath $suite)) {
-        throw "Query suite was not found at $suite"
+function Get-ResolvedQueries {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]] $Selectors
+    )
+
+    $output = & $CodeQl resolve queries --format=json @Selectors
+    if ($LASTEXITCODE -ne 0) {
+        throw "codeql resolve queries exited with code $LASTEXITCODE"
     }
+
+    return @($output | ConvertFrom-Json)
+}
+
+$ErrorActionPreference = "Continue"
+try {
+    $configured = Get-ResolvedQueries -Selectors @($suite)
+    $suitesOnly = Get-ResolvedQueries -Selectors @(
+        "codeql/csharp-queries:codeql-suites/csharp-security-extended.qls",
+        "codeql/csharp-queries:codeql-suites/csharp-security-and-quality.qls"
+    )
+}
+finally {
+    $ErrorActionPreference = "Stop"
+}
+
+$added = @($configured | Where-Object { $_ -notin $suitesOnly })
+$removed = @($suitesOnly | Where-Object { $_ -notin $configured })
+$suppression = @($added | Where-Object { $_ -like "*\AlertSuppression.ql" -or $_ -like "*/AlertSuppression.ql" })
+if ($removed.Count -ne 0 -or $added.Count -ne 1 -or $suppression.Count -ne 1) {
+    throw "The configured suite must equal security-extended plus security-and-quality plus AlertSuppression.ql once. Added=$($added.Count) Removed=$($removed.Count) Suppression=$($suppression.Count)"
 }
 
 if (Test-Path -LiteralPath $database) {
@@ -177,15 +150,14 @@ try {
         "--command", $buildCommand
     )
 
-    Invoke-CodeQl -LogPath (Join-Path $evidenceRoot "database-analyze.log") -Arguments (@(
-        "database", "analyze", $database
-    ) + $suites + @(
+    Invoke-CodeQl -LogPath (Join-Path $evidenceRoot "database-analyze.log") -Arguments @(
+        "database", "analyze", $database,
         "--format=sarifv2.1.0",
         "--output", (Join-Path $evidenceRoot "results.sarif"),
         "--threads=0",
         "--no-sarif-minify",
         "--sarif-category=csharp"
-    ))
+    )
 }
 finally {
     Pop-Location

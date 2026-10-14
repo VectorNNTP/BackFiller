@@ -129,6 +129,7 @@ namespace VectorNNTP.BackFiller.Acme
                 {
                     throw;
                 }
+                // codeql[cs/catch-of-all-exceptions] An unexpected DNS-01 failure is counted so the remaining names can still be recovered.
                 catch
                 {
                     failures++;
@@ -216,6 +217,7 @@ namespace VectorNNTP.BackFiller.Acme
                     {
                         throw;
                     }
+                    // codeql[cs/catch-of-all-exceptions] An unexpected propagation failure skips this server and tries the remaining nameservers.
                     catch
                     {
                         continue;
@@ -271,6 +273,7 @@ namespace VectorNNTP.BackFiller.Acme
                 {
                     throw;
                 }
+                // codeql[cs/catch-of-all-exceptions] An unexpected deletion failure keeps the record for another cleanup attempt.
                 catch
                 {
                     remaining.Add(item);
@@ -467,6 +470,7 @@ namespace VectorNNTP.BackFiller.Acme
             {
                 throw;
             }
+            // codeql[cs/catch-of-all-exceptions] Best-effort TXT cleanup must not replace the issuance failure being reported.
             catch
             {
                 // Logged by callers via category.

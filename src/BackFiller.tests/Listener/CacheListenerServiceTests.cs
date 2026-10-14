@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Net.Security;
+using System.Reflection;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,6 +12,7 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
 using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 using VectorNNTP.BackFiller.Networking.Certificates;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
@@ -39,6 +42,30 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(CancellationToken.None));
             Assert.Equal(CacheListenerState.Stopped, service.State);
+        }
+
+        [Fact]
+        public async Task Unexpected_connection_task_fault_during_dispose_still_stops_the_listener()
+        {
+            var logger = new CollectingLogger<CacheListenerService>();
+            var service = new CacheListenerService(
+                CreateRuntime(GetFreePort()),
+                TestListenerCertificates.CreateUnavailableProvider(),
+                ArticleRetentionAuthorityTests.Create(TimeProvider.System, 1024),
+                logger);
+            var connectionsField = typeof(CacheListenerService).GetField(
+                "_connections",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var connections = Assert.IsType<ConcurrentDictionary<Task, byte>>(connectionsField?.GetValue(service));
+            connections[Task.FromException(new NotSupportedException("connection boom"))] = 0;
+
+            await service.DisposeAsync();
+
+            Assert.Equal(CacheListenerState.Stopped, service.State);
+            Assert.Contains(
+                logger.Entries,
+                entry => entry.EventId.Id == 5414
+                    && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
         }
 
         [Fact]

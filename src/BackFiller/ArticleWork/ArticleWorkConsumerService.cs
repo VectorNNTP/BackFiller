@@ -1,4 +1,5 @@
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.RabbitMq;
 
@@ -340,6 +341,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 }
                 catch (OperationCanceledException)
                 {
+                    ShutdownObservations.Canceled(_logger, "article-work reconcile loop");
                 }
             }
 
@@ -353,6 +355,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 await replace.ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A background reconcile or replacement failure must be logged without faulting an unobserved task.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.ConsumerReplaceFailed(_logger, ex.Message);
@@ -366,10 +369,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             finally
             {
                 _replaceGate.Release();
-                _replaceGate.Dispose();
-                _reconcileCts.Dispose();
-                _replacementRetirementCts.Dispose();
+                DisposeShutdownHandles();
             }
+        }
+
+        /// <summary>Releases the replacement gate and the reconcile cancellation sources after sessions have stopped.</summary>
+        private void DisposeShutdownHandles()
+        {
+            _replaceGate.Dispose();
+            _reconcileCts.Dispose();
+            _replacementRetirementCts.Dispose();
         }
 
         /// <summary>Waits <see cref="ReconcileInterval"/> and then reconciles until <paramref name="cancellationToken"/> is cancelled.</summary>
@@ -387,6 +396,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                ShutdownObservations.Canceled(_logger, "article-work periodic reconcile");
             }
         }
 
@@ -415,6 +425,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 await ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A background reconcile or replacement failure must be logged without faulting an unobserved task.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.ConsumerReplaceFailed(_logger, ex.Message);
@@ -781,6 +792,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 
                 await ReconcileSessionsAsync(CancellationToken.None).ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A background reconcile or replacement failure must be logged without faulting an unobserved task.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.ConsumerReplaceFailed(_logger, ex.Message);
@@ -809,6 +821,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 await RunReplacementBodyAsync().ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A background reconcile or replacement failure must be logged without faulting an unobserved task.
             catch (Exception ex)
             {
                 ArticleWorkLogMessages.ConsumerReplaceFailed(_logger, ex.Message);

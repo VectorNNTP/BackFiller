@@ -161,6 +161,7 @@ namespace VectorNNTP.BackFiller.Dns
                     return [.. servers];
                 }
             }
+            // codeql[cs/catch-of-all-exceptions] A nameserver query failure must be contained so discovery can try the remaining servers.
             catch (Exception ex)
             {
                 s_recursiveResolverDiscoveryException = ex;
@@ -350,6 +351,7 @@ namespace VectorNNTP.BackFiller.Dns
             {
                 throw;
             }
+            // codeql[cs/catch-of-all-exceptions] A nameserver query failure must be contained so discovery can try the remaining servers.
             catch (Exception ex)
             {
                 if (logger is not null && logger.IsEnabled(LogLevel.Debug))

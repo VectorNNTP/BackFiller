@@ -1,4 +1,5 @@
 using Serilog.Core;
+using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Sinks.File;
 
@@ -10,7 +11,10 @@ namespace VectorNNTP.BackFiller.Logging
     /// <remarks>
     /// Serilog disposes this object with the logger. <see cref="Dispose"/> stops the timer, waits until an
     /// in-flight callback has left the flush lock, flushes any remaining buffered write, then disposes the
-    /// inner sink. A second <see cref="Dispose"/> does nothing.
+    /// inner sink and the timer. A flush or inner-sink failure is reported through <see cref="SelfLog"/> so
+    /// the diagnostic cannot re-enter this file sink. A timer callback contains every flush failure. When the
+    /// final flush and a later dispose both fail, the flush exception is thrown and the dispose failure stays
+    /// on <see cref="SelfLog"/>. A second <see cref="Dispose"/> does nothing.
     /// </remarks>
     internal sealed class PeriodicFileFlushSink : ILogEventSink, IDisposable
     {
@@ -53,7 +57,14 @@ namespace VectorNNTP.BackFiller.Logging
             Interlocked.Exchange(ref _flushRequired, 1);
         }
 
-        /// <summary>Stops the timer, flushes the last buffered write, and disposes the inner sink.</summary>
+        /// <summary>
+        /// Stops the timer, flushes the last buffered write, and disposes the inner sink and timer.
+        /// </summary>
+        /// <exception cref="Exception">
+        /// The final flush exception when one occurred. An inner-sink or timer dispose exception is thrown
+        /// only when the final flush succeeded. A dispose failure that follows a flush failure is written to
+        /// <see cref="SelfLog"/> and is not thrown.
+        /// </exception>
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -61,31 +72,104 @@ namespace VectorNNTP.BackFiller.Logging
                 return;
             }
 
-            _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            lock (_gate)
+            try
             {
-                FlushRequired();
-                (_sink as IDisposable)?.Dispose();
+                _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                ReportDiagnostic("Periodic file flush timer was already stopped.", ex);
             }
 
-            _timer.Dispose();
+            Exception? flushError = null;
+            lock (_gate)
+            {
+                try
+                {
+                    FlushRequired();
+                }
+                // codeql[cs/catch-of-all-exceptions] A flush, dispose, or diagnostic failure must not escape this sink or skip the remaining cleanup.
+                catch (Exception ex)
+                {
+                    flushError = ex;
+                    ReportDiagnostic("Periodic file flush failed during disposal.", ex);
+                }
+            }
+
+            Exception? disposeError = null;
+            try
+            {
+                (_sink as IDisposable)?.Dispose();
+            }
+            // codeql[cs/catch-of-all-exceptions] A flush, dispose, or diagnostic failure must not escape this sink or skip the remaining cleanup.
+            catch (Exception ex)
+            {
+                disposeError = ex;
+                ReportDiagnostic("Periodic file sink disposal failed.", ex);
+            }
+
+            try
+            {
+                _timer.Dispose();
+            }
+            // codeql[cs/catch-of-all-exceptions] A flush, dispose, or diagnostic failure must not escape this sink or skip the remaining cleanup.
+            catch (Exception ex)
+            {
+                disposeError ??= ex;
+                ReportDiagnostic("Periodic file flush timer disposal failed.", ex);
+            }
+
+            if (flushError is not null)
+            {
+                throw flushError;
+            }
+
+            if (disposeError is not null)
+            {
+                throw disposeError;
+            }
         }
 
         private void OnTick(object? state)
         {
-            if (Volatile.Read(ref _disposed) != 0)
+            try
             {
-                return;
-            }
-
-            lock (_gate)
-            {
-                if (_disposed != 0)
+                if (Volatile.Read(ref _disposed) != 0)
                 {
                     return;
                 }
 
-                FlushRequired();
+                lock (_gate)
+                {
+                    if (Volatile.Read(ref _disposed) != 0)
+                    {
+                        return;
+                    }
+
+                    FlushRequired();
+                }
+            }
+            // codeql[cs/catch-of-all-exceptions] A flush, dispose, or diagnostic failure must not escape this sink or skip the remaining cleanup.
+            catch (Exception ex)
+            {
+                ReportDiagnostic("Periodic file flush timer callback failed.", ex);
+            }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="message"/> and <paramref name="exception"/> to <see cref="SelfLog"/>.
+        /// A failure inside that write is ignored so timer and dispose paths cannot fail because diagnostics failed.
+        /// </summary>
+        private static void ReportDiagnostic(string message, Exception exception)
+        {
+            try
+            {
+                SelfLog.WriteLine("{0} {1}", message, exception);
+            }
+            // codeql[cs/catch-of-all-exceptions] A flush, dispose, or diagnostic failure must not escape this sink or skip the remaining cleanup.
+            catch (Exception)
+            {
+                // The diagnostic channel is best-effort. It must not recurse into this sink or fault the timer thread.
             }
         }
 

@@ -139,8 +139,10 @@ namespace VectorNNTP.BackFiller.Listener
         /// The outbound writer is completed in <c>finally</c> without cancelling first, so a queued FAIL can still drain.
         /// Cancellation is reserved for <see cref="RequestSessionTermination"/>. A reader exception other than
         /// cancellation or <see cref="ChannelClosedException"/> also propagates after cleanup unless the writer
-        /// failure is rethrown from <c>finally</c> in its place. <see cref="VatpListenerLogMessages.ConnectionClosed"/>
-        /// is written once on this path.
+        /// failure is rethrown from <c>finally</c> in its place. Stream disposal, connection-closed logging, and
+        /// clearing <see cref="_runCts"/> still run after a writer failure. A cleanup exception does not replace
+        /// that writer failure; it is reported through <c>SelfLog</c> and is thrown only when the writer succeeded.
+        /// <see cref="VatpListenerLogMessages.ConnectionClosed"/> is written once on this path.
         /// </remarks>
         internal async Task RunAsync(CancellationToken cancellationToken)
         {
@@ -180,18 +182,45 @@ namespace VectorNNTP.BackFiller.Listener
                 {
                     ShutdownObservations.Canceled(_logger, "VATP outbound writer");
                 }
-                catch (Exception ex) when (ex is IOException or ObjectDisposedException or ChannelClosedException or InvalidOperationException or TimeoutException)
+                // codeql[cs/catch-of-all-exceptions] Writer cleanup must run, and a cleanup failure must not replace the original writer exception.
+                catch (Exception ex)
                 {
                     writerError = ex;
                 }
 
-                DisposeAllStreams();
-                VatpListenerLogMessages.ConnectionClosed(_logger);
+                Exception? cleanupError = null;
+                try
+                {
+                    DisposeAllStreams();
+                }
+                // codeql[cs/catch-of-all-exceptions] Writer cleanup must run, and a cleanup failure must not replace the original writer exception.
+                catch (Exception ex)
+                {
+                    cleanupError = ex;
+                    ReportWriterCleanupFailure(ex);
+                }
+
+                try
+                {
+                    VatpListenerLogMessages.ConnectionClosed(_logger);
+                }
+                // codeql[cs/catch-of-all-exceptions] Writer cleanup must run, and a cleanup failure must not replace the original writer exception.
+                catch (Exception ex)
+                {
+                    cleanupError ??= ex;
+                    ReportWriterCleanupFailure(ex);
+                }
+
                 _runCts = null;
 
                 if (writerError is not null)
                 {
                     System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(writerError);
+                }
+
+                if (cleanupError is not null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(cleanupError);
                 }
             }
         }
@@ -451,11 +480,9 @@ namespace VectorNNTP.BackFiller.Listener
             _clientHelloComplete = true;
             VatpListenerLogMessages.ClientHelloAccepted(_logger, _maxFramePayload);
 
-            if (!_serverHelloSent)
-            {
-                _serverHelloSent = true;
-                await QueueFrameAsync(VatpFrameEncoder.EncodeHello(_maxFramePayload), cancellationToken).ConfigureAwait(false);
-            }
+            if (_serverHelloSent) return true;
+            _serverHelloSent = true;
+            await QueueFrameAsync(VatpFrameEncoder.EncodeHello(_maxFramePayload), cancellationToken).ConfigureAwait(false);
 
             return true;
         }
@@ -853,6 +880,23 @@ namespace VectorNNTP.BackFiller.Listener
             stream.Phase = cancelled ? SendStreamPhase.Cancelled : SendStreamPhase.Failed;
             ReleaseFoundBytes(stream.ReservedBytes);
             stream.Lease.Dispose();
+        }
+
+        /// <summary>
+        /// Records a writer-cleanup failure without replacing a writer exception already stored by <see cref="RunAsync"/>.
+        /// </summary>
+        /// <param name="exception">Stream disposal or connection-closed logging failure.</param>
+        private static void ReportWriterCleanupFailure(Exception exception)
+        {
+            try
+            {
+                Serilog.Debugging.SelfLog.WriteLine("VATP writer cleanup failed: {0}", exception);
+            }
+            // codeql[cs/catch-of-all-exceptions] Writer cleanup must run, and a cleanup failure must not replace the original writer exception.
+            catch (Exception)
+            {
+                // Cleanup diagnostics must not replace the writer failure or skip the remaining cleanup steps.
+            }
         }
 
         /// <summary>Releases every stream still in the table. Does not log transfer completion, cancel, or failure.</summary>

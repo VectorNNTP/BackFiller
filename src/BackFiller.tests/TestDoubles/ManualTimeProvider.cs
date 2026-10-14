@@ -52,9 +52,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 DateTimeOffset dueAt = default;
                 lock (_gate)
                 {
-                    foreach (var timer in _timers)
+                    foreach (var timer in _timers.Where(timer => timer.NextDue is { } next && next <= target))
                     {
-                        if (timer.NextDue is { } next && next <= target && (due is null || next < dueAt))
+                        var next = timer.NextDue!.Value;
+                        if (due is null || next < dueAt)
                         {
                             due = timer;
                             dueAt = next;

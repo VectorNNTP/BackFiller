@@ -340,8 +340,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 {
                     await _accept.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
                 }
+                // codeql[cs/catch-of-all-exceptions] Stopping the listener can fault the accept task with any transport exception.
                 catch (Exception)
                 {
+                    /* Disposal still releases the listener and the cancellation source. */
                 }
 
                 _cts.Dispose();
@@ -350,14 +352,18 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             private async Task AcceptAsync(CancellationToken cancellationToken)
             {
                 using var tcp = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-                Stream stream = tcp.GetStream();
-                await WriteAsync(stream, "200 ready\r\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+                await WriteAsync(tcp.GetStream(), "200 ready\r\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+                await ReadCommandsAsync(tcp.GetStream(), allowStartTls: true, cancellationToken).ConfigureAwait(false);
+            }
+
+            private async Task ReadCommandsAsync(Stream stream, bool allowStartTls, CancellationToken cancellationToken)
+            {
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     var command = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
                     if (command is null)
                     {
-                        break;
+                        return;
                     }
 
                     lock (_commands)
@@ -375,15 +381,14 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                         continue;
                     }
 
-                    if (command.Equals("STARTTLS", StringComparison.OrdinalIgnoreCase))
+                    if (allowStartTls && command.Equals("STARTTLS", StringComparison.OrdinalIgnoreCase))
                     {
                         await WriteAsync(
                                 stream,
                                 "382 Continue with TLS negotiation\r\n"u8.ToArray(),
                                 cancellationToken)
                             .ConfigureAwait(false);
-                        var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
-                        stream = ssl;
+                        using var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
                         await ssl.AuthenticateAsServerAsync(
                                 new SslServerAuthenticationOptions
                                 {
@@ -394,7 +399,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                                 cancellationToken)
                             .ConfigureAwait(false);
                         TlsHandshakeCompleted = true;
-                        continue;
+                        await ReadCommandsAsync(ssl, allowStartTls: false, cancellationToken).ConfigureAwait(false);
+                        return;
                     }
 
                     if (command.StartsWith("AUTHINFO USER", StringComparison.OrdinalIgnoreCase))
@@ -413,15 +419,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
                     if (command.Equals("QUIT", StringComparison.OrdinalIgnoreCase))
                     {
-                        break;
+                        return;
                     }
 
                     await WriteAsync(stream, "500 unknown\r\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
-                }
-
-                if (stream is SslStream sslStream)
-                {
-                    await sslStream.DisposeAsync().ConfigureAwait(false);
                 }
             }
 

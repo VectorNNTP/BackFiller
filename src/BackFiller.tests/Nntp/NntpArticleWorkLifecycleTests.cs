@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 using VectorNNTP.BackFiller.Accounts;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
@@ -203,6 +205,46 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(4, transport.ConnectAttempts.Count);
         }
 
+        [Fact]
+        public async Task Unexpected_consumer_reconcile_failure_is_logged_and_the_registry_stays_usable()
+        {
+            await AssertReconcileFailureIsObserved(new NotSupportedException("reconcile boom"), "reconcile boom");
+        }
+
+        [Fact]
+        public async Task Cancelled_consumer_reconcile_is_logged_and_does_not_escape()
+        {
+            await AssertReconcileFailureIsObserved(
+                new OperationCanceledException("reconcile canceled"),
+                "reconcile canceled");
+        }
+
+        private static async Task AssertReconcileFailureIsObserved(Exception failure, string expectedText)
+        {
+            var logger = new CollectingLogger<NntpProviderRegistry>();
+            var catalog = new ProviderConfigurationCatalog();
+            var transport = new ScriptedNntpTransportFactory();
+            NntpSessionPoolTests.EnqueueReadyServers(transport, count: 2);
+            var capacity = new BackboneUsableCapacityState();
+            var consumers = new ScriptedConsumers { ReconcileException = failure };
+            await using var registry = CreateRegistry(catalog, transport, capacity, consumers, logger);
+
+            await registry.ApplySnapshotAsync([CreateProvider("Giganews", maxSessions: 1)], CancellationToken.None);
+            Assert.True(registry.TryGetPool("Giganews", out var pool));
+            consumers.IsRunning = true;
+            await using (var lease = await pool.AcquireAsync(CancellationToken.None))
+            {
+                lease.Retire();
+            }
+
+            await WaitUntilAsync(() =>
+                logger.Messages.Any(message =>
+                    message.Contains(expectedText, StringComparison.Ordinal)
+                    && message.Contains("consumers", StringComparison.Ordinal))
+                && pool.ActiveSessionCount == 1);
+            Assert.True(consumers.ReconcileCalls >= 1);
+        }
+
         private static async Task<ConsumerHarness> StartConsumerAsync(
             IBackFillerProviderCatalog catalog,
             IBackboneUsableCapacityProvider capacity)
@@ -239,7 +281,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             ProviderConfigurationCatalog catalog,
             ScriptedNntpTransportFactory transport,
             BackboneUsableCapacityState capacity,
-            IArticleWorkConsumerReconciliation? consumers = null)
+            IArticleWorkConsumerReconciliation? consumers = null,
+            ILogger<NntpProviderRegistry>? logger = null)
         {
             return new NntpProviderRegistry(
                 catalog,
@@ -251,9 +294,32 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                     ReceiveTimeout = TimeSpan.FromSeconds(2),
                 },
                 TimeSpan.FromSeconds(2),
-                NullLogger<NntpProviderRegistry>.Instance,
+                logger ?? NullLogger<NntpProviderRegistry>.Instance,
                 capacity,
                 consumers);
+        }
+
+        private sealed class ScriptedConsumers : IArticleWorkConsumerReconciliation
+        {
+            public bool IsRunning { get; set; }
+
+            public Exception? ReconcileException { get; init; }
+
+            public int ReconcileCalls { get; private set; }
+
+            public Task ReconcileAsync(CancellationToken cancellationToken)
+            {
+                ReconcileCalls++;
+                return ReconcileException is null
+                    ? Task.CompletedTask
+                    : Task.FromException(ReconcileException);
+            }
+
+            public Task RetireCapacityAsync(
+                string backbone,
+                int retainConnectionCount,
+                CancellationToken cancellationToken) =>
+                Task.CompletedTask;
         }
 
         private static BackFillerProviderDefinition CreateProvider(string backbone, int maxSessions) =>

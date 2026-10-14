@@ -468,9 +468,32 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 await Consumers!.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+            catch (OperationCanceledException ex)
             {
                 NntpLogMessages.SessionReplenishFailed(_logger, "consumers", ex.Message);
+            }
+            // codeql[cs/catch-of-all-exceptions] An observed reconcile task must log every failure, including a failure of that log.
+            catch (Exception ex)
+            {
+                try
+                {
+                    NntpLogMessages.SessionReplenishFailed(_logger, "consumers", ex.Message);
+                }
+                // codeql[cs/catch-of-all-exceptions] An observed reconcile task must log every failure, including a failure of that log.
+                catch (Exception logFailure)
+                {
+                    try
+                    {
+                        Serilog.Debugging.SelfLog.WriteLine(
+                            "NNTP consumer reconcile failure log failed: {0}",
+                            logFailure);
+                    }
+                    // codeql[cs/catch-of-all-exceptions] An observed reconcile task must log every failure, including a failure of that log.
+                    catch (Exception)
+                    {
+                        // The reconcile task is unobserved. Its failure must not become an unhandled task exception.
+                    }
+                }
             }
         }
 

@@ -139,34 +139,32 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         public async Task Syslog_ConfiguresUdpAndTcpTargets(string protocol)
         {
             var logDir = NewLogDir();
-            UdpClient? udp = null;
-            TcpListener? tcp = null;
             try
             {
-                int port;
-                if (protocol.Equals("Udp", StringComparison.OrdinalIgnoreCase))
+                using UdpClient? udp = protocol.Equals("Udp", StringComparison.OrdinalIgnoreCase)
+                    ? new UdpClient(new IPEndPoint(IPAddress.Loopback, 0))
+                    : null;
+                using TcpListener? tcp = udp is null ? new TcpListener(IPAddress.Loopback, 0) : null;
+                if (tcp is not null)
                 {
-                    udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-                    port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
-                }
-                else
-                {
-                    tcp = new TcpListener(IPAddress.Loopback, 0);
                     tcp.Start();
-                    port = ((IPEndPoint)tcp.LocalEndpoint).Port;
                 }
 
+                var port = udp is not null
+                    ? ((IPEndPoint)udp.Client.LocalEndPoint!).Port
+                    : ((IPEndPoint)tcp!.LocalEndpoint).Port;
                 var configuration = Configuration(logDir);
                 var section = $"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}:Syslog";
                 configuration[$"{section}:Enabled"] = "true";
                 configuration[$"{section}:Host"] = "127.0.0.1";
                 configuration[$"{section}:Port"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 configuration[$"{section}:Protocol"] = protocol;
-                var logger = Build(configuration);
-                logger.Information("syslog-target-marker");
-                (logger as IDisposable)?.Dispose();
+                using (var logger = Build(configuration))
+                {
+                    logger.Information("syslog-target-marker");
+                    Assert.Contains(Sinks(logger), static sink => sink.GetType().Name.Contains("Syslog", StringComparison.Ordinal));
+                }
 
-                Assert.Contains(Sinks(logger), static sink => sink.GetType().Name.Contains("Syslog", StringComparison.Ordinal));
                 if (udp is not null)
                 {
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -185,8 +183,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                udp?.Dispose();
-                tcp?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -198,10 +194,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             var logDir = NewLogDir();
             using var captured = new StringWriter();
             var previous = Console.Out;
-            UdpClient? udp = null;
             try
             {
-                udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+                using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
                 var port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
                 Console.SetOut(captured);
                 var configuration = Configuration(logDir);
@@ -216,20 +211,21 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 configuration[$"{logging}:RabbitMQ:Enabled"] = "true";
                 configuration[$"{logging}:RabbitMQ:Json"] = "true";
                 using var services = RabbitServices();
-                var logger = Build(
+                using (var logger = Build(
                     configuration,
                     new BackFillerLoggingCommandLine(Console: true, EnrichFromLogContext: false),
-                    services);
-                logger.Information("json-formatter-marker");
-                (logger as IDisposable)?.Dispose();
-                var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
-                Assert.Equal(RabbitMqLogEventSink.JsonContentType, rabbitSink.ContentType);
-                using var rabbitJson = new StringWriter();
-                rabbitSink.Formatter.Format(
-                    SourceContextEvent("VectorNNTP.BackFiller.SourceContextProbe", "json-formatter-marker"),
-                    rabbitJson);
-                Assert.Contains("\"MessageTemplate\"", rabbitJson.ToString(), StringComparison.Ordinal);
-                Assert.DoesNotContain("SourceContext", rabbitJson.ToString(), StringComparison.Ordinal);
+                    services))
+                {
+                    logger.Information("json-formatter-marker");
+                    var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
+                    Assert.Equal(RabbitMqLogEventSink.JsonContentType, rabbitSink.ContentType);
+                    using var rabbitJson = new StringWriter();
+                    rabbitSink.Formatter.Format(
+                        SourceContextEvent("VectorNNTP.BackFiller.SourceContextProbe", "json-formatter-marker"),
+                        rabbitJson);
+                    Assert.Contains("\"MessageTemplate\"", rabbitJson.ToString(), StringComparison.Ordinal);
+                    Assert.DoesNotContain("SourceContext", rabbitJson.ToString(), StringComparison.Ordinal);
+                }
 
                 var fileText = File.ReadAllText(Directory.GetFiles(logDir, "*.log").Single());
                 Assert.Contains("\"MessageTemplate\"", fileText, StringComparison.Ordinal);
@@ -243,7 +239,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             finally
             {
                 Console.SetOut(previous);
-                udp?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -261,12 +256,14 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 configuration[$"{logging}:RabbitMQ:Enabled"] = "true";
                 configuration[$"{logging}:RabbitMQ:Formatter"] = "Json";
                 using var services = RabbitServices();
-                var logger = Build(configuration, services: services);
-                var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
-                Assert.IsType<MessageTemplateTextFormatter>(rabbitSink.Formatter);
-                Assert.Equal(RabbitMqLogEventSink.TextContentType, rabbitSink.ContentType);
-                logger.Information("plain-template-marker");
-                (logger as IDisposable)?.Dispose();
+                using (var logger = Build(configuration, services: services))
+                {
+                    var rabbitSink = Assert.Single(Sinks(logger).OfType<RabbitMqLogEventSink>());
+                    Assert.IsType<MessageTemplateTextFormatter>(rabbitSink.Formatter);
+                    Assert.Equal(RabbitMqLogEventSink.TextContentType, rabbitSink.ContentType);
+                    logger.Information("plain-template-marker");
+                }
+
                 var fileText = File.ReadAllText(Directory.GetFiles(logDir, "*.log").Single());
                 Assert.Contains("plain-template-marker", fileText, StringComparison.Ordinal);
                 Assert.DoesNotContain("\"MessageTemplate\"", fileText, StringComparison.Ordinal);
@@ -529,9 +526,14 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 Console.SetOut(captured);
                 var logger = BackFillerLoggingExtensions.CreateBootstrapLogger(
                     new BackFillerLoggingCommandLine(Console: true, commandLine.EnrichFromLogContext));
-                logger.ForContext(Constants.SourceContextPropertyName, category).Information(marker);
-                (logger as IDisposable)?.Dispose();
-                return captured.ToString();
+                string text;
+                using ((IDisposable)logger)
+                {
+                    logger.ForContext(Constants.SourceContextPropertyName, category).Information(marker);
+                    text = captured.ToString();
+                }
+
+                return text;
             }
             finally
             {
@@ -546,10 +548,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             bool json = false)
         {
             var logDir = NewLogDir();
-            UdpClient? udp = null;
             try
             {
-                udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+                using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
                 var port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
                 var configuration = Configuration(logDir);
                 var logging = $"{BackFillerOptions.SectionName}:{BackFillerLoggingOptions.SectionName}";
@@ -583,7 +584,6 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             finally
             {
-                udp?.Dispose();
                 Log.CloseAndFlush();
                 TryDelete(logDir);
             }
@@ -713,6 +713,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
             catch (IOException)
             {
+                /* A directory that is still in use must not fail the test. */
             }
         }
 

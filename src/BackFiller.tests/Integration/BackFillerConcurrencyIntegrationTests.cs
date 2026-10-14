@@ -242,22 +242,22 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 harness.Retention,
                 ArticleWorkTestDeliveries.CanonicalMessageId,
                 "lease-body\r\n");
-            var open = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.NotNull(open.Lease);
-
-            harness.Time.Advance(TimeSpan.FromSeconds(1));
-            _ = harness.Retention.SweepExpired();
-            Assert.Equal(prepared.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
-            Assert.True(open.Lease.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
-
-            // RequestId was consumed; a new OPEN for the same RequestId must fail while the entry is logically removed.
-            using (var second = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            using (var open = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
             {
-                Assert.Equal(VatpOpenKind.Rejected, second.Kind);
-            }
+                Assert.Equal(VatpOpenKind.Opened, open.Kind);
+                Assert.NotNull(open.Lease);
 
-            open.Dispose();
+                harness.Time.Advance(TimeSpan.FromSeconds(1));
+                _ = harness.Retention.SweepExpired();
+                Assert.Equal(prepared.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
+                Assert.True(open.Lease.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
+
+                // RequestId was consumed; a new OPEN for the same RequestId must fail while the entry is logically removed.
+                using (var second = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+                {
+                    Assert.Equal(VatpOpenKind.Rejected, second.Kind);
+                }
+            }
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(0, harness.Retention.RetainedCount);
         }

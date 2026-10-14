@@ -168,7 +168,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var tasks = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
             {
                 barrier.SignalAndWait();
-                var result = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId, _ => true);
+                using var result = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId, _ => true);
                 if (result.Kind == VatpOpenKind.Opened)
                 {
                     Interlocked.Increment(ref opened);
@@ -177,8 +177,6 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 {
                     Interlocked.Increment(ref rejected);
                 }
-
-                result.Dispose();
             })).ToArray();
 
             await Task.WhenAll(tasks).WaitAsync(TestTimeout);
@@ -302,6 +300,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             }
             catch (IOException)
             {
+                /* The transfer may already have closed the connection. */
             }
         }
 

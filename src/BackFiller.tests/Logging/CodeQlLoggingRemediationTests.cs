@@ -6,6 +6,7 @@ using Serilog.Formatting.Display;
 using Serilog.Sinks.File;
 using Serilog.Parsing;
 using VectorNNTP.BackFiller.Logging;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {
@@ -174,6 +175,116 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.DisposeCount);
         }
 
+        [Fact]
+        public void Timer_callback_contains_a_flush_failure()
+        {
+            var inner = new FaultingFlushSink { FlushException = new IOException("timer flush") };
+            using var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+            Emit(sink);
+
+            var diagnostic = TestSelfLog.Capture(() => InvokeOnTick(sink));
+
+            Assert.Contains("timer callback failed", diagnostic, StringComparison.Ordinal);
+            Assert.Contains("timer flush", diagnostic, StringComparison.Ordinal);
+            sink.Dispose();
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+        }
+
+        [Fact]
+        public void Final_flush_failure_still_disposes_the_sink_and_timer()
+        {
+            var inner = new FaultingFlushSink { FlushException = new IOException("final flush") };
+            using var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+            Emit(sink);
+
+            var diagnostic = TestSelfLog.Capture(() =>
+            {
+                var ex = Assert.Throws<IOException>(sink.Dispose);
+                Assert.Equal("final flush", ex.Message);
+            });
+
+            Assert.Contains("failed during disposal", diagnostic, StringComparison.Ordinal);
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+            Assert.Equal(1, inner.DisposeCount);
+        }
+
+        [Fact]
+        public void Inner_sink_disposal_failure_still_disposes_the_timer()
+        {
+            var inner = new FaultingFlushSink { DisposeException = new InvalidOperationException("sink dispose") };
+            var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+
+            var ex = Assert.Throws<InvalidOperationException>(sink.Dispose);
+
+            Assert.Equal("sink dispose", ex.Message);
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+        }
+
+        [Fact]
+        public void Flush_failure_stays_primary_when_disposal_also_fails()
+        {
+            var inner = new FaultingFlushSink
+            {
+                FlushException = new IOException("primary flush"),
+                DisposeException = new NotSupportedException("secondary dispose"),
+            };
+            var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+            Emit(sink);
+
+            var diagnostic = TestSelfLog.Capture(() =>
+            {
+                var ex = Assert.Throws<IOException>(sink.Dispose);
+                Assert.Equal("primary flush", ex.Message);
+            });
+
+            Assert.Contains("sink disposal failed", diagnostic, StringComparison.Ordinal);
+            Assert.Contains("secondary dispose", diagnostic, StringComparison.Ordinal);
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+        }
+
+        [Fact]
+        public async Task Concurrent_dispose_disposes_the_inner_sink_once()
+        {
+            var inner = new FaultingFlushSink();
+            var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+            var first = Task.Run(sink.Dispose);
+            var second = Task.Run(sink.Dispose);
+            await Task.WhenAll(first, second);
+
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+        }
+
+        private static void Emit(PeriodicFileFlushSink sink) =>
+            sink.Emit(new LogEvent(
+                DateTimeOffset.UtcNow,
+                LogEventLevel.Information,
+                exception: null,
+                new MessageTemplateParser().Parse("marker"),
+                []));
+
+        private static void InvokeOnTick(PeriodicFileFlushSink sink)
+        {
+            var onTick = typeof(PeriodicFileFlushSink).GetMethod(
+                "OnTick",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(onTick);
+            onTick.Invoke(sink, [null]);
+        }
+
+        private static void AssertTimerDisposed(PeriodicFileFlushSink sink)
+        {
+            var timerField = typeof(PeriodicFileFlushSink).GetField(
+                "_timer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var timer = Assert.IsType<Timer>(timerField?.GetValue(sink));
+            Assert.False(timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan));
+        }
+
         private static GzipRollingFileSink Create(RollingInterval interval, string? path = null)
         {
             path ??= Path.Join(Path.GetTempPath(), "bf-checkpoint-.log");
@@ -219,6 +330,38 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             public void Dispose()
             {
                 Interlocked.Increment(ref _disposeCount);
+            }
+        }
+
+        private sealed class FaultingFlushSink : ILogEventSink, IFlushableFileSink, IDisposable
+        {
+            private int _disposeCount;
+
+            public Exception? FlushException { get; init; }
+
+            public Exception? DisposeException { get; init; }
+
+            public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+            public void Emit(LogEvent logEvent)
+            {
+            }
+
+            public void FlushToDisk()
+            {
+                if (FlushException is not null)
+                {
+                    throw FlushException;
+                }
+            }
+
+            public void Dispose()
+            {
+                Interlocked.Increment(ref _disposeCount);
+                if (DisposeException is not null)
+                {
+                    throw DisposeException;
+                }
             }
         }
     }

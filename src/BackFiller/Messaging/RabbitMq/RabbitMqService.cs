@@ -612,18 +612,42 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <summary>
-        /// Disposes <paramref name="connection"/>. A dispose failure is logged and not rethrown.
+        /// Disposes <paramref name="connection"/>. Every dispose failure is logged and not rethrown.
         /// </summary>
         /// <param name="connection">Connection to dispose. May already be closed.</param>
+        /// <remarks>
+        /// Callers use this only while retiring a connection during install, replacement, or shutdown.
+        /// A failure here must not stop the surrounding reconnect or shutdown. Failures outside this method,
+        /// including a broker exception from <see cref="RecoverAsync"/>, still propagate.
+        /// </remarks>
         private async Task DisposeConnectionQuietlyAsync(IRabbitMqConnection connection)
         {
             try
             {
                 await connection.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is AlreadyClosedException or OperationInterruptedException or IOException or ObjectDisposedException or TimeoutException)
+            // codeql[cs/catch-of-all-exceptions] Quiet connection disposal must log every failure and still let reconnect or shutdown continue.
+            catch (Exception ex)
             {
-                RabbitMqLogMessages.ConnectionDisposeFailed(_logger, ex);
+                try
+                {
+                    RabbitMqLogMessages.ConnectionDisposeFailed(_logger, ex);
+                }
+                // codeql[cs/catch-of-all-exceptions] Quiet connection disposal must log every failure and still let reconnect or shutdown continue.
+                catch (Exception logFailure)
+                {
+                    try
+                    {
+                        Serilog.Debugging.SelfLog.WriteLine(
+                            "RabbitMQ connection dispose failure log failed: {0}",
+                            logFailure);
+                    }
+                    // codeql[cs/catch-of-all-exceptions] Quiet connection disposal must log every failure and still let reconnect or shutdown continue.
+                    catch (Exception)
+                    {
+                        // Quiet disposal must return so reconnect or shutdown can continue.
+                    }
+                }
             }
         }
 

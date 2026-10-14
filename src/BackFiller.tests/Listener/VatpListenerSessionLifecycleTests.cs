@@ -10,7 +10,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Transport.ArticleTransfer;
+using Microsoft.Extensions.Logging;
+using System.Reflection;
 using VectorNNTP.BackFiller.Networking.Certificates;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
@@ -131,6 +134,37 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
+        public async Task Unexpected_writer_exception_still_releases_streams_and_preserves_the_writer_failure()
+        {
+            var logger = new ConnectionClosedThrowingLogger();
+            await using var harness = await SessionHarness.CreateAsync(logger);
+            var prepared = RetentionTestArticles.RetainPrepared(
+                harness.Authority,
+                "<writer-unexpected@example.test>",
+                body: BuildBody(4096));
+
+            harness.Transport.AllowSuccessfulWritesThenBlock(2);
+            var runTask = harness.Session.RunAsync(CancellationToken.None);
+            harness.Transport.EnqueueInbound(EncodeHello());
+            await WaitAsync(() => harness.Transport.WriteCalls >= 2);
+            harness.Transport.EnqueueInbound(EncodeOpen(1, prepared.RequestId, prepared.Record.ArtId));
+            await WaitAsync(() => harness.Session.ReservedFoundPayloadBytes > 0);
+            harness.Transport.FailWrites(new NotSupportedException("writer boom"));
+
+            var writerError = await TestSelfLog.CaptureAsync(async () =>
+            {
+                var error = await Assert.ThrowsAsync<NotSupportedException>(() => runTask);
+                Assert.Equal("writer boom", error.Message);
+            });
+            Assert.Equal(1, logger.ConnectionClosedAttempts);
+            Assert.Equal(0, harness.Session.ActiveStreamCount);
+            Assert.Equal(0, harness.Session.ReservedFoundPayloadBytes);
+            Assert.Contains("connection-closed log failed", writerError, StringComparison.Ordinal);
+            var runCts = typeof(VatpListenerSession).GetField("_runCts", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.Null(runCts?.GetValue(harness.Session));
+        }
+
+        [Fact]
         public async Task WriterFailure_ReleasesConnectionAdmission()
         {
             var runtime = CreateRuntime(GetFreePort(), maxConnections: 1, ioProgressTimeout: TimeSpan.FromMilliseconds(200));
@@ -170,6 +204,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
             catch (IOException)
             {
+                /* The flooded connection may already be closed. */
             }
 
             Assert.Equal(0, context.Service.ActiveConnections);
@@ -341,6 +376,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
             catch (IOException)
             {
+                /* The flooded connection may already be closed. */
             }
         }
 
@@ -500,7 +536,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             public ArticleRetentionAuthority Authority { get; }
 
-            public static Task<SessionHarness> CreateAsync()
+            public static Task<SessionHarness> CreateAsync(ILogger? logger = null)
             {
                 var authority = ArticleRetentionAuthorityTests.Create(TimeProvider.System, 16 * 1024 * 1024);
                 var listener = new BackFillerListenerRuntimeOptions(
@@ -513,7 +549,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                     transport,
                     authority,
                     listener,
-                    NullLogger.Instance);
+                    logger ?? NullLogger.Instance);
                 return Task.FromResult(new SessionHarness(transport, session, authority, listener));
             }
 
@@ -521,6 +557,39 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             {
                 await Session.DisposeAsync();
                 await Authority.DisposeAsync();
+            }
+        }
+
+        private sealed class ConnectionClosedThrowingLogger : ILogger
+        {
+            public int ConnectionClosedAttempts { get; private set; }
+
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => NullScope.Instance;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (eventId.Id == 5456)
+                {
+                    ConnectionClosedAttempts++;
+                    throw new InvalidOperationException("connection-closed log failed");
+                }
+            }
+
+            private sealed class NullScope : IDisposable
+            {
+                public static NullScope Instance { get; } = new();
+
+                public void Dispose()
+                {
+                }
             }
         }
     }

@@ -310,6 +310,7 @@ namespace VectorNNTP.BackFiller.Core
                 // Complete graceful stop before marking disposed.
                 await StopAsync(CancellationToken.None).ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] Shutdown and disposal must observe every service failure and still release the lifecycle.
             catch (Exception ex)
             {
                 shutdownFailure = ex;
@@ -318,15 +319,7 @@ namespace VectorNNTP.BackFiller.Core
             finally
             {
                 Interlocked.Exchange(ref _disposed, 1);
-
-                try
-                {
-                    _gate.Dispose();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Gate may already be disposed by a concurrent path; ignore.
-                }
+                DisposeGate();
 
                 if (shutdownFailure is null)
                 {
@@ -342,6 +335,19 @@ namespace VectorNNTP.BackFiller.Core
             if (shutdownFailure is not null)
             {
                 throw shutdownFailure;
+            }
+        }
+
+        /// <summary>Releases the start/stop gate. A second dispose of that gate is ignored.</summary>
+        private void DisposeGate()
+        {
+            try
+            {
+                _gate.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Gate may already be disposed by a concurrent path; ignore.
             }
         }
 
@@ -363,6 +369,7 @@ namespace VectorNNTP.BackFiller.Core
                 {
                     await stop.ConfigureAwait(false);
                 }
+                // codeql[cs/catch-of-all-exceptions] A later dispose must not rethrow a failure already observed by the first caller.
                 catch
                 {
                     // The original stop/dispose caller observes the failure; subsequent dispose awaits are idempotent.
@@ -373,6 +380,7 @@ namespace VectorNNTP.BackFiller.Core
             {
                 await _disposeCompleted.Task.ConfigureAwait(false);
             }
+            // codeql[cs/catch-of-all-exceptions] A later dispose must not rethrow a failure already observed by the first caller.
             catch
             {
                 // Idempotent subsequent dispose: do not rethrow the original failure.
@@ -481,6 +489,7 @@ namespace VectorNNTP.BackFiller.Core
                     await _serviceManager.StopAsync(CancellationToken.None).ConfigureAwait(false);
                 }
             }
+            // codeql[cs/catch-of-all-exceptions] Shutdown and disposal must observe every service failure and still release the lifecycle.
             catch (Exception ex)
             {
                 LifecycleLogMessages.StartupFailureCleanupError(_logger, ex);
@@ -542,6 +551,7 @@ namespace VectorNNTP.BackFiller.Core
             {
                 StateChanged?.Invoke(this, new ApplicationStateChangedEventArgs(from, to));
             }
+            // codeql[cs/catch-of-all-exceptions] Shutdown and disposal must observe every service failure and still release the lifecycle.
             catch (Exception ex)
             {
                 LifecycleLogMessages.StateChangedHandlerFailed(_logger, ex, from, to);
