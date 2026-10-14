@@ -525,10 +525,17 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        public Exception? DisposeException { get; set; }
+
         public ValueTask DisposeAsync()
         {
             DisposeCount++;
             IsOpen = false;
+            if (DisposeException is { } disposeException)
+            {
+                throw disposeException;
+            }
+
             return ValueTask.CompletedTask;
         }
     }

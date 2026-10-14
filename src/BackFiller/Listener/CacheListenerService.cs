@@ -530,7 +530,8 @@ namespace VectorNNTP.BackFiller.Listener
             {
                 CacheListenerLogMessages.ConnectionIoClosed(_logger, remote, ex.GetType().Name);
             }
-            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or ChannelClosedException)
+            // codeql[cs/catch-of-all-exceptions] One connection failure must be logged and must not leave the accept loop with an unobserved task fault.
+            catch (Exception ex)
             {
                 CacheListenerLogMessages.ConnectionFailed(_logger, remote, ex.GetType().Name);
             }

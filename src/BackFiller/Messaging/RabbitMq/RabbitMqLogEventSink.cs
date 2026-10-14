@@ -1,4 +1,3 @@
-using RabbitMQ.Client.Exceptions;
 using Serilog.Core;
 using Serilog.Debugging;
 using Serilog.Events;
@@ -138,7 +137,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
                     Publish(logEvent);
                 }
             }
-            catch (Exception ex) when (ex is IOException or TimeoutException or ObjectDisposedException or InvalidOperationException or AlreadyClosedException or OperationInterruptedException)
+            // codeql[cs/catch-of-all-exceptions] A format or publish failure must stay inside this logging sink.
+            catch (Exception ex)
             {
                 SelfLog.WriteLine("RabbitMqLogEventSink publication failed: {0}", ex.Message);
             }
@@ -246,7 +246,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             {
                 channel.DisposeAsync().AsTask().ConfigureAwait(false).GetAwaiter().GetResult();
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or TimeoutException or AlreadyClosedException or OperationInterruptedException)
+            // codeql[cs/catch-of-all-exceptions] A publish-channel dispose failure must stay inside this logging sink.
+            catch (Exception ex)
             {
                 SelfLog.WriteLine("RabbitMqLogEventSink failed to dispose a publish channel: {0}", ex.Message);
             }

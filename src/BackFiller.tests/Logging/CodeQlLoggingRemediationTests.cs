@@ -186,7 +186,34 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
             Assert.Contains("timer callback failed", diagnostic, StringComparison.Ordinal);
             Assert.Contains("timer flush", diagnostic, StringComparison.Ordinal);
+            var disposeDiagnostic = TestSelfLog.Capture(() =>
+            {
+                var error = Assert.Throws<IOException>(sink.Dispose);
+                Assert.Equal("timer flush", error.Message);
+            });
+            Assert.Contains("failed during disposal", disposeDiagnostic, StringComparison.Ordinal);
+            Assert.Equal(2, inner.FlushCount);
+            Assert.Equal(1, inner.DisposeCount);
+            AssertTimerDisposed(sink);
+        }
+
+        [Fact]
+        public void Timer_flush_failure_is_retried_by_the_next_callback()
+        {
+            var inner = new FaultingFlushSink
+            {
+                FlushException = new IOException("transient flush"),
+                FailuresRemaining = 1,
+            };
+            using var sink = new PeriodicFileFlushSink(inner, TimeSpan.FromHours(1));
+            Emit(sink);
+
+            var diagnostic = TestSelfLog.Capture(() => InvokeOnTick(sink));
+            InvokeOnTick(sink);
             sink.Dispose();
+
+            Assert.Contains("timer callback failed", diagnostic, StringComparison.Ordinal);
+            Assert.Equal(2, inner.FlushCount);
             Assert.Equal(1, inner.DisposeCount);
             AssertTimerDisposed(sink);
         }
@@ -336,10 +363,20 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         private sealed class FaultingFlushSink : ILogEventSink, IFlushableFileSink, IDisposable
         {
             private int _disposeCount;
+            private int _flushCount;
+            private int _failuresRemaining = int.MaxValue;
 
             public Exception? FlushException { get; init; }
 
             public Exception? DisposeException { get; init; }
+
+            public int FailuresRemaining
+            {
+                get => _failuresRemaining;
+                init => _failuresRemaining = value;
+            }
+
+            public int FlushCount => Volatile.Read(ref _flushCount);
 
             public int DisposeCount => Volatile.Read(ref _disposeCount);
 
@@ -349,7 +386,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
 
             public void FlushToDisk()
             {
-                if (FlushException is not null)
+                Interlocked.Increment(ref _flushCount);
+                if (FlushException is not null && Interlocked.Decrement(ref _failuresRemaining) >= 0)
                 {
                     throw FlushException;
                 }

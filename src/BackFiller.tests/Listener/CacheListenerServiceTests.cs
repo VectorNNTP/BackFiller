@@ -6,8 +6,11 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit.Abstractions;
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Listener;
+using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
 using VectorNNTP.BackFiller.Transport.ArticleTransfer;
@@ -66,6 +69,40 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 logger.Entries,
                 entry => entry.EventId.Id == 5414
                     && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task Unexpected_connection_failure_is_logged_and_the_listener_stays_up()
+        {
+            var logger = new CollectingLogger<CacheListenerService>();
+            var runtime = CreateRuntime(GetFreePort());
+            var certificates = TestListenerCertificates.CreatePublishedProvider();
+            var service = new CacheListenerService(runtime, certificates, new ThrowingRetention(), logger);
+            await service.StartAsync(CancellationToken.None);
+            try
+            {
+                await using var client = await ConnectAsync(runtime.BindPortTls);
+                await ExchangeHelloAsync(client.Stream);
+                var articleId = ArticleId.FromSpan(new byte[ArticleId.Length]);
+                Span<byte> idBytes = stackalloc byte[VatpProtocol.ArticleIdLength];
+                articleId.CopyTo(idBytes);
+                await client.Stream.WriteAsync(
+                    VatpFrameEncoder.ToSingleBuffer(VatpFrameEncoder.EncodeOpen(1, Guid.NewGuid(), idBytes)));
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => service.State == CacheListenerState.Running && service.ActiveConnections == 0,
+                    TimeSpan.FromSeconds(2));
+
+                Assert.Equal(CacheListenerState.Running, service.State);
+                Assert.Contains(
+                    logger.Entries,
+                    entry => entry.EventId.Id == 5411
+                        && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+            }
+            finally
+            {
+                await service.DisposeAsync();
+                await certificates.DisposeAsync();
+            }
         }
 
         [Fact]
@@ -344,12 +381,17 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return new VatpParsedFrame(header, new System.Buffers.ReadOnlySequence<byte>(payload));
         }
 
-        private static async Task<TlsClient> ConnectAsync(
+        private static Task<TlsClient> ConnectAsync(
             ListenerContext context,
+            SslProtocols protocols = SslProtocols.Tls12 | SslProtocols.Tls13) =>
+            ConnectAsync(context.Port, protocols);
+
+        private static async Task<TlsClient> ConnectAsync(
+            int port,
             SslProtocols protocols = SslProtocols.Tls12 | SslProtocols.Tls13)
         {
             var tcp = new TcpClient();
-            await tcp.ConnectAsync(IPAddress.Loopback, context.Port);
+            await tcp.ConnectAsync(IPAddress.Loopback, port);
             var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false, static (_, _, _, _) => true);
             await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
@@ -443,6 +485,38 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             {
                 await Stream.DisposeAsync();
                 tcp.Dispose();
+            }
+        }
+
+        private sealed class ThrowingRetention : IArticleRetentionAuthority
+        {
+            public TimeSpan SweepInterval => TimeSpan.Zero;
+
+            public long RetainedPayloadBytes => 0;
+
+            public int RetainedCount => 0;
+
+            public ArticleRetentionResult RetainCanonical(
+                string messageId,
+                Guid requestId,
+                ArticleRecord record,
+                NntpArticleHeaderName selectedDateHeaderName,
+                string? endpointFqdn = null) =>
+                throw new NotSupportedException("retention boom");
+
+            public VatpOpenResult TryOpenTransfer(
+                Guid requestId,
+                ArticleId expectedArticleId,
+                Func<int, bool>? tryReserveOutboundBytes = null) =>
+                throw new NotSupportedException("retention boom");
+
+            public bool TryCancelPendingRequest(Guid requestId) =>
+                throw new NotSupportedException("retention boom");
+
+            public long SweepExpired() => throw new NotSupportedException("retention boom");
+
+            public void BeginShutdown()
+            {
             }
         }
 

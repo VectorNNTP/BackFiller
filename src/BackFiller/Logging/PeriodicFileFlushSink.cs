@@ -12,7 +12,8 @@ namespace VectorNNTP.BackFiller.Logging
     /// Serilog disposes this object with the logger. <see cref="Dispose"/> stops the timer, waits until an
     /// in-flight callback has left the flush lock, flushes any remaining buffered write, then disposes the
     /// inner sink and the timer. A flush or inner-sink failure is reported through <see cref="SelfLog"/> so
-    /// the diagnostic cannot re-enter this file sink. A timer callback contains every flush failure. When the
+    /// the diagnostic cannot re-enter this file sink. A timer callback contains every flush failure and leaves the
+    /// checkpoint pending so a later tick or <see cref="Dispose"/> retries it. When the
     /// final flush and a later dispose both fail, the flush exception is thrown and the dispose failure stays
     /// on <see cref="SelfLog"/>. A second <see cref="Dispose"/> does nothing.
     /// </remarks>
@@ -173,6 +174,13 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>
+        /// Flushes when <see cref="_flushRequired"/> is set. A flush failure restores the flag before the exception propagates.
+        /// </summary>
+        /// <remarks>
+        /// The timer callback contains that exception and leaves the flag set, so a later tick retries the checkpoint.
+        /// <see cref="Dispose"/> calls this method once more, so a failed timer flush is attempted again before the inner sink is disposed.
+        /// </remarks>
         private void FlushRequired()
         {
             if (Interlocked.Exchange(ref _flushRequired, 0) != 1)
@@ -180,7 +188,16 @@ namespace VectorNNTP.BackFiller.Logging
                 return;
             }
 
-            _flushable.FlushToDisk();
+            try
+            {
+                _flushable.FlushToDisk();
+            }
+            catch
+            {
+                // A failed checkpoint must stay pending for the next tick and for disposal.
+                Interlocked.Exchange(ref _flushRequired, 1);
+                throw;
+            }
         }
     }
 }
