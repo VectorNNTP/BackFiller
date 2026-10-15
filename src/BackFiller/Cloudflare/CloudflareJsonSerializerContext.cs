@@ -9,8 +9,12 @@ namespace VectorNNTP.BackFiller.Cloudflare
     /// Mirrors the historical <see cref="CloudflareDnsClient"/> options:
     /// case-insensitive property names on read, and omit nulls when writing request bodies.
     /// Closed generic response types cover every <c>T</c> used by the client.
+    /// <see cref="JsonSourceGenerationMode.Metadata"/> keeps that contract source-generated.
+    /// The fast-path emitter is not used: it casts every property read to the declaring type,
+    /// which is redundant when the member is declared on the serialized type.
     /// </remarks>
     [JsonSourceGenerationOptions(
+        GenerationMode = JsonSourceGenerationMode.Metadata,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(CloudflareApiResponse<List<CloudflareDnsRecord>>))]
