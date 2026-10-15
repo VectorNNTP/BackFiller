@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// </summary>
     /// <remarks>
     /// Property names are <c>version</c>, <c>serverId</c>, <c>fqdn</c>, <c>state</c>
-    /// (<c>Draining</c>), <c>timestamp</c> (UTC ISO-8601 round-trip), and <c>listenerPort</c>.
+    /// (<c>Draining</c>), <c>timestamp</c> (<c>yyyy-MM-ddTHH:mm:ss.fffffffZ</c>), and <c>listenerPort</c>.
     /// Version 1 accepts only <c>Draining</c>. Any other <c>state</c> string, including
     /// <c>Ready</c>, is invalid and is not treated as an advertisement. An object without
     /// <c>state</c> is not a lifecycle announcement. Unknown properties are ignored.
@@ -249,12 +249,29 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             return true;
         }
 
-        /// <summary>Reads <paramref name="name"/> as a round-trip ISO-8601 timestamp and converts it to UTC.</summary>
+        /// <summary>
+        /// <see cref="SerializeV1"/> formats <see cref="DateTimeOffset.UtcDateTime"/> with <c>O</c>.
+        /// That text is seven fractional digits and a literal <c>Z</c>, never a numeric offset.
+        /// </summary>
+        private const string UtcRoundTripTimestampFormat = "yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffff'Z'";
+
+        /// <summary>
+        /// Parses <see cref="UtcRoundTripTimestampFormat"/> as UTC.
+        /// The quoted <c>Z</c> is a literal, so <see cref="DateTimeStyles.RoundtripKind"/> would leave the value unspecified
+        /// and <see cref="DateTimeOffset.ToUniversalTime"/> would then apply the local offset.
+        /// </summary>
+        private const DateTimeStyles UtcRoundTripTimestampStyles =
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal;
+
+        /// <summary>Reads <paramref name="name"/> as the UTC timestamp text emitted by <see cref="SerializeV1"/>.</summary>
         /// <param name="root">Lifecycle announcement object.</param>
         /// <param name="name">Required property name, normally <c>timestamp</c>.</param>
         /// <param name="value">UTC timestamp on success; otherwise the default.</param>
         /// <param name="reason">Empty on success; otherwise a missing, non-string, or unparseable timestamp error.</param>
-        /// <returns><see langword="true"/> when invariant round-trip parsing succeeds.</returns>
+        /// <returns>
+        /// <see langword="true"/> when the text matches <see cref="UtcRoundTripTimestampFormat"/> under
+        /// <see cref="CultureInfo.InvariantCulture"/> and <see cref="UtcRoundTripTimestampStyles"/>.
+        /// </returns>
         private static bool TryReadTimestamp(
             JsonElement root,
             string name,
@@ -277,12 +294,14 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
 
             var text = property.GetString();
             if (string.IsNullOrWhiteSpace(text)
-                || !DateTimeOffset.TryParse(
+                || !DateTimeOffset.TryParseExact(
                     text,
+                    UtcRoundTripTimestampFormat,
                     CultureInfo.InvariantCulture,
-                    DateTimeStyles.RoundtripKind,
+                    UtcRoundTripTimestampStyles,
                     out value))
             {
+                value = default;
                 reason = $"Lifecycle announcement '{name}' was not a valid ISO-8601 timestamp.";
                 return false;
             }
