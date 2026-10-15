@@ -184,7 +184,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
         [Fact]
         public void ProductionJson_DeclaresLoggingSettings_AndOmitsSerilogSection()
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(FindProductionAppsettings()));
+            using var doc = JsonDocument.Parse(File.ReadAllText(FindProductionConfigurationFile()));
             Assert.False(doc.RootElement.TryGetProperty("Serilog", out _));
             var backFiller = doc.RootElement.GetProperty("BackFiller");
             Assert.False(backFiller.TryGetProperty("LogDir", out _));
@@ -538,7 +538,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return dir;
         }
 
-        private static string FindProductionAppsettings()
+        private static string FindProductionConfigurationFile()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir is not null)

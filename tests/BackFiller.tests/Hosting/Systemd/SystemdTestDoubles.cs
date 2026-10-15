@@ -38,6 +38,14 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
         public TaskCompletionSource WatchdogSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource WatchdogAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Runs on the watchdog thread after a successful notify is recorded and before
+        /// <see cref="NotifyWatchdog"/> returns. The loop cannot start another tick until it returns.
+        /// </summary>
+        public Action? AfterWatchdogRecorded { get; set; }
+
         public void NotifyReady()
         {
             Record("READY=1", ref _readyCount);
@@ -70,8 +78,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
         public void NotifyWatchdog()
         {
+            WatchdogAttempted.TrySetResult();
             Record("WATCHDOG=1", ref _watchdogCount);
             WatchdogSent.TrySetResult();
+            AfterWatchdogRecorded?.Invoke();
         }
 
         private void Record(string value, ref int counter)
@@ -110,7 +120,55 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
     internal sealed class FakeApplicationHealth : IApplicationHealth
     {
-        public bool IsHealthyForWatchdog { get; set; }
+        private bool _healthy;
+        private readonly TaskCompletionSource _unhealthyRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool IsHealthyForWatchdog
+        {
+            get
+            {
+                var healthy = Volatile.Read(ref _healthy);
+                if (!healthy)
+                {
+                    _unhealthyRead.TrySetResult();
+                }
+
+                return healthy;
+            }
+
+            set => Volatile.Write(ref _healthy, value);
+        }
+
+        public Task UnhealthyRead => _unhealthyRead.Task;
+    }
+
+    /// <summary>
+    /// Signals each time <see cref="IApplicationHealth.IsHealthyForWatchdog"/> returns.
+    /// </summary>
+    internal sealed class ObservingApplicationHealth : IApplicationHealth
+    {
+        private readonly IApplicationHealth _inner;
+        private TaskCompletionSource _readReturned = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ObservingApplicationHealth(IApplicationHealth inner)
+        {
+            _inner = inner;
+        }
+
+        public Task ReadReturned => Volatile.Read(ref _readReturned).Task;
+
+        public void ExpectNextRead() =>
+            Volatile.Write(ref _readReturned, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        public bool IsHealthyForWatchdog
+        {
+            get
+            {
+                var healthy = _inner.IsHealthyForWatchdog;
+                Volatile.Read(ref _readReturned).TrySetResult();
+                return healthy;
+            }
+        }
     }
 
     internal sealed class RecordingSystemdRuntimeFactory

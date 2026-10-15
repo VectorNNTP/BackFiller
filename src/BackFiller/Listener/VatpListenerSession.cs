@@ -101,6 +101,14 @@ namespace VectorNNTP.BackFiller.Listener
         /// </remarks>
         internal long ReservedFoundPayloadBytes => Volatile.Read(ref _reservedFoundPayloadBytes);
 
+        /// <summary>Gets frames waiting on the outbound channel (test observation).</summary>
+        /// <remarks>
+        /// This is the bounded channel count, not the frame currently blocked in the transport write.
+        /// Producers wait in <see cref="QueueFrameAsync"/> when the count reaches
+        /// <see cref="ArticleTransferLimits.MaxStreamsPerConnection"/> times four.
+        /// </remarks>
+        internal int PendingOutboundFrames => _outbound.Reader.Count;
+
         /// <summary>Initializes a VATP session over an established transport.</summary>
         /// <param name="transport">Connected transport. Disposed by <see cref="DisposeAsync"/>.</param>
         /// <param name="retention">OPEN authority. This session does not retain articles itself.</param>

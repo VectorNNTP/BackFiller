@@ -8,12 +8,13 @@ alwaysApply: true
 | Kind | Location |
 |------|----------|
 | Production code | `src/BackFiller/` |
-| Production tests | `src/BackFiller.tests/` |
+| Production tests | `tests/BackFiller.tests/` |
 | Permanent docs (explicitly accepted only) | `docs/` |
 | Local experiments, benches, audits, generated reports, prototypes | `.artifacts/` |
-| CI publish output | `artifacts/win-x64` on the Linux/Windows runner workspace |
+| Local release staging | `.artifacts/release/win-64` and `.artifacts/release/linux-64` |
+| CI Native AOT publish output | `.artifacts/win-x64` and `.artifacts/linux-x64` on the runner |
 
-`.gitignore` ignores `.artifacts/` and `Artifacts/`. On Windows, `artifacts/` and `Artifacts/` are the same path, so that name is gitignored locally. On Linux, `artifacts/` is not the same as `Artifacts/` or `.artifacts/`. CI writes `./artifacts/win-x64` as a job output and uploads it. That directory is not a source tree and is not where agents put notes they expect to commit.
+`.gitignore` ignores `.artifacts/`. `tools/Publish-Release.ps1` and `.github/workflows/build.yml` write repository-controlled publish output there. `actions/upload-artifact` uploads those directories; the action does not require the local directory to be named `artifacts/`. Release staging is `.artifacts/release/` and does not replace `.artifacts/articles` or existing benchmark reports.
 
 Agents write local evidence under `.artifacts/`. Do not put committable documentation or policy there: the directory is gitignored, so a file created only to satisfy an old index path will not be in git. This rule is the committed placement policy. There is no committed `.artifacts/ARTIFACT-INDEX.md` or `.artifacts/REPOSITORY-ARTIFACT-POLICY.md`.
 
@@ -32,4 +33,4 @@ Promotion (`.artifacts/` → `docs/` or `src/`/`tests/`) requires an explicit us
 
 Before command or data-plane work: inspect production code, then accepted `docs/`. Local files under `.artifacts/` are evidence from a machine, not current architecture.
 
-Do not delete or “clean up” historical artifacts. Do not implement features or optimize as part of indexing/hygiene tasks. Do not move CI publish output into `.artifacts/` or the reverse.
+Do not delete or “clean up” historical artifacts. Do not implement features or optimize as part of indexing/hygiene tasks. Do not write new repository output under `artifacts/`.

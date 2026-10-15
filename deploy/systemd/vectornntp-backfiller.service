@@ -1,0 +1,66 @@
+[Unit]
+Description=VectorNNTP BackFiller
+# Install the flat linux-x64 release directory at this path. It contains
+# VectorNNTP.BackFiller, VectorNNTP.BackFiller.json, VectorNNTP.RabbitMQ.json,
+# README.md, and vectornntp-backfiller.service. Copy the unit to
+# /etc/systemd/system/ and create user and group vectornntp before enable.
+Documentation=file:///opt/vectornntp/backfiller/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+# Dedicated non-root service account (create before enabling the unit).
+# Same account as NNTPD is acceptable when both share /opt/vectornntp.
+User=vectornntp
+Group=vectornntp
+
+# The executable directory is the configuration root. The process loads
+# VectorNNTP.BackFiller.json and VectorNNTP.RabbitMQ.json from that directory,
+# not appsettings.json, RabbitMq.json, or the process working directory.
+# Relative logs (logs/) and ACME state (certs/) also resolve there.
+WorkingDirectory=/opt/vectornntp/backfiller
+ExecStart=/opt/vectornntp/backfiller/VectorNNTP.BackFiller
+
+# Host ShutdownTimeout follows BackFiller:Shutdown:GracePeriodSeconds.
+# The shipped value and the code default are 30; the valid maximum is 600.
+# TimeoutStopSec must stay above that setting or systemd SIGKILLs an in-progress drain.
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+Restart=on-failure
+RestartSec=5
+
+# DOTNET_ENVIRONMENT selects the optional VectorNNTP.BackFiller.Production.json overlay.
+# Configuration overlays use VECTOR__ (for example VECTOR__RABBITMQ__USERNAME).
+# The NntpDB connection string is ConnectionStrings__NntpDB, without a VECTOR__ prefix.
+# backfiller__ and nntpd__ are not registered.
+# EnvironmentFile=-/etc/vectornntp/backfiller.env
+Environment=DOTNET_ENVIRONMENT=Production
+
+# Watchdog heartbeats run only when EnableWatchdog is true (the shipped default)
+# and this unit sets WatchdogSec, which supplies WATCHDOG_USEC.
+# Leave WatchdogSec unset until readiness has been checked on the target host.
+# Example (enable only after validation):
+# WatchdogSec=30
+# Restart=on-watchdog
+
+# File logging is the shipped destination (BackFiller:Logging:File:LogDir=logs).
+# stdout and stderr still reach the journal. The console sink is off unless
+# ExecStart includes --console.
+# Hardening. BackFiller binds TLS and opens outbound NNTP, RabbitMQ, MySQL, and Cloudflare.
+# ProtectSystem=strict leaves the install tree writable only through ReadWritePaths,
+# which covers the JSON files, logs/, and certs/.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/vectornntp/backfiller
+
+KillSignal=SIGTERM
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

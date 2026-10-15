@@ -9,8 +9,9 @@ obj/
 *.userosscache
 *.sln.docstates
 
-# Test artifacts
+# Test, diagnostic, and release output. Repository-controlled output is .artifacts/.
 .artifacts/
+artifacts/
 Artifacts/
 release/
 TestResults/

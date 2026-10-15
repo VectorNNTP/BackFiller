@@ -22,10 +22,13 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private int _successfulWritesAllowed = int.MaxValue;
         private int _successfulWritesCompleted;
         private int _disposed;
+        private int _blockedWrites;
         private int _writeCalls;
         private int _readCalls;
 
         public int WriteCalls => Volatile.Read(ref _writeCalls);
+
+        public int BlockedWrites => Volatile.Read(ref _blockedWrites);
 
         public int ReadCalls => Volatile.Read(ref _readCalls);
 
@@ -134,6 +137,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 {
                     _blockWrites ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     block = _blockWrites.Task;
+                    Interlocked.Increment(ref _blockedWrites);
                 }
                 else
                 {

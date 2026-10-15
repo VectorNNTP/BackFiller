@@ -193,7 +193,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         }
 
         [Fact]
-        public void Production_appsettings_declares_server_id_under_backfiller()
+        public void Production_configuration_declares_server_id_under_backfiller()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             string? path = null;

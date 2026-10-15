@@ -36,9 +36,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         }
 
         [Fact]
-        public void Production_appsettings_declares_bind_address_and_tls_port_without_bind_port()
+        public void Production_configuration_declares_bind_address_and_tls_port_without_bind_port()
         {
-            var path = FindProductionAppsettings();
+            var path = FindProductionConfigurationFile();
             using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
             var root = doc.RootElement;
             var section = root.GetProperty("BackFiller");
@@ -349,7 +349,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return builder.Build();
         }
 
-        private static string FindProductionAppsettings()
+        private static string FindProductionConfigurationFile()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null)

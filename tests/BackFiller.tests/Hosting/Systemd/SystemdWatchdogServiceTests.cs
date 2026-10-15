@@ -109,13 +109,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             await service.StartAsync(CancellationToken.None);
             Assert.True(service.IsActive);
 
-            var unhealthyGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(service.HeartbeatInterval + TimeSpan.FromMilliseconds(30));
-                unhealthyGate.TrySetResult();
-            });
-            await unhealthyGate.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await health.UnhealthyRead.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.Equal(0, notify.WatchdogCount);
 
             health.IsHealthyForWatchdog = true;
@@ -131,12 +125,15 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             var health = new BackFillerApplicationHealth();
             health.MarkStarted();
             Assert.True(health.IsHealthyForWatchdog);
+            var observed = new ObservingApplicationHealth(health);
 
             var notify = new FakeSystemdNotifyBridge();
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            notify.AfterWatchdogRecorded = () => release.Task.GetAwaiter().GetResult();
             using var watchdog = CreateWatchdog(
                 notify,
                 runtime: RecordingSystemdRuntimeFactory.LinuxUnderSystemd(TimeSpan.FromMilliseconds(80)),
-                health: health,
+                health: observed,
                 configure: o => o.Systemd.WatchdogIntervalFraction = 0.5);
 
             await watchdog.StartAsync(CancellationToken.None);
@@ -144,15 +141,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
             health.MarkUnexpectedTermination();
             Assert.False(health.IsHealthyForWatchdog);
-
             var count = notify.WatchdogCount;
-            var settle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(watchdog.HeartbeatInterval + TimeSpan.FromMilliseconds(40));
-                settle.TrySetResult();
-            });
-            await settle.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            observed.ExpectNextRead();
+            release.TrySetResult();
+            await observed.ReadReturned.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.Equal(count, notify.WatchdogCount);
 
             await watchdog.StopAsync(CancellationToken.None);
@@ -164,6 +156,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             var notify = new FakeSystemdNotifyBridge();
             var health = new FakeApplicationHealth { IsHealthyForWatchdog = true };
             var lifetime = new TestHostApplicationLifetime();
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            notify.AfterWatchdogRecorded = () => release.Task.GetAwaiter().GetResult();
 
             using var service = CreateWatchdog(
                 notify,
@@ -175,18 +169,11 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             await service.StartAsync(CancellationToken.None);
             await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-            lifetime.SignalStopping();
             var count = notify.WatchdogCount;
-            var settle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(service.HeartbeatInterval + TimeSpan.FromMilliseconds(40));
-                settle.TrySetResult();
-            });
-            await settle.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(count, notify.WatchdogCount);
-
+            lifetime.SignalStopping();
+            release.TrySetResult();
             await service.StopAsync(CancellationToken.None);
+            Assert.Equal(count, notify.WatchdogCount);
             Assert.False(service.IsActive);
         }
 
@@ -212,14 +199,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             await service.StartAsync(CancellationToken.None);
             Assert.True(service.IsActive);
 
-            var settle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(service.HeartbeatInterval + TimeSpan.FromMilliseconds(40));
-                settle.TrySetResult();
-            });
-            await settle.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
+            await notify.WatchdogAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.False(lifetime.StopRequested);
             Assert.True(service.IsActive);
 

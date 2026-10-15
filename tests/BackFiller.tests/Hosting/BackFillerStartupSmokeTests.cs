@@ -164,7 +164,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             {
                 var candidate = Path.Join(
                     directory.FullName,
-                    "src",
+                    "tests",
                     "BackFiller.tests",
                     "Fixtures",
                     "startup-smoke.json");

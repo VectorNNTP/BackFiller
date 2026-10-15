@@ -121,10 +121,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         }
 
         [Fact]
-        public async Task Process_loads_appsettings_from_the_application_base_not_the_working_directory()
+        public async Task Process_loads_configuration_from_the_application_base_not_the_working_directory()
         {
             var (fileName, arguments) = ResolveApplicationStart();
-            var workingDirectory = Directory.CreateTempSubdirectory("bf-process-appsettings-").FullName;
+            var workingDirectory = Directory.CreateTempSubdirectory("bf-process-config-").FullName;
             try
             {
                 using var process = new Process
@@ -165,7 +165,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 catch (OperationCanceledException)
                 {
                     TryKill(process);
-                    Assert.Fail("BackFiller process did not exit within 20s while loading appsettings from a foreign cwd.");
+                    Assert.Fail("BackFiller process did not exit within 20s while loading configuration from a foreign cwd.");
                 }
 
                 var output = string.Concat(await stdout, await stderr, ReadNewLogs(applicationPath, logBefore));
@@ -238,7 +238,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             {
                 var candidate = Path.Join(
                     directory.FullName,
-                    "src",
+                    "tests",
                     "BackFiller.tests",
                     "Fixtures",
                     "startup-smoke.json");

@@ -6,7 +6,7 @@ Standalone migration of `VectorNNTP.BackFiller` into an independent repository.
 
 - `src/BackFiller/BackFiller.csproj` - standalone BackFiller worker app (net10.0)
 - `src/BackFiller/` - production code organized by responsibility (for example `Acme`, `Articles`, `Configuration`, `Core`, `Hosting`, `Nntp`, `Transport`)
-- `src/BackFiller.tests/BackFiller.Tests.csproj` - xUnit test suite, namespace `VectorNNTP.BackFiller.Tests`
+- `tests/BackFiller.tests/BackFiller.Tests.csproj` - xUnit test suite, namespace `VectorNNTP.BackFiller.Tests`
 - `BackFiller.slnx` - solution including app + tests
 - `tools/Invoke-CodeQlAnalysis.ps1` - local traced C# CodeQL analysis
 
@@ -19,7 +19,7 @@ dotnet build .\BackFiller.slnx -c Release -p:Platform=x64
 ## Test
 
 ```powershell
-dotnet test .\src\BackFiller.tests\BackFiller.Tests.csproj -c Release -p:Platform=x64
+dotnet test .\tests\BackFiller.tests\BackFiller.Tests.csproj -c Release -p:Platform=x64
 ```
 
 ## Publish
@@ -41,6 +41,12 @@ The production project references the `StuDev.AotAnywhere` 1.0.4 MSBuild SDK. On
 Native AOT publish keeps trim and AOT analysis enabled. CI then runs the published executable with `VECTORNNTP_BACKFILLER_STARTUP_SMOKE=1` and `VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG` pointing at an isolated JSON file. The process must print `BackFiller startup smoke: configuration serverId=1 fqdn=backfiller01.usenet.ninja` and exit 0. That checkpoint is configuration binding and host construction. It does not open a listener or contact a database, broker, DNS provider, or certificate authority.
 
 The standalone project has no external build/runtime dependency on a separate `VectorNNTP.Common` project or assembly.
+
+## Linux service
+
+`tools/Publish-Release.ps1 -Platform linux-64` writes `.artifacts/release/linux-64/`. The Linux CI job writes `.artifacts/linux-x64/` and uploads that directory. Both contain `VectorNNTP.BackFiller`, `VectorNNTP.BackFiller.json`, `VectorNNTP.RabbitMQ.json`, `README.md`, and `vectornntp-backfiller.service`.
+
+Install that directory at `/opt/vectornntp/backfiller`. `deploy/systemd/vectornntp-backfiller.service` uses that path for `ExecStart`, `WorkingDirectory`, `ReadWritePaths`, and `Documentation=`. Create user and group `vectornntp`, install the unit as `/etc/systemd/system/vectornntp-backfiller.service`, then enable it. The shipped JSON writes file logs under `logs/` and ACME state under `certs/` in the install directory. `TimeoutStopSec=60` covers the shipped 30-second shutdown grace; raise it when `BackFiller:Shutdown:GracePeriodSeconds` is raised. `WatchdogSec` stays unset until readiness has been checked on the host.
 
 ## CodeQL
 

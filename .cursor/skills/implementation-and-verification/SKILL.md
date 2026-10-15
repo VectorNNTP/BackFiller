@@ -26,11 +26,11 @@ Execute a complete engineering task continuously, safely, and with verified resu
 4. Inspect applicable RFCs (`nntp-protocol`) and accepted `docs/` when relevant. `.artifacts/` is gitignored local evidence, not current architecture.
 5. Plan a **focused** implementation (smallest correct change). Command work implements only the requested command.
 6. Implement production changes under `src/BackFiller/`. Put experiments, benches, and generated reports under `.artifacts/` (not `docs/` or `tools/` unless explicitly promoted).
-7. Add or update meaningful production tests under `src/BackFiller.tests/` (`testing`).
+7. Add or update meaningful production tests under `tests/BackFiller.tests/` (`testing`).
 8. Run relevant verification for this repo. Platform is x64 only. An unset platform defaults to x64 in `Directory.Build.props`, and any other platform fails the build. Output is `bin/x64/<Configuration>/`. Pass the same `-p:Platform=x64` on build and on `--no-build` test. Typical local commands:
    - `dotnet restore BackFiller.slnx -p:Platform=x64`
    - `dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore`
-   - `dotnet test src/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --no-build`
+   - `dotnet test tests/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --no-build`
    - `dotnet format BackFiller.slnx --verify-no-changes` (local check; CI does not run it)
    - Treat warnings as errors / analyzers already enforced by `Directory.Build.props`
 9. Inspect the final diff for unintended changes.

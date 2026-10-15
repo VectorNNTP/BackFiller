@@ -85,9 +85,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         }
 
         [Fact]
-        public void Production_appsettings_does_not_contain_connection_strings_or_grabberdb()
+        public void Production_configuration_does_not_contain_connection_strings_or_grabberdb()
         {
-            var path = FindProductionAppsettings();
+            var path = FindProductionConfigurationFile();
             var json = File.ReadAllText(path);
             using var document = JsonDocument.Parse(json);
             Assert.False(document.RootElement.TryGetProperty("ConnectionStrings", out _));
@@ -95,7 +95,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("Password=", json, StringComparison.Ordinal);
         }
 
-        private static string FindProductionAppsettings()
+        private static string FindProductionConfigurationFile()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir is not null)

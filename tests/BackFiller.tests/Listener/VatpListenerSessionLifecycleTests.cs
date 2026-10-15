@@ -38,8 +38,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             // Adversarial peer: keep sending inbound frames after writer is wedged / about to fail.
             // Do not close the inbound side.
+            var readsBeforeFlood = harness.Transport.ReadCalls;
             var flood = FloodWindowsAsync(harness.Transport, count: 64, CancellationToken.None);
-            await Task.Delay(50);
+            await WaitAsync(() => harness.Transport.BlockedWrites >= 1 && harness.Transport.ReadCalls > readsBeforeFlood);
             harness.Transport.FailWrites();
 
             await AssertSessionTerminatedAsync(runTask);
@@ -62,9 +63,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             // Capacity is MaxStreamsPerConnection * 4 (= 256); exceed it so QueueFrameAsync waits.
             var flood = FloodWindowsAsync(harness.Transport, count: 400, CancellationToken.None);
             await WaitAsync(() => harness.Transport.WriteCalls >= 3);
-
-            // Writer is blocked on write #3; inbound flood drives QueueFrameAsync until the channel fills.
-            await Task.Delay(100);
+            await WaitAsync(() => harness.Session.PendingOutboundFrames >= ArticleTransferLimits.Default.MaxStreamsPerConnection * 4);
             Assert.False(runTask.IsCompleted, "session must still be alive while QueueFrameAsync is blocked");
 
             harness.Transport.FailWrites();
@@ -150,10 +149,10 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await WaitAsync(() => harness.Transport.WriteCalls >= 2);
             harness.Transport.EnqueueInbound(EncodeOpen(1, prepared.RequestId, prepared.Record.ArtId));
             await WaitAsync(() => harness.Session.ReservedFoundPayloadBytes > 0);
-            harness.Transport.FailWrites(new NotSupportedException("writer boom"));
 
             var writerError = await TestSelfLog.CaptureAsync(async () =>
             {
+                harness.Transport.FailWrites(new NotSupportedException("writer boom"));
                 var error = await Assert.ThrowsAsync<NotSupportedException>(() => runTask);
                 Assert.Equal("writer boom", error.Message);
             });

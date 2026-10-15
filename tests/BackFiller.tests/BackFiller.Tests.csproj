@@ -36,7 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BackFiller\BackFiller.csproj" />
+    <ProjectReference Include="..\..\src\BackFiller\BackFiller.csproj" />
   </ItemGroup>
 
 </Project>

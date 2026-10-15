@@ -10,7 +10,7 @@ This repository is standalone **VectorNNTP.BackFiller**. It was extracted from V
 2. Identify the task domain and **explicitly read** the relevant [`.cursor/skills/<skill-name>/SKILL.md`](.cursor/skills/) file(s) before implementing, reviewing, testing, or documenting.
 3. Combine skills when appropriate (do not default to a single skill when several apply).
 4. Follow the core engineering rules in [`.cursor/rules/vectornntp-core.mdc`](.cursor/rules/vectornntp-core.mdc). Protocol data remains byte-oriented throughout the data plane ([`docs/architecture.md`](docs/architecture.md#byte-oriented-protocol-data-plane)). Application logging prefers source-generated structured methods ([`docs/architecture.md`](docs/architecture.md#source-generated-structured-logging)). Host lifecycle, Article Work settlement, and the NNTP client subset are in [`docs/architecture.md`](docs/architecture.md).
-5. Follow the placement policy in [`.cursor/rules/repository-artifacts.mdc`](.cursor/rules/repository-artifacts.mdc): production in `src/BackFiller/`; tests in `src/BackFiller.tests/`; permanent docs only in `docs/`; local evidence in `.artifacts/`. That directory is gitignored. Do not treat it as a committed index. Builds are x64 only (`-p:Platform=x64`); output is `bin/x64/<Configuration>/`.
+5. Follow the placement policy in [`.cursor/rules/repository-artifacts.mdc`](.cursor/rules/repository-artifacts.mdc): production in `src/BackFiller/`; tests in `tests/BackFiller.tests/`; permanent docs only in `docs/`; local evidence, release staging, and CI publish output in `.artifacts/`. That directory is gitignored. Do not treat it as a committed index. Builds are x64 only (`-p:Platform=x64`); output is `bin/x64/<Configuration>/`.
 
 ## Discovery honesty
 

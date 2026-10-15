@@ -14,7 +14,7 @@ After start, non-null `IApplicationService.Execution` tasks are watched. A fault
 
 `SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. Readiness is not inferred from DI registration order.
 
-`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `src/BackFiller.tests/` constructs it. It is not the live host lifecycle.
+`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `tests/BackFiller.tests/` constructs it. It is not the live host lifecycle.
 
 Article Work shutdown uses `BackFillerShutdownOptions`:
 

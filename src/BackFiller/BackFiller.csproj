@@ -18,6 +18,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Update="VectorNNTP.BackFiller.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Update="VectorNNTP.RabbitMQ.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Blake3" Version="3.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="11.0.0-rc.2.26504.105" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="11.0.0-rc.2.26504.105" />
