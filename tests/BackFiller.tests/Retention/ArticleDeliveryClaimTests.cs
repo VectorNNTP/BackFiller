@@ -209,6 +209,55 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(before.Length, authority.RetainedPayloadBytes);
         }
 
+        [Theory]
+        [InlineData("plain\nmid.dot\r\n")]
+        [InlineData("plain\rmid.dot\r\n")]
+        public void Interior_bare_cr_or_lf_is_not_frameable_when_the_article_ends_in_crlf(string body)
+        {
+            var authority = ArticleRetentionAuthorityTests.Create(new ManualTimeProvider(Start), maxBytes: 1024 * 1024);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>", body);
+            var before = prepared.Record.ArtData.ToArray();
+            Assert.True(before.AsSpan().EndsWith("\r\n"u8));
+
+            var claimed = authority.TryClaimForDelivery(Id("<a@b>"));
+            Assert.Equal(ArticleDeliveryClaimKind.NotFrameable, claimed.Kind);
+            Assert.Null(claimed.Claim);
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+            Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+
+            var again = authority.TryClaimForDelivery(Id("<a@b>"));
+            Assert.Equal(ArticleDeliveryClaimKind.NotFrameable, again.Kind);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+
+            var other = RetentionTestArticles.RetainPrepared(authority, "<c@d>", "valid\r\n");
+            var delivered = authority.TryClaimForDelivery(Id("<c@d>"));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, delivered.Kind);
+            Assert.True(delivered.Claim!.ArticleBytes.Span.SequenceEqual(other.Record.ArtData.Span));
+            delivered.Claim.Dispose();
+            Assert.Equal(2, authority.RetainedCount);
+        }
+
+        [Theory]
+        [InlineData("alpha\r\nbeta\r\n")]
+        [InlineData("\r\n")]
+        [InlineData("above\r\n\r\nbelow\r\n")]
+        public void Crlf_lines_and_empty_lines_can_be_claimed_without_rewriting_bytes(string body)
+        {
+            var authority = ArticleRetentionAuthorityTests.Create(new ManualTimeProvider(Start), maxBytes: 1024 * 1024);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>", body);
+            var before = prepared.Record.ArtData.ToArray();
+            Assert.True(before.AsSpan().EndsWith("\r\n"u8));
+
+            var claimed = authority.TryClaimForDelivery(Id("<a@b>"));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.True(claimed.Claim!.ArticleBytes.Span.SequenceEqual(before));
+            Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+            claimed.Claim.Dispose();
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+        }
+
         [Fact]
         public void Commit_at_exact_expiry_without_a_sweep_removes_the_entry_once()
         {

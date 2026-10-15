@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Nntp;
@@ -63,13 +62,13 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 created.Record,
                 created.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, retention.Kind);
+            var beforeBytes = authority.RetainedPayloadBytes;
             var claimed = authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(MessageId));
-            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
-            Assert.True(claimed.Claim!.ArticleBytes.Span.SequenceEqual(retained));
-            Assert.True(MemoryMarshal.TryGetArray(claimed.Claim.ArticleBytes, out var retainedSegment));
-            Assert.True(MemoryMarshal.TryGetArray(created.Record.ArtData, out var createdSegment));
-            Assert.Same(createdSegment.Array, retainedSegment.Array);
-            claimed.Claim.Dispose();
+            Assert.Equal(ArticleDeliveryClaimKind.NotFrameable, claimed.Kind);
+            Assert.Null(claimed.Claim);
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(beforeBytes, authority.RetainedPayloadBytes);
+            Assert.True(created.Record.ArtData.Span.SequenceEqual(retained));
         }
 
         /// <summary>

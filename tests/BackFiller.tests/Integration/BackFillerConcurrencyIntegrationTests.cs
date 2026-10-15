@@ -233,18 +233,18 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 harness.Retention,
                 ArticleWorkTestDeliveries.CanonicalMessageId,
                 "lease-body\r\n");
-            var claim = ArticleRetentionAuthorityTests.Claim(
+            using (var claim = ArticleRetentionAuthorityTests.Claim(
                 harness.Retention,
                 ArticleWorkTestDeliveries.CanonicalMessageId,
-                prepared.ArtData);
-
-            harness.Time.Advance(TimeSpan.FromSeconds(1));
-            Assert.Equal(prepared.Record.ArtSize, harness.Retention.SweepExpired());
-            Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
-            Assert.Equal(0, harness.Retention.RetainedCount);
-            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
-            ArticleRetentionAuthorityTests.AssertNotFound(harness.Retention, ArticleWorkTestDeliveries.CanonicalMessageId);
-            claim.Dispose();
+                prepared.ArtData))
+            {
+                harness.Time.Advance(TimeSpan.FromSeconds(1));
+                Assert.Equal(prepared.Record.ArtSize, harness.Retention.SweepExpired());
+                Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
+                Assert.Equal(0, harness.Retention.RetainedCount);
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+                ArticleRetentionAuthorityTests.AssertNotFound(harness.Retention, ArticleWorkTestDeliveries.CanonicalMessageId);
+            }
 
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(0, harness.Retention.RetainedCount);

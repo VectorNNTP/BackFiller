@@ -24,7 +24,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 authority.RetainCanonical(prepared.MessageId, second, prepared.Record, prepared.SelectedDateHeaderName).Kind);
 
             time.Advance(TimeSpan.FromSeconds(10) - TimeSpan.FromTicks(1));
-            using (var early = ArticleRetentionAuthorityTests.Claim(authority, "<exact@example.test>", prepared.ArtData))
+            using (ArticleRetentionAuthorityTests.Claim(authority, "<exact@example.test>", prepared.ArtData))
             {
                 Assert.True(authority.RetainedPayloadBytes > 0);
             }
@@ -68,21 +68,23 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(
                 ArticleRetentionKind.AlreadyPresent,
                 authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName).Kind);
-            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<active@example.test>", prepared.ArtData);
-            var payloadBytes = prepared.Record.ArtSize;
+            using (var claim = ArticleRetentionAuthorityTests.Claim(authority, "<active@example.test>", prepared.ArtData))
+            {
+                var payloadBytes = prepared.Record.ArtSize;
 
-            time.Advance(TimeSpan.FromSeconds(10));
-            Assert.Equal(payloadBytes, authority.SweepExpired());
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            Assert.Equal(0, authority.RetainedCount);
-            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
-            Assert.False(authority.TryCancelPendingRequest(sibling));
+                time.Advance(TimeSpan.FromSeconds(10));
+                Assert.Equal(payloadBytes, authority.SweepExpired());
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+                Assert.Equal(0, authority.RetainedCount);
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+                Assert.False(authority.TryCancelPendingRequest(sibling));
 
-            claim.Dispose();
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            claim.Dispose();
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            Assert.Equal(0, authority.SweepExpired());
+                claim.Dispose();
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+                claim.Dispose();
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+                Assert.Equal(0, authority.SweepExpired());
+            }
         }
 
         [Fact]
@@ -91,14 +93,15 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<lookup@example.test>");
-            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<lookup@example.test>", prepared.ArtData);
+            using (var claim = ArticleRetentionAuthorityTests.Claim(authority, "<lookup@example.test>", prepared.ArtData))
+            {
+                time.Advance(TimeSpan.FromSeconds(10));
+                ArticleRetentionAuthorityTests.AssertNotFound(authority, "<lookup@example.test>");
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+                Assert.Equal(0, authority.RetainedCount);
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            }
 
-            time.Advance(TimeSpan.FromSeconds(10));
-            ArticleRetentionAuthorityTests.AssertNotFound(authority, "<lookup@example.test>");
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            Assert.Equal(0, authority.RetainedCount);
-            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
-            claim.Dispose();
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
@@ -108,13 +111,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<pinned@example.test>");
-            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<pinned@example.test>", prepared.ArtData);
-            time.Advance(TimeSpan.FromSeconds(10));
-            Assert.True(authority.SweepExpired() > 0);
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            Assert.Equal(0, authority.RetainedCount);
-            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
-            claim.Dispose();
+            using (var claim = ArticleRetentionAuthorityTests.Claim(authority, "<pinned@example.test>", prepared.ArtData))
+            {
+                time.Advance(TimeSpan.FromSeconds(10));
+                Assert.True(authority.SweepExpired() > 0);
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+                Assert.Equal(0, authority.RetainedCount);
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            }
         }
 
         [Fact]
@@ -170,14 +174,16 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var first = RetentionTestArticles.RetainPrepared(authority, "<acct-a@example.test>", "a\r\n");
             time.Advance(TimeSpan.FromSeconds(10));
             var second = RetentionTestArticles.RetainPrepared(authority, "<acct-b@example.test>", "longer-body-bytes\r\n");
-            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<acct-a@example.test>", first.ArtData);
-            Assert.Equal(first.Record.ArtSize + second.Record.ArtSize, authority.RetainedPayloadBytes);
+            using (ArticleRetentionAuthorityTests.Claim(authority, "<acct-a@example.test>", first.ArtData))
+            {
+                Assert.Equal(first.Record.ArtSize + second.Record.ArtSize, authority.RetainedPayloadBytes);
 
-            time.Advance(TimeSpan.FromSeconds(20));
-            Assert.Equal(first.Record.ArtSize, authority.SweepExpired());
-            Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
-            Assert.Equal(1, authority.RetainedCount);
-            claim.Dispose();
+                time.Advance(TimeSpan.FromSeconds(20));
+                Assert.Equal(first.Record.ArtSize, authority.SweepExpired());
+                Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
+                Assert.Equal(1, authority.RetainedCount);
+            }
+
             Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
 
             time.Advance(TimeSpan.FromSeconds(10));
@@ -190,15 +196,17 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         public async Task Repeated_expiry_and_disposal_are_idempotent()
         {
             var time = new ManualTimeProvider(Start);
-            var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<idem@example.test>");
-            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<idem@example.test>", prepared.ArtData);
-            time.Advance(TimeSpan.FromSeconds(10));
-            Assert.True(authority.SweepExpired() > 0);
-            Assert.Equal(0, authority.SweepExpired());
-            claim.Dispose();
-            claim.Dispose();
-            Assert.Equal(0, authority.RetainedPayloadBytes);
+            using (var claim = ArticleRetentionAuthorityTests.Claim(authority, "<idem@example.test>", prepared.ArtData))
+            {
+                time.Advance(TimeSpan.FromSeconds(10));
+                Assert.True(authority.SweepExpired() > 0);
+                Assert.Equal(0, authority.SweepExpired());
+                claim.Dispose();
+                claim.Dispose();
+                Assert.Equal(0, authority.RetainedPayloadBytes);
+            }
 
             authority.BeginShutdown();
             var shut = authority.RetainCanonical(

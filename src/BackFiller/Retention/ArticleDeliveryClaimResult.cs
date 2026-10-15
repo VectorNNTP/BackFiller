@@ -10,8 +10,8 @@ namespace VectorNNTP.BackFiller.Retention
         NotFound = 1,
 
         /// <summary>
-        /// The entry is indexed, but its ArtData cannot be sent as an RFC 3977 multiline block
-        /// without changing bytes, or its stored header does not match the lookup octets.
+        /// The entry is indexed, but its ArtData is not a CRLF-only multiline block, a dot-leading line
+        /// cannot be classified as a header, or its stored header does not match the lookup octets.
         /// Nothing was claimed.
         /// </summary>
         NotFrameable = 2,

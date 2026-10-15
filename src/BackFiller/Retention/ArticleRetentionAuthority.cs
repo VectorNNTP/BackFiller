@@ -488,7 +488,7 @@ namespace VectorNNTP.BackFiller.Retention
                 }
 
                 if (!NntpArticleIdentity.MatchesRequest(record.MessageId, messageIdOctets)
-                    || !EndsWithCrlf(record.ArtData.Span))
+                    || !NntpDeliveryFraming.IsFrameable(record.ArtData.Span))
                 {
                     return ArticleDeliveryClaimResult.NotFrameable();
                 }
@@ -591,14 +591,6 @@ namespace VectorNNTP.BackFiller.Retention
             key = new string(chars);
             return true;
         }
-
-        /// <summary>Reports whether <paramref name="artData"/> ends in CRLF and can take a following terminator line.</summary>
-        /// <param name="artData">Retained article bytes. Not modified.</param>
-        /// <returns><see langword="true"/> when the last two octets are CR LF.</returns>
-        private static bool EndsWithCrlf(ReadOnlySpan<byte> artData) =>
-            artData.Length >= 2
-            && artData[^2] == (byte)'\r'
-            && artData[^1] == (byte)'\n';
 
         /// <summary>Reclaims TTL-expired entries in insertion order.</summary>
         /// <returns>

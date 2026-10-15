@@ -1,3 +1,5 @@
+using VectorNNTP.BackFiller.Articles;
+using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
@@ -59,10 +61,92 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             var written = await RunAsync(authority, "ARTICLE <a@b>\r\nQUIT\r\n");
 
             Assert.Contains("403 Article not available\r\n"u8, written);
+            Assert.DoesNotContain("220 "u8, written);
             Assert.DoesNotContain(Encoding.ASCII.GetBytes(body), written.AsSpan());
             Assert.Equal(1, authority.RetainedCount);
             Assert.Equal(before.Length, authority.RetainedPayloadBytes);
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+        }
+
+        [Theory]
+        [InlineData("plain\nmid.dot\r\n")]
+        [InlineData("plain\rmid.dot\r\n")]
+        public async Task Interior_bare_cr_or_lf_returns_403_before_any_article_byte(string body)
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>", body);
+            var before = prepared.ArtData.ToArray();
+            Assert.True(before.AsSpan().EndsWith("\r\n"u8));
+
+            var written = await RunAsync(authority, "ARTICLE <a@b>\r\n");
+
+            Assert.Contains("403 Article not available\r\n"u8, written);
+            Assert.DoesNotContain("220 "u8, written);
+            Assert.DoesNotContain(before, written.AsSpan());
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+            Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+        }
+
+        [Fact]
+        public async Task Dot_leading_header_is_stuffed_on_the_wire_and_the_body_is_decoded_once()
+        {
+            var logical = Encoding.ASCII.GetBytes(
+                "Date: Fri, 23 Aug 2024 07:30:10 +0000\r\n"
+                + "Message-ID: <dot-header@example.test>\r\n"
+                + "Newsgroups: alt.test\r\n"
+                + "From: user@example.test\r\n"
+                + "Subject: dots\r\n"
+                + "Path: peer.example\r\n"
+                + ".X-Dot: kept\r\n"
+                + "\r\n"
+                + ".only\r\n"
+                + "..two\r\n"
+                + "...three\r\n"
+                + "mid.dot\r\n");
+            var parser = new NntpArticleParser("backfiller.test");
+            var created = ArticleRecordFactory.TryCreate(parser, logical);
+            Assert.True(created.IsAccepted, created.ParseFailure.ToString());
+            var retained = created.Record.ArtData.ToArray();
+            Assert.Contains(".X-Dot: kept\r\n"u8, retained);
+            Assert.DoesNotContain("..X-Dot:"u8, retained);
+            Assert.Contains("..only\r\n"u8, retained);
+            Assert.Contains("...two\r\n"u8, retained);
+            Assert.Contains("....three\r\n"u8, retained);
+
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            Assert.Equal(
+                ArticleRetentionKind.Retained,
+                authority.RetainCanonical(
+                    "<dot-header@example.test>",
+                    Guid.NewGuid(),
+                    created.Record,
+                    created.SelectedDateHeaderName).Kind);
+
+            var written = await RunAsync(authority, "ARTICLE <dot-header@example.test>\r\n");
+            var follows = Status("<dot-header@example.test>");
+            var article = written.AsSpan(Greeting.Length + follows.Length);
+            Assert.True(article.EndsWith(Terminator));
+            Assert.Equal(1, Count(article, Terminator));
+            var block = article[..^Terminator.Length];
+            Assert.Contains("..X-Dot: kept\r\n"u8, block);
+            Assert.Contains("..only\r\n"u8, block);
+            Assert.Contains("...two\r\n"u8, block);
+            Assert.Contains("....three\r\n"u8, block);
+            Assert.DoesNotContain("...only"u8, block);
+            Assert.DoesNotContain(".....three"u8, block);
+
+            var decoded = DestuffMultiline(block);
+            Assert.True(decoded.AsSpan().SequenceEqual(LogicalFromRetained(retained)));
+            Assert.Contains(".only\r\n"u8, decoded);
+            Assert.Contains("..two\r\n"u8, decoded);
+            Assert.Contains("...three\r\n"u8, decoded);
+            Assert.DoesNotContain("..only"u8, decoded);
+            Assert.True(created.Record.ArtData.Span.SequenceEqual(retained));
+            Assert.Equal(0, authority.RetainedCount);
+            Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
         [Fact]
@@ -355,6 +439,46 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
 
             return count;
+        }
+
+        private static byte[] LogicalFromRetained(byte[] artData)
+        {
+            var separator = artData.AsSpan().IndexOf("\r\n\r\n"u8);
+            Assert.True(separator > 0);
+            var bodyStart = separator + 4;
+            var body = DestuffMultiline(artData.AsSpan(bodyStart));
+            var logical = new byte[bodyStart + body.Length];
+            artData.AsSpan(0, bodyStart).CopyTo(logical);
+            body.CopyTo(logical.AsSpan(bodyStart));
+            return logical;
+        }
+
+        private static byte[] DestuffMultiline(ReadOnlySpan<byte> block)
+        {
+            var buffer = new byte[block.Length];
+            var written = 0;
+            var index = 0;
+            while (index < block.Length)
+            {
+                var crlf = block[index..].IndexOf("\r\n"u8);
+                Assert.True(crlf >= 0);
+                var lineLength = crlf + 2;
+                var line = block.Slice(index, lineLength);
+                if (line[0] == (byte)'.' && !(line.Length == 3 && line[1] == (byte)'\r'))
+                {
+                    line[1..].CopyTo(buffer.AsSpan(written));
+                    written += line.Length - 1;
+                }
+                else
+                {
+                    line.CopyTo(buffer.AsSpan(written));
+                    written += line.Length;
+                }
+
+                index += lineLength;
+            }
+
+            return buffer.AsSpan(0, written).ToArray();
         }
 
         private static byte[] Status(string messageId) =>

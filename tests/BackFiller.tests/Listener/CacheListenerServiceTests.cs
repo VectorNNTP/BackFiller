@@ -222,8 +222,11 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             {
                 await flood;
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                output.WriteLine(
+                    "Ignoring expected IOException while awaiting the flood task during cancellation or shutdown: {0}",
+                    ex.Message);
             }
 
             Assert.Equal(0, context.Service.ActiveConnections);

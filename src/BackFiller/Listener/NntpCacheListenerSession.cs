@@ -1,3 +1,4 @@
+using VectorNNTP.BackFiller.Articles.Processing;
 using VectorNNTP.BackFiller.Articles.Validation;
 using VectorNNTP.BackFiller.Retention;
 
@@ -14,8 +15,10 @@ namespace VectorNNTP.BackFiller.Listener
     /// whole and is not split into a later command. Bytes after one command stay in the buffer for the next.
     /// </para>
     /// <para>
-    /// A successful <c>ARTICLE</c> writes <c>220 0</c>, the exact retained ArtData, and one <c>.CRLF</c> terminator.
-    /// The retained entry is removed only after all three writes complete. A failure before that rolls the claim
+    /// A successful <c>ARTICLE</c> writes <c>220 0</c>, the multiline article image, and one <c>.CRLF</c> terminator.
+    /// Header lines that begin with <c>.</c> gain one stuffing dot in that image only. The retained body is copied
+    /// unchanged, so a stuffing dot already stored on a body line is not added again. The retained entry is removed
+    /// only after all three writes complete. A failure before that rolls the claim
     /// back when the entry is still eligible. Completion of the local writes is not proof the peer processed the article.
     /// A disconnect during the write can leave the peer with a prefix and, after rollback, a later retry can deliver
     /// the article again. A commit followed by a lost connection cannot be delivered again.
@@ -163,8 +166,14 @@ namespace VectorNNTP.BackFiller.Listener
             }
 
             using var claim = claimed.Claim!;
+            var payload = claim.ArticleBytes;
+            if (NntpDeliveryFraming.TryStuffHeaderLines(claim.ArticleBytes.Span, out var stuffed))
+            {
+                payload = stuffed;
+            }
+
             await WriteFullyAsync(BuildFollowsLine(argument.Span), cancellationToken).ConfigureAwait(false);
-            await WriteFullyAsync(claim.ArticleBytes, cancellationToken).ConfigureAwait(false);
+            await WriteFullyAsync(payload, cancellationToken).ConfigureAwait(false);
             await WriteFullyAsync(Terminator, cancellationToken).ConfigureAwait(false);
             claim.Commit();
         }

@@ -70,7 +70,8 @@ namespace VectorNNTP.BackFiller.Retention
         /// <remarks>
         /// Does not copy ArtData. Does not remove the entry. RequestIds stay openable until
         /// <see cref="ArticleRetentionAuthority.ArticleDeliveryClaim.Commit"/>.
-        /// An entry that does not end in CRLF is <see cref="ArticleDeliveryClaimKind.NotFrameable"/>.
+        /// An entry whose lines are not exclusively CRLF, or that has a dot-leading line and no header/body
+        /// separator, is <see cref="ArticleDeliveryClaimKind.NotFrameable"/>. The retained buffer is not rewritten.
         /// A second claim while one is active is <see cref="ArticleDeliveryClaimKind.InDelivery"/>.
         /// </remarks>
         /// <exception cref="ObjectDisposedException">The authority has been disposed.</exception>
