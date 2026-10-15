@@ -46,19 +46,25 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// <summary>
         /// Copies <paramref name="artData"/> with one extra leading dot on each header line that begins with <c>.</c>.
         /// </summary>
-        /// <param name="artData">Frameable retained article. Not modified.</param>
+        /// <param name="artData">Retained article. Not modified.</param>
         /// <param name="stuffed">
         /// The socket image when at least one header line needed a dot.
-        /// <see langword="null"/> when the caller should send <paramref name="artData"/> unchanged.
+        /// <see langword="null"/> when the caller should send <paramref name="artData"/> unchanged,
+        /// or when <paramref name="artData"/> is not frameable.
         /// </param>
         /// <returns>
         /// <see langword="true"/> when <paramref name="stuffed"/> holds the header-stuffed image.
-        /// <see langword="false"/> when no header line begins with <c>.</c>.
+        /// <see langword="false"/> when the article is not frameable, has no header/body separator,
+        /// or no header line begins with <c>.</c>.
         /// </returns>
+        /// <remarks>
+        /// <see cref="IsFrameable"/> runs before the header region is located for stuffing and before any socket image is allocated.
+        /// A header/body separator alone does not make a buffer frameable. Body bytes in a successful image are copied unchanged.
+        /// </remarks>
         internal static bool TryStuffHeaderLines(ReadOnlySpan<byte> artData, out byte[]? stuffed)
         {
             stuffed = null;
-            if (!TryFindBodyStart(artData, out var bodyStart))
+            if (!IsFrameable(artData) || !TryFindBodyStart(artData, out var bodyStart))
             {
                 return false;
             }

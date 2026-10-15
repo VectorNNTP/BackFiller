@@ -17,10 +17,20 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         private AsyncEventingBasicConsumer? _consumer;
 
         /// <summary>Delivery handler from <see cref="BasicConsumeAsync"/>. A null handler drops the delivery without ack or nack.</summary>
-        private Func<RabbitMqManualAckDelivery, Task>? _onDelivery;
+        private volatile Func<RabbitMqManualAckDelivery, Task>? _onDelivery;
 
         /// <summary><c>1</c> after the first <see cref="DisposeAsync"/>.</summary>
         private int _disposed;
+
+        /// <summary>
+        /// Serializes <see cref="BasicConsumeAsync"/> with <see cref="DisposeAsync"/> across the awaited broker calls.
+        /// A monitor cannot be held across those awaits. This semaphore is not disposed: a late consume still has to observe
+        /// <see cref="_disposed"/> after the first disposal has released the gate. It has no named wait handle.
+        /// </summary>
+        private readonly SemaphoreSlim _lifecycle = new(1, 1);
+
+        /// <summary>Callers blocked in <see cref="EnterLifecycleAsync"/> before they hold <see cref="_lifecycle"/>.</summary>
+        private int _lifecycleWaiters;
 
         /// <summary>
         /// Initializes a new wrapper around an opened channel.
@@ -43,6 +53,10 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// Settlement checks this inside the channel gate, so it does not start a broker RPC once disposal has entered.
         /// </remarks>
         public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _channel.IsOpen;
+
+        /// <summary>Gets how many consume or dispose calls are waiting to enter the lifecycle gate.</summary>
+        /// <remarks>The holder is not counted. Tests use this to observe a blocked dispose or a second consume.</remarks>
+        internal int LifecycleWaiters => Volatile.Read(ref _lifecycleWaiters);
 
         /// <inheritdoc />
         public Task ExchangeDeclareAsync(
@@ -106,6 +120,14 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// Holds <see cref="_lifecycle"/> across QoS and Basic.Consume. The handler is installed before Basic.Consume so a
+        /// delivery that arrives with Consume-Ok is not dropped, and <see cref="_consumer"/> is assigned only after that call
+        /// returns, before the gate is released. A second call throws <see cref="InvalidOperationException"/>.
+        /// RabbitMQ.Client 7 adds the dispatcher consumer inside Consume-Ok handling and removes it if that handling throws,
+        /// so a faulted <see cref="IChannel.BasicConsumeAsync"/> does not leave a client-tracked consumer. This method still
+        /// detaches the local handler before releasing the gate. It does not close the channel; the caller disposes on failure.
+        /// </remarks>
         public async Task<string> BasicConsumeAsync(
             string queue,
             ushort prefetchCount,
@@ -114,20 +136,44 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(queue);
             ArgumentNullException.ThrowIfNull(onDelivery);
-            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
-            if (!_channel.IsOpen)
+            await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                throw new InvalidOperationException("RabbitMQ channel is not open for consume.");
-            }
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+                if (_consumer is not null)
+                {
+                    throw new InvalidOperationException("RabbitMQ manual-ack channel already has a consumer.");
+                }
 
-            _onDelivery = onDelivery;
-            await _channel.BasicQosAsync(0, prefetchCount, global: false, cancellationToken).ConfigureAwait(false);
-            var consumer = new AsyncEventingBasicConsumer(_channel);
-            consumer.ReceivedAsync += OnReceivedAsync;
-            _consumer = consumer;
-            return await _channel
-                .BasicConsumeAsync(queue, autoAck: false, consumer, cancellationToken)
-                .ConfigureAwait(false);
+                if (!_channel.IsOpen)
+                {
+                    throw new InvalidOperationException("RabbitMQ channel is not open for consume.");
+                }
+
+                await _channel.BasicQosAsync(0, prefetchCount, global: false, cancellationToken).ConfigureAwait(false);
+                var consumer = new AsyncEventingBasicConsumer(_channel);
+                consumer.ReceivedAsync += OnReceivedAsync;
+                _onDelivery = onDelivery;
+                try
+                {
+                    var tag = await _channel
+                        .BasicConsumeAsync(queue, autoAck: false, consumer, cancellationToken)
+                        .ConfigureAwait(false);
+                    _consumer = consumer;
+                    return tag;
+                }
+                catch (Exception)
+                {
+                    // codeql[cs/catch-of-all-exceptions] A failed or cancelled registration must detach the local handler and then propagate.
+                    _onDelivery = null;
+                    consumer.ReceivedAsync -= OnReceivedAsync;
+                    throw;
+                }
+            }
+            finally
+            {
+                _lifecycle.Release();
+            }
         }
 
         /// <inheritdoc />
@@ -154,30 +200,59 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 
         /// <inheritdoc />
         /// <remarks>
-        /// The disposed flag is published under <see cref="ArticleWorkSettlementLease"/>'s channel gate, after any
-        /// ACK, NACK, or Basic.Cancel already inside that gate has returned. The client close runs only after the gate
-        /// is released. Client close waits for the consumer callback, so holding the gate across close would deadlock
-        /// a callback that still needs the gate to finish settlement. A second call does not close the client channel again.
+        /// <see cref="_lifecycle"/> is acquired first, so an in-flight <see cref="BasicConsumeAsync"/> publishes
+        /// <see cref="_consumer"/> or clears a failed registration before disposal unsubscribes or closes.
+        /// The disposed flag is then published under <see cref="ArticleWorkSettlementLease"/>'s channel gate, after any
+        /// ACK, NACK, or Basic.Cancel already inside that gate has returned. The client close runs only after that
+        /// settlement gate is released, while <see cref="_lifecycle"/> is still held so a new consume cannot start on
+        /// the closing channel. Client close waits for the consumer callback, so holding the settlement gate across
+        /// close would deadlock a callback that still needs that gate to finish settlement. A second call waits for
+        /// the first close to finish and does not close the client channel again.
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
-            var close = false;
-            await ArticleWorkSettlementLease.RunExclusiveAsync(this, () =>
+            await EnterLifecycleAsync(CancellationToken.None).ConfigureAwait(false);
+            try
             {
-                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                var close = false;
+                await ArticleWorkSettlementLease.RunExclusiveAsync(this, () =>
                 {
-                    _consumer?.ReceivedAsync -= OnReceivedAsync;
-                    _consumer = null;
-                    _onDelivery = null;
-                    close = true;
+                    if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                    {
+                        _consumer?.ReceivedAsync -= OnReceivedAsync;
+                        _consumer = null;
+                        _onDelivery = null;
+                        close = true;
+                    }
+
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
+
+                if (close)
+                {
+                    await RabbitMqChannelShutdown.CloseIfOpenThenDisposeAsync(_channel).ConfigureAwait(false);
                 }
-
-                return Task.CompletedTask;
-            }).ConfigureAwait(false);
-
-            if (close)
+            }
+            finally
             {
-                await RabbitMqChannelShutdown.CloseIfOpenThenDisposeAsync(_channel).ConfigureAwait(false);
+                _lifecycle.Release();
+            }
+        }
+
+        /// <summary>Waits for <see cref="_lifecycle"/> and counts this caller only while it is blocked.</summary>
+        /// <param name="cancellationToken">Cancels consume setup before it enters. Disposal passes <see cref="CancellationToken.None"/>.</param>
+        /// <returns>A task that completes when this caller holds the gate.</returns>
+        /// <remarks>A cancelled wait does not hold the semaphore and must not release it.</remarks>
+        private async Task EnterLifecycleAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _lifecycleWaiters);
+            try
+            {
+                await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _lifecycleWaiters);
             }
         }
 
@@ -187,7 +262,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <param name="sender">Unused.</param>
         /// <param name="eventArgs">Client delivery. The body is passed through without copying.</param>
         /// <remarks>
-        /// When no handler is installed the delivery is ignored and left unsettled. Handler exceptions propagate to the client consumer.
+        /// When no handler is installed, including after disposal clears it, the delivery is ignored and left unsettled.
+        /// The handler reference is read once. Handler exceptions propagate to the client consumer.
         /// </remarks>
         private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs eventArgs)
         {

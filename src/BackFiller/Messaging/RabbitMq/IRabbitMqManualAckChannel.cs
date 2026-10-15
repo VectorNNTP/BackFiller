@@ -50,7 +50,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             CancellationToken cancellationToken);
 
         /// <summary>
-        /// Starts a manual-ack consumer on <paramref name="queue"/> with the given prefetch.
+        /// Starts one manual-ack consumer on <paramref name="queue"/> with the given prefetch.
+        /// A second call on the same channel throws <see cref="InvalidOperationException"/>.
         /// </summary>
         /// <param name="queue">Queue previously declared for consume.</param>
         /// <param name="prefetchCount">Per-channel prefetch.</param>

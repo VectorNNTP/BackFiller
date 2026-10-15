@@ -53,7 +53,9 @@ Without `blake3`, the script still checks that `articleId` is 64 lowercase hex d
 
 ## Configuration
 
-Flags override environment variables. Passwords are read from the environment when `--rabbitmq-password` is omitted. The script does not print the password, the username, or an AMQP URL.
+Flags override environment variables. An omitted flag inherits the environment variable, then the default. Boolean flags accept an explicit opposite: `--no-insecure-skip-tls-verify` forces certificate verification, and `--no-rabbitmq-tls` forces plaintext AMQP. Passwords are read from the environment when `--rabbitmq-password` is omitted. The script does not print the password, the username, or an AMQP URL.
+
+`--amqp-url` or `BACKFILLER_AMQP_URL` is the broker identity. In that mode the script does not read or validate `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_VHOST`, `RABBITMQ_CA_FILE`, `RABBITMQ_USE_TLS`, or the discrete username and password. An `amqps` URL selects TLS by itself. Passing both `--amqp-url` and `--rabbitmq-host` is an error. `--rabbitmq-host` overrides an environment AMQP URL and uses the discrete settings.
 
 | Setting | Flag | Environment variable |
 |---|---|---|
@@ -61,7 +63,7 @@ Flags override environment variables. Passwords are read from the environment wh
 | NNTP TLS port (`BackFiller:BindPortTls`) | `--nntp-port` | `NNTP_PORT` |
 | Certificate name / SNI | `--tls-server-name` | `NNTP_TLS_SERVER_NAME` |
 | Listener CA bundle | `--ca-file` | `NNTP_CA_FILE` |
-| Skip listener certificate checks | `--insecure-skip-tls-verify` | `NNTP_INSECURE_SKIP_TLS_VERIFY=true` |
+| Skip listener certificate checks (default false) | `--insecure-skip-tls-verify` / `--no-insecure-skip-tls-verify` | `NNTP_INSECURE_SKIP_TLS_VERIFY=true` |
 | Message-ID, including brackets | `--message-id` | `BACKFILLER_MESSAGE_ID` |
 | Backbone label | `--backbone` | `BACKFILLER_BACKBONE` |
 | AMQP URL (overrides the discrete broker settings) | `--amqp-url` | `BACKFILLER_AMQP_URL` |
@@ -70,7 +72,7 @@ Flags override environment variables. Passwords are read from the environment wh
 | Virtual host (default `/`) | `--rabbitmq-vhost` | `RABBITMQ_VHOST` |
 | Broker username | `--rabbitmq-username` | `VECTOR__RABBITMQ__USERNAME` |
 | Broker password | `--rabbitmq-password` | `VECTOR__RABBITMQ__PASSWORD` |
-| Broker TLS | `--rabbitmq-tls` | `RABBITMQ_USE_TLS=true` |
+| Broker TLS for discrete settings (default false) | `--rabbitmq-tls` / `--no-rabbitmq-tls` | `RABBITMQ_USE_TLS=true` |
 | Broker CA bundle | `--rabbitmq-ca-file` | `RABBITMQ_CA_FILE` |
 | TCP/TLS connect timeout seconds (default 30) | `--connect-timeout` | `BACKFILLER_CONNECT_TIMEOUT_SECONDS` |
 | RPC wait seconds (default 30) | `--rpc-timeout` | `BACKFILLER_RPC_TIMEOUT_SECONDS` |

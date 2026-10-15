@@ -20,8 +20,10 @@ does not open a socket.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ipaddress
 import json
+import math
 import os
 import re
 import socket
@@ -227,10 +229,9 @@ class NntpSession:
             sent += wrote
 
     def close(self) -> None:
-        try:
+        # Closing an already-closed socket raises OSError. That must not fail the test.
+        with contextlib.suppress(OSError):
             self._sock.close()
-        except OSError:
-            pass
 
     def _fill(self) -> None:
         try:
@@ -291,7 +292,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
             "then ARTICLE <message-id> on the same NNTP connection."
         ),
     )
-    parser.add_argument("--self-test", action="store_true", help="Run local framing and schema checks. No network.")
+    parser.add_argument("--self-test", action="store_true", help="Run local framing, schema, and configuration checks. No network.")
     parser.add_argument("--nntp-host", default=os.environ.get("NNTP_HOST"), help="Listener host. Env: NNTP_HOST.")
     parser.add_argument("--nntp-port", default=os.environ.get("NNTP_PORT"), help="TLS listener port (BackFiller:BindPortTls). Env: NNTP_PORT.")
     parser.add_argument(
@@ -302,19 +303,56 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--ca-file", default=os.environ.get("NNTP_CA_FILE"), help="PEM CA bundle for the listener certificate. Env: NNTP_CA_FILE.")
     parser.add_argument(
         "--insecure-skip-tls-verify",
-        action="store_true",
-        help="Disable NNTP certificate and hostname checks. Env: NNTP_INSECURE_SKIP_TLS_VERIFY=true.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Disable NNTP certificate and hostname checks. "
+            "--no-insecure-skip-tls-verify forces verification. "
+            "Omitted: NNTP_INSECURE_SKIP_TLS_VERIFY, default false."
+        ),
     )
     parser.add_argument("--message-id", default=os.environ.get("BACKFILLER_MESSAGE_ID"), help="Message-ID including angle brackets. Env: BACKFILLER_MESSAGE_ID.")
     parser.add_argument("--backbone", default=os.environ.get("BACKFILLER_BACKBONE"), help="Article Work backbone label, for example Giganews. Env: BACKFILLER_BACKBONE.")
-    parser.add_argument("--amqp-url", default=os.environ.get("BACKFILLER_AMQP_URL"), help="AMQP URL. Overrides discrete RabbitMQ settings. Not logged. Env: BACKFILLER_AMQP_URL.")
-    parser.add_argument("--rabbitmq-host", default=os.environ.get("RABBITMQ_HOST"), help="Broker host. Env: RABBITMQ_HOST.")
-    parser.add_argument("--rabbitmq-port", default=os.environ.get("RABBITMQ_PORT", str(DEFAULT_RABBITMQ_PORT)), help="Broker TCP port. Default 5672. Env: RABBITMQ_PORT.")
-    parser.add_argument("--rabbitmq-vhost", default=os.environ.get("RABBITMQ_VHOST", DEFAULT_RABBITMQ_VHOST), help="Virtual host. Default /. Env: RABBITMQ_VHOST.")
-    parser.add_argument("--rabbitmq-username", default=os.environ.get("VECTOR__RABBITMQ__USERNAME"), help="Broker username. Env: VECTOR__RABBITMQ__USERNAME. Not logged.")
-    parser.add_argument("--rabbitmq-password", default=None, help="Broker password. Prefer VECTOR__RABBITMQ__PASSWORD so it is not on the command line. Not logged.")
-    parser.add_argument("--rabbitmq-tls", action="store_true", help="Use TLS for AMQP. Env: RABBITMQ_USE_TLS=true. The checked-in RabbitMQ file sets EnableSsl false.")
-    parser.add_argument("--rabbitmq-ca-file", default=os.environ.get("RABBITMQ_CA_FILE"), help="PEM CA bundle for the broker. Env: RABBITMQ_CA_FILE.")
+    parser.add_argument(
+        "--amqp-url",
+        default=None,
+        help="AMQP URL. Overrides discrete RabbitMQ settings. Not logged. Env: BACKFILLER_AMQP_URL.",
+    )
+    parser.add_argument("--rabbitmq-host", default=None, help="Broker host. Env: RABBITMQ_HOST. Overrides BACKFILLER_AMQP_URL.")
+    parser.add_argument(
+        "--rabbitmq-port",
+        default=None,
+        help="Broker TCP port. Default 5672. Env: RABBITMQ_PORT. Ignored when an AMQP URL is used.",
+    )
+    parser.add_argument(
+        "--rabbitmq-vhost",
+        default=None,
+        help="Virtual host. Default /. Env: RABBITMQ_VHOST. Ignored when an AMQP URL is used.",
+    )
+    parser.add_argument(
+        "--rabbitmq-username",
+        default=None,
+        help="Broker username. Env: VECTOR__RABBITMQ__USERNAME. Not logged. Ignored when an AMQP URL is used.",
+    )
+    parser.add_argument(
+        "--rabbitmq-password",
+        default=None,
+        help="Broker password. Prefer VECTOR__RABBITMQ__PASSWORD so it is not on the command line. Not logged. Ignored when an AMQP URL is used.",
+    )
+    parser.add_argument(
+        "--rabbitmq-tls",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Use TLS for discrete AMQP settings. --no-rabbitmq-tls forces plaintext. "
+            "Omitted: RABBITMQ_USE_TLS, default false. Ignored when an AMQP URL is used."
+        ),
+    )
+    parser.add_argument(
+        "--rabbitmq-ca-file",
+        default=None,
+        help="PEM CA bundle for the broker. Env: RABBITMQ_CA_FILE. Ignored when an AMQP URL is used.",
+    )
     parser.add_argument("--connect-timeout", default=os.environ.get("BACKFILLER_CONNECT_TIMEOUT_SECONDS", str(DEFAULT_CONNECT_TIMEOUT_SECONDS)), help="TCP and TLS handshake timeout in seconds. Default 30.")
     parser.add_argument("--rpc-timeout", default=os.environ.get("BACKFILLER_RPC_TIMEOUT_SECONDS", str(DEFAULT_RPC_TIMEOUT_SECONDS)), help="Seconds to wait for the matching RPC response after publish. Default 30.")
     parser.add_argument("--nntp-timeout", default=os.environ.get("BACKFILLER_NNTP_TIMEOUT_SECONDS", str(DEFAULT_NNTP_TIMEOUT_SECONDS)), help="Per-read and per-write NNTP timeout in seconds. Default 60.")
@@ -322,44 +360,95 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _blank_to_none(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _flag_or_env_bool(flag: object, env_name: str, default: bool) -> bool:
+    """Use an explicit CLI bool. None means the flag was omitted, so the env var or default applies."""
+    if isinstance(flag, bool):
+        return flag
+    raw = os.environ.get(env_name)
+    if raw is None or raw.strip() == "":
+        return default
+    return _env_bool(env_name)
+
+
+def _first_text(flag: object, env_name: str) -> str | None:
+    text = _blank_to_none(flag)
+    if text is not None:
+        return text
+    return _blank_to_none(os.environ.get(env_name))
+
+
 def build_config(args: argparse.Namespace) -> Config:
-    insecure_env = _env_bool("NNTP_INSECURE_SKIP_TLS_VERIFY")
-    rabbit_tls_env = _env_bool("RABBITMQ_USE_TLS")
-    password = args.rabbitmq_password
-    if password is None:
-        password = os.environ.get("VECTOR__RABBITMQ__PASSWORD")
     nntp_host = _required_text(args.nntp_host, "NNTP host (--nntp-host or NNTP_HOST)")
     nntp_port = _port(args.nntp_port, "NNTP port")
     backbone = _required_text(args.backbone, "backbone (--backbone or BACKFILLER_BACKBONE)")
     if _BACKBONE_TOKEN.fullmatch(backbone) is None:
         raise ConfigError("backbone must be 1–64 characters from A-Z, a-z, 0-9, '.', '_', or '-'.")
     message_id = validate_message_id(_required_text(args.message_id, "Message-ID (--message-id or BACKFILLER_MESSAGE_ID)"))
-    amqp_url = args.amqp_url.strip() if isinstance(args.amqp_url, str) and args.amqp_url.strip() else None
-    rabbit_host = args.rabbitmq_host.strip() if isinstance(args.rabbitmq_host, str) and args.rabbitmq_host.strip() else None
-    if amqp_url and rabbit_host:
+    cli_url = _blank_to_none(args.amqp_url)
+    cli_host = _blank_to_none(args.rabbitmq_host)
+    if cli_url and cli_host:
         raise ConfigError("Pass either --amqp-url or --rabbitmq-host, not both.")
+    if cli_url is not None:
+        amqp_url: str | None = cli_url
+        rabbit_host: str | None = None
+    elif cli_host is not None:
+        # An explicit host flag overrides an environment AMQP URL.
+        amqp_url = None
+        rabbit_host = cli_host
+    else:
+        amqp_url = _blank_to_none(os.environ.get("BACKFILLER_AMQP_URL"))
+        rabbit_host = None if amqp_url is not None else _blank_to_none(os.environ.get("RABBITMQ_HOST"))
     if amqp_url is None:
         if rabbit_host is None:
             raise ConfigError("RabbitMQ host is required (--rabbitmq-host or RABBITMQ_HOST), or pass --amqp-url.")
-        if not args.rabbitmq_username or not str(args.rabbitmq_username).strip():
+        rabbit_user = _first_text(args.rabbitmq_username, "VECTOR__RABBITMQ__USERNAME")
+        if rabbit_user is None:
             raise ConfigError("RabbitMQ username is required (VECTOR__RABBITMQ__USERNAME or --rabbitmq-username).")
-        if password is None or password == "":
+        rabbit_password = args.rabbitmq_password
+        if rabbit_password is None:
+            rabbit_password = os.environ.get("VECTOR__RABBITMQ__PASSWORD")
+        if rabbit_password is None or rabbit_password == "":
             raise ConfigError("RabbitMQ password is required (VECTOR__RABBITMQ__PASSWORD or --rabbitmq-password).")
+        port_text = args.rabbitmq_port
+        if port_text is None:
+            port_text = os.environ.get("RABBITMQ_PORT", str(DEFAULT_RABBITMQ_PORT))
+        rabbit_port = _port(port_text, "RabbitMQ port")
+        vhost = _first_text(args.rabbitmq_vhost, "RABBITMQ_VHOST") or DEFAULT_RABBITMQ_VHOST
+        rabbit_tls = _flag_or_env_bool(args.rabbitmq_tls, "RABBITMQ_USE_TLS", False)
+        ca_text = args.rabbitmq_ca_file
+        if ca_text is None:
+            ca_text = os.environ.get("RABBITMQ_CA_FILE")
+        rabbit_ca_file = _optional_path(ca_text)
+    else:
+        # The URL is the broker identity. Discrete host, port, credentials, TLS, and CA are not read.
+        rabbit_host = None
+        rabbit_port = DEFAULT_RABBITMQ_PORT
+        vhost = DEFAULT_RABBITMQ_VHOST
+        rabbit_user = None
+        rabbit_password = None
+        rabbit_tls = False
+        rabbit_ca_file = None
     tls_name = args.tls_server_name.strip() if isinstance(args.tls_server_name, str) and args.tls_server_name.strip() else None
     return Config(
         nntp_host=nntp_host,
         nntp_port=nntp_port,
         tls_server_name=tls_name,
         ca_file=_optional_path(args.ca_file),
-        insecure_tls=bool(args.insecure_skip_tls_verify or insecure_env),
+        insecure_tls=_flag_or_env_bool(args.insecure_skip_tls_verify, "NNTP_INSECURE_SKIP_TLS_VERIFY", False),
         amqp_url=amqp_url,
         rabbit_host=rabbit_host,
-        rabbit_port=_port(args.rabbitmq_port, "RabbitMQ port"),
-        rabbit_vhost=args.rabbitmq_vhost if args.rabbitmq_vhost else DEFAULT_RABBITMQ_VHOST,
-        rabbit_user=str(args.rabbitmq_username).strip() if args.rabbitmq_username else None,
-        rabbit_password=password,
-        rabbit_tls=bool(args.rabbitmq_tls or rabbit_tls_env),
-        rabbit_ca_file=_optional_path(args.rabbitmq_ca_file),
+        rabbit_port=rabbit_port,
+        rabbit_vhost=vhost,
+        rabbit_user=rabbit_user,
+        rabbit_password=rabbit_password,
+        rabbit_tls=rabbit_tls,
+        rabbit_ca_file=rabbit_ca_file,
         backbone=backbone,
         message_id=message_id,
         message_id_text=message_id.decode("ascii"),
@@ -619,6 +708,31 @@ def _message_id_header(article: bytes) -> bytes | None:
     return found
 
 
+def _amqp_shutdown_errors() -> tuple[type[BaseException], ...]:
+    """Return the shutdown errors a best-effort close may ignore."""
+    try:
+        import pika.exceptions as pika_exceptions
+    except ImportError:
+        return (OSError,)
+    return (OSError, pika_exceptions.AMQPError)
+
+
+def _best_effort_close(connection: object) -> None:
+    """Close a socket or AMQP connection without hiding unexpected failures.
+
+    A closed socket raises ``OSError``. pika raises ``AMQPError`` when the
+    connection is already gone. Either may happen while this process is
+    finishing or reporting an earlier connection failure. Any other exception
+    propagates.
+    """
+    closer = getattr(connection, "close", None)
+    if closer is None:
+        return
+    with contextlib.suppress(*_amqp_shutdown_errors()):
+        if getattr(connection, "is_open", True):
+            closer()
+
+
 class RabbitSession:
     """One AMQP connection and the exclusive reply queue for this test."""
 
@@ -628,15 +742,7 @@ class RabbitSession:
         self.reply_to = reply_to
 
     def close(self) -> None:
-        connection = self.connection
-        closer = getattr(connection, "close", None)
-        if closer is None:
-            return
-        try:
-            if getattr(connection, "is_open", True):
-                closer()
-        except Exception:
-            pass
+        _best_effort_close(self.connection)
 
 
 def connect_rabbit(config: Config) -> RabbitSession:
@@ -652,10 +758,7 @@ def connect_rabbit(config: Config) -> RabbitSession:
         return RabbitSession(connection, channel, reply_to)
     except Exception as exc:
         if connection is not None:
-            try:
-                connection.close()
-            except Exception:
-                pass
+            _best_effort_close(connection)
         raise TestFailure(
             "RabbitMQ RPC failure or timeout",
             "Could not open the RabbitMQ reply queue: " + redact(str(exc), config.secrets()),
@@ -867,6 +970,9 @@ def import_pika() -> object:
 
 def _rabbit_parameters(pika: object, config: Config) -> object:
     if config.amqp_url:
+        # URL host, port, vhost, credentials, and TLS are authoritative.
+        # connection_attempts, retry_delay, and connection_name are this script's
+        # connection behavior, not discrete broker settings.
         parameters = pika.URLParameters(config.amqp_url)
     else:
         credentials = pika.PlainCredentials(config.rabbit_user, config.rabbit_password)
@@ -1064,6 +1170,8 @@ def _positive_float(value: object, label: str) -> float:
         number = float(str(value))
     except (TypeError, ValueError):
         raise ConfigError(f"{label} must be a number of seconds.") from None
+    if not math.isfinite(number):
+        raise ConfigError(f"{label} must be a finite number of seconds.")
     if number <= 0:
         raise ConfigError(f"{label} must be greater than zero.")
     return number
@@ -1121,6 +1229,295 @@ class _ChunkSocket:
         return None
 
 
+def _best_effort_close_failures() -> list[str]:
+    """Return failures from the local shutdown-suppression checks."""
+    failures: list[str] = []
+
+    class _ClosedSocket:
+        def close(self) -> None:
+            raise OSError("already closed")
+
+    class _BrokenSocket:
+        def close(self) -> None:
+            raise RuntimeError("socket close bug")
+
+    NntpSession(_ClosedSocket(), MAX_WIRE_LINE_CONTENT).close()
+    try:
+        NntpSession(_BrokenSocket(), MAX_WIRE_LINE_CONTENT).close()
+    except RuntimeError as exc:
+        if str(exc) != "socket close bug":
+            failures.append("unexpected socket close error was replaced")
+    else:
+        failures.append("unexpected socket close error was ignored")
+
+    class _ClosedAmqp:
+        is_open = True
+
+        def close(self) -> None:
+            raise OSError("amqp socket closed")
+
+    class _BrokenAmqp:
+        is_open = True
+
+        def close(self) -> None:
+            raise RuntimeError("amqp close bug")
+
+    RabbitSession(object(), None, "reply").close()
+
+    class _IdleAmqp:
+        is_open = False
+
+        def close(self) -> None:
+            raise RuntimeError("close called while idle")
+
+    try:
+        RabbitSession(_IdleAmqp(), None, "reply").close()
+    except RuntimeError:
+        failures.append("idle AMQP connection was closed")
+
+    RabbitSession(_ClosedAmqp(), None, "reply").close()
+    try:
+        RabbitSession(_BrokenAmqp(), None, "reply").close()
+    except RuntimeError as exc:
+        if str(exc) != "amqp close bug":
+            failures.append("unexpected AMQP close error was replaced")
+    else:
+        failures.append("unexpected AMQP close error was ignored")
+
+    try:
+        import pika.exceptions as pika_exceptions
+    except ImportError:
+        return failures
+
+    class _PikaClosed:
+        is_open = True
+
+        def close(self) -> None:
+            raise pika_exceptions.AMQPConnectionError("already gone")
+
+    RabbitSession(_PikaClosed(), None, "reply").close()
+    return failures
+
+
+def _configuration_failures() -> list[str]:
+    """Return configuration-precedence and timeout failures. Does not print secrets."""
+    failures: list[str] = []
+    managed = (
+        "NNTP_HOST",
+        "NNTP_PORT",
+        "NNTP_TLS_SERVER_NAME",
+        "NNTP_CA_FILE",
+        "NNTP_INSECURE_SKIP_TLS_VERIFY",
+        "BACKFILLER_MESSAGE_ID",
+        "BACKFILLER_BACKBONE",
+        "BACKFILLER_AMQP_URL",
+        "RABBITMQ_HOST",
+        "RABBITMQ_PORT",
+        "RABBITMQ_VHOST",
+        "RABBITMQ_CA_FILE",
+        "RABBITMQ_USE_TLS",
+        "VECTOR__RABBITMQ__USERNAME",
+        "VECTOR__RABBITMQ__PASSWORD",
+        "BACKFILLER_CONNECT_TIMEOUT_SECONDS",
+        "BACKFILLER_RPC_TIMEOUT_SECONDS",
+        "BACKFILLER_NNTP_TIMEOUT_SECONDS",
+        "BACKFILLER_MAX_ARTICLE_BYTES",
+    )
+    base = [
+        "--nntp-host",
+        "nntp.example",
+        "--nntp-port",
+        "563",
+        "--backbone",
+        "Giganews",
+        "--message-id",
+        "<a@b.example>",
+    ]
+    discrete = {
+        "RABBITMQ_HOST": "broker.example",
+        "VECTOR__RABBITMQ__USERNAME": "discrete-user",
+        "VECTOR__RABBITMQ__PASSWORD": "discrete-secret",
+    }
+    amqp_url = "amqp://url-user:url-secret@url-broker.example:5672/vh"
+    saved = {key: os.environ.get(key) for key in managed}
+
+    def build(argv: list[str], env: dict[str, str]) -> Config:
+        for key in managed:
+            os.environ.pop(key, None)
+        os.environ.update(env)
+        return build_config(parse_args(base + argv))
+
+    def note(condition: bool, detail: str) -> None:
+        if not condition:
+            failures.append(detail)
+
+    def expect_error(argv: list[str], env: dict[str, str], fragment: str, label: str) -> None:
+        try:
+            build(argv, env)
+        except ConfigError as exc:
+            note(fragment in str(exc), f"{label}: message did not include {fragment!r}")
+        else:
+            failures.append(f"{label}: configuration was accepted")
+
+    try:
+        disabled = build(["--no-insecure-skip-tls-verify"], {**discrete, "NNTP_INSECURE_SKIP_TLS_VERIFY": "true"})
+        note(disabled.insecure_tls is False, "CLI did not disable NNTP verification when the environment enabled it")
+        enabled = build(["--insecure-skip-tls-verify"], {**discrete, "NNTP_INSECURE_SKIP_TLS_VERIFY": "false"})
+        note(enabled.insecure_tls is True, "CLI did not enable NNTP verification skipping when the environment disabled it")
+        inherited = build([], {**discrete, "NNTP_INSECURE_SKIP_TLS_VERIFY": "true"})
+        note(inherited.insecure_tls is True, "omitted NNTP verification flag did not inherit the environment")
+        defaulted = build([], discrete)
+        note(defaulted.insecure_tls is False, "NNTP verification default was not certificate checking")
+
+        rabbit_off = build(["--no-rabbitmq-tls"], {**discrete, "RABBITMQ_USE_TLS": "true"})
+        note(rabbit_off.rabbit_tls is False, "CLI did not disable RabbitMQ TLS when the environment enabled it")
+        rabbit_on = build(["--rabbitmq-tls"], {**discrete, "RABBITMQ_USE_TLS": "false"})
+        note(rabbit_on.rabbit_tls is True, "CLI did not enable RabbitMQ TLS when the environment disabled it")
+        rabbit_env = build([], {**discrete, "RABBITMQ_USE_TLS": "true"})
+        note(rabbit_env.rabbit_tls is True, "omitted RabbitMQ TLS flag did not inherit the environment")
+        note(defaulted.rabbit_tls is False, "RabbitMQ TLS default was not plaintext")
+
+        url_config = build(
+            ["--amqp-url", amqp_url],
+            {
+                "RABBITMQ_HOST": "discrete.example",
+                "RABBITMQ_PORT": "not-a-port",
+                "RABBITMQ_VHOST": "other",
+                "RABBITMQ_CA_FILE": "missing-ca-not-real.pem",
+                "RABBITMQ_USE_TLS": "true",
+                "VECTOR__RABBITMQ__USERNAME": "discrete-user",
+                "VECTOR__RABBITMQ__PASSWORD": "discrete-secret",
+            },
+        )
+        note(url_config.amqp_url == amqp_url, "AMQP URL was not kept as the broker configuration")
+        note(url_config.rabbit_host is None, "URL mode kept a discrete host")
+        note(url_config.rabbit_user is None, "URL mode kept a discrete username")
+        note(url_config.rabbit_password is None, "URL mode kept a discrete password")
+        note(url_config.rabbit_tls is False, "URL mode kept discrete TLS")
+        note(url_config.rabbit_ca_file is None, "URL mode kept a discrete CA file")
+        note(url_config.rabbit_vhost == DEFAULT_RABBITMQ_VHOST, "URL mode kept a discrete virtual host")
+
+        bare_url = build(
+            ["--amqp-url", amqp_url, "--rabbitmq-port=not-a-port", "--rabbitmq-ca-file=missing-ca-not-real.pem"],
+            {},
+        )
+        note(bare_url.rabbit_user is None and bare_url.rabbit_password is None, "URL mode required discrete credentials")
+        note(bare_url.rabbit_ca_file is None, "URL mode validated an explicit unused CA file")
+        amqps_url = "amqps://url-user:url-secret@url-broker.example:5671/vh"
+        amqps_config = build(
+            ["--amqp-url", amqps_url],
+            {"RABBITMQ_USE_TLS": "false", "RABBITMQ_CA_FILE": "missing-ca-not-real.pem"},
+        )
+        note(amqps_config.amqp_url == amqps_url, "amqps URL was not kept")
+        note(amqps_config.rabbit_ca_file is None, "amqps URL mode validated a discrete CA file")
+
+        host_override = build(
+            [
+                "--rabbitmq-host",
+                "cli-broker.example",
+                "--rabbitmq-port",
+                "5671",
+                "--rabbitmq-username",
+                "cli-user",
+                "--rabbitmq-password",
+                "cli-secret",
+            ],
+            {"BACKFILLER_AMQP_URL": amqp_url, "RABBITMQ_PORT": "not-a-port"},
+        )
+        note(host_override.amqp_url is None, "explicit --rabbitmq-host did not override the environment AMQP URL")
+        note(host_override.rabbit_host == "cli-broker.example", "explicit host was not used")
+        note(host_override.rabbit_port == 5671, "explicit port did not override the environment port")
+        note(host_override.rabbit_user == "cli-user", "explicit username was not used")
+
+        valid_discrete = build([], discrete)
+        note(valid_discrete.amqp_url is None, "discrete mode stored an AMQP URL")
+        note(valid_discrete.rabbit_host == "broker.example", "discrete host was not used")
+        note(valid_discrete.rabbit_port == DEFAULT_RABBITMQ_PORT, "discrete port default was not 5672")
+        note(valid_discrete.rabbit_user == "discrete-user", "discrete username was not used")
+        note(valid_discrete.connect_timeout == DEFAULT_CONNECT_TIMEOUT_SECONDS, "connect timeout default changed")
+        note(valid_discrete.rpc_timeout == DEFAULT_RPC_TIMEOUT_SECONDS, "RPC timeout default changed")
+        note(valid_discrete.nntp_timeout == DEFAULT_NNTP_TIMEOUT_SECONDS, "NNTP timeout default changed")
+        note(
+            math.isfinite(valid_discrete.connect_timeout)
+            and math.isfinite(valid_discrete.rpc_timeout)
+            and math.isfinite(valid_discrete.nntp_timeout),
+            "a non-finite timeout reached configuration",
+        )
+
+        expect_error([], {**discrete, "RABBITMQ_PORT": "not-a-port"}, "RabbitMQ port", "invalid discrete port")
+        expect_error(
+            [],
+            {**discrete, "RABBITMQ_CA_FILE": "missing-ca-not-real.pem"},
+            "CA file does not exist",
+            "missing discrete CA file",
+        )
+        expect_error(
+            ["--amqp-url", amqp_url, "--rabbitmq-host", "broker.example"],
+            {},
+            "not both",
+            "URL and host flags together",
+        )
+
+        note(_positive_float("1.5", "RPC timeout") == 1.5, "a positive finite timeout was rejected")
+
+        def expect_float(value: str, fragment: str, label: str) -> None:
+            try:
+                _positive_float(value, "RPC timeout")
+            except ConfigError as exc:
+                note(fragment in str(exc), f"{label}: message did not include {fragment!r}")
+            else:
+                failures.append(f"{label}: timeout was accepted")
+
+        expect_float("0", "greater than zero", "zero timeout")
+        expect_float("-1", "greater than zero", "negative timeout")
+        for value in ("nan", "NaN", "inf", "+inf", "-inf", "Infinity", "-Infinity"):
+            expect_float(value, "finite", f"non-finite timeout {value}")
+            expect_error([f"--rpc-timeout={value}"], discrete, "finite", f"non-finite RPC timeout {value}")
+            expect_error([f"--connect-timeout={value}"], discrete, "finite", f"non-finite connect timeout {value}")
+            expect_error([f"--nntp-timeout={value}"], discrete, "finite", f"non-finite NNTP timeout {value}")
+        expect_float("abc", "number of seconds", "malformed timeout")
+        expect_error(["--rpc-timeout=0"], discrete, "greater than zero", "zero RPC timeout")
+        expect_error(["--rpc-timeout=-1"], discrete, "greater than zero", "negative RPC timeout")
+        expect_error(["--rpc-timeout=abc"], discrete, "number of seconds", "malformed RPC timeout")
+        expect_error(
+            [],
+            {**discrete, "BACKFILLER_RPC_TIMEOUT_SECONDS": "nan"},
+            "finite",
+            "non-finite environment RPC timeout",
+        )
+
+        try:
+            pika = import_pika()
+        except ConfigError:
+            pika = None
+        if pika is not None:
+            parameters = _rabbit_parameters(pika, url_config)
+            note(parameters.host == "url-broker.example", "URL parameters did not use the URL host")
+            note(parameters.port == 5672, "URL parameters did not use the URL port")
+            note(parameters.virtual_host == "vh", "URL parameters did not use the URL virtual host")
+            credentials = parameters.credentials
+            note(
+                getattr(credentials, "username", None) == "url-user",
+                "URL parameters did not use the URL username",
+            )
+            note(getattr(parameters, "ssl_options", None) is None, "URL mode applied discrete TLS or CA settings")
+            note(parameters.connection_attempts == 1, "URL mode dropped connection_attempts")
+            note(parameters.retry_delay == 0, "URL mode dropped retry_delay")
+            secure_parameters = _rabbit_parameters(pika, amqps_config)
+            note(getattr(secure_parameters, "ssl_options", None) is not None, "amqps URL did not select TLS")
+            note(secure_parameters.port == 5671, "amqps URL port was replaced")
+            discrete_parameters = _rabbit_parameters(pika, valid_discrete)
+            note(discrete_parameters.host == "broker.example", "discrete parameters did not use the discrete host")
+            note(getattr(discrete_parameters, "ssl_options", None) is None, "plaintext discrete mode enabled TLS")
+    finally:
+        for key, previous in saved.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+    return failures
+
+
 def run_self_test() -> int:
     failures: list[str] = []
 
@@ -1149,9 +1546,13 @@ def run_self_test() -> int:
     for bad in ("12345@example.invalid", "<a@>", "<a..b@c>", "<.a@b>", "<>"):
         try:
             validate_message_id(bad)
-            check(False, f"invalid message-id was accepted: {bad}")
         except ConfigError:
-            pass
+            rejected = True
+        else:
+            rejected = False
+        check(rejected, f"invalid message-id was accepted: {bad}")
+    failures.extend(_best_effort_close_failures())
+    failures.extend(_configuration_failures())
 
     check(is_canonical_fqdn("backfiller01.usenet.ninja"), "canonical fqdn was rejected")
     check(not is_canonical_fqdn("Backfiller01.usenet.ninja"), "uppercase fqdn was accepted")
@@ -1211,6 +1612,7 @@ def run_self_test() -> int:
     print("[PASS] Multiline dot-stuffing")
     print("[PASS] Message-ID grammar")
     print("[PASS] RPC success and failure schema")
+    print("[PASS] Configuration precedence and finite timeouts")
     print()
     print("Result: PASS")
     print("Live services were not contacted.")

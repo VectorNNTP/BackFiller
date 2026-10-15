@@ -12,6 +12,17 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Maximum characters kept from one sanitized field before an ellipsis is appended.</summary>
         private const int MaxFieldLength = 400;
 
+        /// <summary>Unicode categories that form .NET <c>\w</c>.</summary>
+        private const int WordCategoriesMask =
+            1 << (int)UnicodeCategory.UppercaseLetter |
+            1 << (int)UnicodeCategory.LowercaseLetter |
+            1 << (int)UnicodeCategory.TitlecaseLetter |
+            1 << (int)UnicodeCategory.ModifierLetter |
+            1 << (int)UnicodeCategory.OtherLetter |
+            1 << (int)UnicodeCategory.NonSpacingMark |
+            1 << (int)UnicodeCategory.DecimalDigitNumber |
+            1 << (int)UnicodeCategory.ConnectorPunctuation;
+
         /// <summary>Formats any exception into a safe ACME diagnostic fragment.</summary>
         /// <param name="exception">Failure to describe. An <see cref="AcmeCaException"/> includes problem fields; any other type contributes only its type name.</param>
         /// <returns>A single-line diagnostic with PEM and long tokens redacted.</returns>
@@ -182,7 +193,7 @@ namespace VectorNNTP.BackFiller.Acme
 
             var cleaned = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
             cleaned = PemBlockRegex().Replace(cleaned, "[redacted-pem]");
-            cleaned = LongTokenRegex().Replace(cleaned, "[redacted-token]");
+            cleaned = RedactLongTokens(cleaned);
             if (cleaned.Length > MaxFieldLength)
             {
                 cleaned = cleaned[..MaxFieldLength] + "...";
@@ -229,11 +240,93 @@ namespace VectorNNTP.BackFiller.Acme
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
         private static partial Regex PemBlockRegex();
 
-        /// <summary>Matches a token of 80 or more URL-safe characters so <see cref="SanitizeText"/> can replace it with <c>[redacted-token]</c>.</summary>
-        /// <returns>The compiled token matcher.</returns>
-        [GeneratedRegex(
-            @"\b[A-Za-z0-9_-]{80,}\b",
-            RegexOptions.CultureInvariant)]
-        private static partial Regex LongTokenRegex();
+        /// <summary>
+        /// Replaces matches of <c>\b[A-Za-z0-9_-]{80,}\b</c> with <c>[redacted-token]</c>.
+        /// </summary>
+        /// <param name="text">Single-line text already scanned for PEM blocks.</param>
+        /// <returns>The same instance when nothing matches; otherwise the redacted text.</returns>
+        /// <remarks>
+        /// <c>\b</c> is .NET's Unicode word boundary, including U+200C and U+200D.
+        /// The quantifier is greedy and then shrinks until the trailing boundary holds,
+        /// so a run that ends on <c>-</c> can match without that final hyphen when the next character is not a word character.
+        /// </remarks>
+        private static string RedactLongTokens(string text)
+        {
+            StringBuilder? builder = null;
+            var copied = 0;
+            for (var index = 0; index < text.Length;)
+            {
+                var length = MatchLongToken(text, index);
+                if (length == 0)
+                {
+                    index++;
+                    continue;
+                }
+
+                builder ??= new StringBuilder(text.Length);
+                builder.Append(text, copied, index - copied);
+                builder.Append("[redacted-token]");
+                index += length;
+                copied = index;
+            }
+
+            if (builder is null)
+            {
+                return text;
+            }
+
+            builder.Append(text, copied, text.Length - copied);
+            return builder.ToString();
+        }
+
+        /// <summary>Returns the length of a long-token match at <paramref name="index"/>, or 0.</summary>
+        private static int MatchLongToken(string text, int index)
+        {
+            if (!IsWordBoundary(text, index) || !IsTokenChar(text[index]))
+            {
+                return 0;
+            }
+
+            var end = index + 1;
+            while (end < text.Length && IsTokenChar(text[end]))
+            {
+                end++;
+            }
+
+            while (end - index >= 80)
+            {
+                if (IsWordBoundary(text, end))
+                {
+                    return end - index;
+                }
+
+                end--;
+            }
+
+            return 0;
+        }
+
+        /// <summary>True when <paramref name="index"/> is a .NET <c>\b</c> position.</summary>
+        private static bool IsWordBoundary(string text, int index)
+        {
+            var before = (uint)(index - 1) < (uint)text.Length && IsWordChar(text[index - 1]);
+            var after = (uint)index < (uint)text.Length && IsWordChar(text[index]);
+            return before != after;
+        }
+
+        /// <summary>True for .NET <c>\w</c>, including U+200C and U+200D.</summary>
+        private static bool IsWordChar(char value)
+        {
+            if (value is '\u200C' or '\u200D')
+            {
+                return true;
+            }
+
+            return (WordCategoriesMask & (1 << (int)CharUnicodeInfo.GetUnicodeCategory(value))) != 0;
+        }
+
+        /// <summary>True for one character of <c>[A-Za-z0-9_-]</c>.</summary>
+        private static bool IsTokenChar(char value) =>
+            value is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-';
     }
 }

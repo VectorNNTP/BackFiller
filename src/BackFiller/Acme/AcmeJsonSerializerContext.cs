@@ -9,8 +9,13 @@ namespace VectorNNTP.BackFiller.Acme
     /// Options match the historical reflection-based serializers:
     /// indented output, default encoder (including <c>+</c> → <c>\u002B</c>), and explicit
     /// snake_case property names via <see cref="JsonPropertyNameAttribute"/>.
+    /// <see cref="JsonSourceGenerationMode.Metadata"/> keeps that contract source-generated.
+    /// The fast-path emitter is not used: it casts every property read to the declaring type,
+    /// which is redundant when the member is declared on the serialized type.
     /// </remarks>
-    [JsonSourceGenerationOptions(WriteIndented = true)]
+    [JsonSourceGenerationOptions(
+        GenerationMode = JsonSourceGenerationMode.Metadata,
+        WriteIndented = true)]
     [JsonSerializable(typeof(AcmeAccountRegistrationPayload))]
     [JsonSerializable(typeof(AcmeAccountPendingPayload))]
     [JsonSerializable(typeof(Dns01ChallengeJournalPayload))]
