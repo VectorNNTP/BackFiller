@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Listener;
@@ -79,6 +80,55 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             var before = prepared.ArtData.ToArray();
             Assert.True(before.AsSpan().EndsWith("\r\n"u8));
 
+            var written = await RunAsync(authority, "ARTICLE <a@b>\r\n");
+
+            Assert.Contains("403 Article not available\r\n"u8, written);
+            Assert.DoesNotContain("220 "u8, written);
+            Assert.DoesNotContain(before, written.AsSpan());
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+            Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+        }
+
+        [Fact]
+        public async Task Nul_in_a_retained_article_is_403_before_any_article_byte()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>", "body\r\n");
+            var body = prepared.Record.ArtData.Span.IndexOf("body\r\n"u8);
+            Assert.True(body > 0);
+            WriteRetainedByte(prepared.Record, body, 0);
+            var before = prepared.Record.ArtData.ToArray();
+            Assert.Contains(before, static value => value == 0);
+            Assert.True(before.AsSpan().EndsWith("\r\n"u8));
+
+            Assert.Equal(ArticleDeliveryClaimKind.NotFrameable, authority.TryClaimForDelivery(Encoding.ASCII.GetBytes("<a@b>")).Kind);
+            var written = await RunAsync(authority, "ARTICLE <a@b>\r\n");
+
+            Assert.Contains("403 Article not available\r\n"u8, written);
+            Assert.DoesNotContain("220 "u8, written);
+            Assert.DoesNotContain(before, written.AsSpan());
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(before.Length, authority.RetainedPayloadBytes);
+            Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
+        }
+
+        [Fact]
+        public async Task Dot_leading_line_without_a_separator_is_403_before_any_article_byte()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>", ".only\r\n");
+            var separator = prepared.Record.ArtData.Span.IndexOf("\r\n\r\n"u8);
+            Assert.True(separator > 0);
+            WriteRetainedByte(prepared.Record, separator, (byte)'Z');
+            WriteRetainedByte(prepared.Record, separator + 1, (byte)'Z');
+            var before = prepared.Record.ArtData.ToArray();
+            Assert.True(before.AsSpan().IndexOf("\r\n\r\n"u8) < 0);
+            Assert.Contains("..only\r\n"u8, before);
+
+            Assert.Equal(ArticleDeliveryClaimKind.NotFrameable, authority.TryClaimForDelivery(Encoding.ASCII.GetBytes("<a@b>")).Kind);
             var written = await RunAsync(authority, "ARTICLE <a@b>\r\n");
 
             Assert.Contains("403 Article not available\r\n"u8, written);
@@ -483,6 +533,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
         private static byte[] Status(string messageId) =>
             Encoding.ASCII.GetBytes("220 0 " + messageId + " article follows\r\n");
+
+        private static void WriteRetainedByte(ArticleRecord record, int index, byte value)
+        {
+            Assert.True(MemoryMarshal.TryGetArray(record.ArtData, out ArraySegment<byte> segment));
+            segment.Array![segment.Offset + index] = value;
+        }
 
         private static int IndexOf(byte[] buffer, byte[] pattern)
         {
