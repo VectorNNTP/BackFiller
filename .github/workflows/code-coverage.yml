@@ -76,7 +76,7 @@ jobs:
                 failed=1
               fi
             fi
-          done < <(find src -name '*.csproj' | sort)
+          done < <(find src tests -name '*.csproj' | sort)
           exit "$failed"
 
       - name: Verify every test project reported results
@@ -93,7 +93,7 @@ jobs:
                 coverlet_count=$((coverlet_count + 1))
               fi
             fi
-          done < <(find src -name '*.csproj' | sort)
+          done < <(find src tests -name '*.csproj' | sort)
           trx_count=0
           cov_count=0
           if [ -d TestResults ]; then

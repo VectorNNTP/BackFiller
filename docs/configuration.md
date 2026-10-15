@@ -6,6 +6,18 @@ Startup registers options with `ValidateOnStart` in `BackFillerServiceCollection
 
 `VectorEnvironment` loads environment variables with the prefix `VECTOR__`. After the prefix is removed, `VECTOR__RABBITMQ__USERNAME` binds to `RabbitMQ:Username`. The prefixes `nntpd__` and `backfiller__` are not registered and are not aliases.
 
+## Configuration files
+
+The host content root is the application binary directory. `ApplicationJsonConfiguration` removes Generic Host `appsettings.json` and `appsettings.{environment}.json` sources and loads these files instead:
+
+| File | Contents |
+|---|---|
+| `VectorNNTP.BackFiller.json` | Primary application configuration. The name is `{entry assembly name}.json`. |
+| `VectorNNTP.BackFiller.{environment}.json` | Optional environment overlay. |
+| `VectorNNTP.RabbitMQ.json` | RabbitMQ connectivity. It is a separate file. Its section name remains `RabbitMQ`. |
+
+Environment variables and command-line arguments are applied after those files. A missing optional file does not fail configuration loading. Invalid JSON in a present file fails when that source is read. Mandatory option validation still runs at startup.
+
 ## BackFiller section
 
 Section name: `BackFiller` (`BackFillerOptions.SectionName`).

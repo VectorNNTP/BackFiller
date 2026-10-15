@@ -163,12 +163,18 @@ namespace VectorNNTP.BackFiller.Nntp
         internal static bool IsMultilineTerminator(ReadOnlySpan<byte> line) =>
             line.Length == 1 && line[0] == (byte)'.';
 
-        /// <summary>Drops one leading dot from a line that begins with <c>..</c>. Other lines are unchanged.</summary>
-        /// <param name="line">One multiline body line without its line ending.</param>
+        /// <summary>
+        /// Drops one leading dot from a non-terminator line that begins with <c>.</c>.
+        /// </summary>
+        /// <param name="line">One multiline line without its line ending.</param>
         /// <returns>A span aliasing <paramref name="line"/>. No copy is made.</returns>
-        /// <remarks>Used for capability lines. ARTICLE payload destuffing is done by <see cref="NntpStreamReader"/>.</remarks>
+        /// <remarks>
+        /// RFC 3977 §3.1.1: a line that is only <c>.</c> is the terminator and is not destuffed here.
+        /// Every other line that begins with <c>.</c> loses exactly that one framing dot.
+        /// Used for capability lines. ARTICLE payload destuffing is done by <see cref="NntpStreamReader"/>.
+        /// </remarks>
         internal static ReadOnlySpan<byte> DestuffDotLine(ReadOnlySpan<byte> line) =>
-            line.Length >= 2 && line[0] == (byte)'.' && line[1] == (byte)'.'
+            line.Length > 1 && line[0] == (byte)'.'
                 ? line[1..]
                 : line;
 
@@ -323,8 +329,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <exception cref="EndOfStreamException">The stream ends before a terminator line is recognized.</exception>
         /// <exception cref="InvalidOperationException">The destuffed payload reaches <paramref name="maxBytes"/>.</exception>
         /// <remarks>
-        /// A line that begins with <c>..</c> stores one <c>.</c>. A line whose first byte is <c>.</c> and whose next byte is LF, or CR LF, ends the payload.
-        /// A leading <c>.</c> followed by any other byte is stored, including the dot.
+        /// A line whose first byte is <c>.</c> and whose next bytes are LF, or CR LF, ends the payload and is not stored.
+        /// Every other line that begins with <c>.</c> drops exactly that one dot (RFC 3977 §3.1.1). <c>..</c> stores <c>.</c>, and a single leading <c>.</c> stores the following bytes.
         /// When the buffer ends before a leading dot can be classified, the unread tail is kept and another read is issued.
         /// Ordinary runs are copied in bulk into a reader-owned scratch. This overload copies the written prefix into an
         /// exact array before the scratch length is cleared, so unused scratch capacity is not visible to the caller.
@@ -399,37 +405,21 @@ namespace VectorNNTP.BackFiller.Nntp
                             }
 
                             var next = span[index + 1];
-                            if (next == (byte)'.')
-                            {
-                                AppendPayload((byte)'.', maxBytes);
-                                atLineStart = false;
-                                index += 2;
-                                continue;
-                            }
-
                             if (next == (byte)'\n')
                             {
                                 Consume(index + 2);
                                 return consume(_payloadScratch.AsMemory(0, _payloadCount));
                             }
 
-                            if (next == (byte)'\r')
+                            if (next == (byte)'\r' && span[index + 2] == (byte)'\n')
                             {
-                                if (span[index + 2] == (byte)'\n')
-                                {
-                                    Consume(index + 3);
-                                    return consume(_payloadScratch.AsMemory(0, _payloadCount));
-                                }
-
-                                AppendPayload((byte)'.', maxBytes);
-                                atLineStart = false;
-                                index += 1;
-                                continue;
+                                Consume(index + 3);
+                                return consume(_payloadScratch.AsMemory(0, _payloadCount));
                             }
 
-                            AppendPayload((byte)'.', maxBytes);
-                            atLineStart = false;
+                            // Non-terminator line: disregard exactly one leading dot.
                             index += 1;
+                            atLineStart = false;
                             continue;
                         }
 

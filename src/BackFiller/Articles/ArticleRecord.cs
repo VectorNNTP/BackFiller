@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Articles
     public readonly struct ArticleRecord
     {
         /// <summary>
-        /// Canonical unstuffed article buffer. Field ranges index these bytes. The struct stores the reference and does not copy the array.
+        /// Retained wire-format article. Headers are the canonical logical bytes. Body lines that begin with <c>.</c> are dot-stuffed. The NNTP terminator is absent. Field ranges index these bytes. The struct stores the reference and does not copy the array.
         /// </summary>
         private readonly byte[] _artData;
 
@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <param name="artLines">Body line count for overview <c>:lines</c>.</param>
         /// <param name="canonicalUtc">Winning Date-family header as UTC.</param>
         /// <param name="parseStatus">Parse/validation state of this record, not of any request.</param>
-        /// <param name="artData">Canonical unstuffed article bytes whose lifetime is managed by the caller workflow.</param>
+        /// <param name="artData">Retained wire-format article bytes whose lifetime is managed by the caller workflow.</param>
         /// <param name="fields">Header value ranges into <paramref name="artData"/>.</param>
         internal ArticleRecord(
             ArticleId artId,
@@ -56,13 +56,13 @@ namespace VectorNNTP.BackFiller.Articles
         /// Gets the XXH3-64 fingerprint of <see cref="ArtData"/>.
         /// </summary>
         /// <remarks>
-        /// Internal deterministic fingerprint of the final canonical article bytes.
+        /// Internal deterministic fingerprint of the retained wire-format article bytes.
         /// Not cryptographic identity and not proof of byte equality. Distinct from
         /// <see cref="ArtId"/>, which is BLAKE3 of the Message-ID value only.
         /// </remarks>
         internal ulong ArtHash { get; }
 
-        /// <summary>Gets the canonical unstuffed article size; always <c>ArtData.Length</c>.</summary>
+        /// <summary>Gets the retained wire-format article size; always <c>ArtData.Length</c>.</summary>
         public int ArtSize => _artData?.Length ?? 0;
 
         /// <summary>Gets the Diablo-derived article type flags. Not <c>NntpArticleType</c>.</summary>
@@ -86,7 +86,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// </summary>
         public ArticleParseStatus ParseStatus { get; }
 
-        /// <summary>Gets the canonical unstuffed article bytes referenced by this record (headers, blank line, encoded body).</summary>
+        /// <summary>Gets the retained wire-format article (canonical headers, blank line, dot-stuffed body, no NNTP terminator).</summary>
         public ReadOnlyMemory<byte> ArtData => _artData;
 
         /// <summary>Gets header value ranges into <see cref="ArtData"/>.</summary>

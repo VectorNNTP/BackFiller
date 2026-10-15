@@ -7,7 +7,7 @@ VectorNNTP.BackFiller is a standalone .NET 10 worker extracted from VectorNNTP.N
 The solution is `BackFiller.slnx` and contains:
 
 - `src/BackFiller/BackFiller.csproj`: production worker. Assembly and root namespace `VectorNNTP.BackFiller`.
-- `src/BackFiller.tests/BackFiller.Tests.csproj`: xUnit tests. Assembly and root namespace `VectorNNTP.BackFiller.Tests`.
+- `tests/BackFiller.tests/BackFiller.Tests.csproj`: xUnit tests. Assembly and root namespace `VectorNNTP.BackFiller.Tests`.
 
 There is no `tools/` benchmark project and no `.copilot/PERFORMANCE-CONTEXT.md`. Do not invent throughput baselines. Shared NNTPD context that the code still uses, including `nntpsharedconfig` and `ConnectionStrings__NntpDB`, is shared-domain configuration, not a reason to build `VectorNNTP.NNTPD.sln`.
 
@@ -30,7 +30,7 @@ From the repository root, matching `.github/workflows/build.yml`:
 ```text
 dotnet restore BackFiller.slnx -p:Platform=x64
 dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
-dotnet test src/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --no-build
+dotnet test tests/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --no-build
 ```
 
 Platform is x64 only. Output is `bin/x64/<Configuration>/`. Any CPU is rejected. Use the same `-p:Platform=x64` on a `--no-build` test as on the preceding build. Publish the worker with `--runtime win-x64` or `--runtime linux-x64` from `src/BackFiller/BackFiller.csproj`.
@@ -41,12 +41,12 @@ Builds enable .NET analyzers, code style, and generated documentation for the pr
 
 ## Engineering conventions
 
-- Follow `CONTRIBUTING.md` and the `.editorconfig` files under `src/BackFiller/` and `src/BackFiller.tests/`: explicit access modifiers, `_camelCase` private fields, PascalCase public members, and block-scoped namespaces. There is no root `.editorconfig`.
+- Follow `CONTRIBUTING.md` and the `.editorconfig` files under `src/BackFiller/` and `tests/BackFiller.tests/`: explicit access modifiers, `_camelCase` private fields, PascalCase public members, and block-scoped namespaces. There is no root `.editorconfig`.
 - Do not add filename banners or per-file copyright headers. Assembly copyright comes from `Directory.Build.targets`.
 - Document contract-bearing symbols, including private ones when the contract is non-obvious. Do not document a symbol only to raise a coverage count.
 - Prefer async I/O, explicit cancellation, and deterministic test coordination. Avoid blocking waits and unobserved fire-and-forget work.
 - Performance changes require a measured baseline. Do not claim a throughput number without evidence from this environment.
-- Local evidence goes in `.artifacts/` (gitignored). CI publish output is `artifacts/win-x64` on the runner. Permanent docs go in `docs/`. See `.cursor/rules/repository-artifacts.mdc`.
+- Local evidence, local release staging, and CI Native AOT publish output go in `.artifacts/` (gitignored). Permanent docs go in `docs/`. See `.cursor/rules/repository-artifacts.mdc`.
 
 ## Additional instructions
 

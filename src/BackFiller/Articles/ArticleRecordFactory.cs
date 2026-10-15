@@ -16,9 +16,13 @@ namespace VectorNNTP.BackFiller.Articles
     /// Date/Path materializer. ArtHash is one-shot XXH3-64 of the completed
     /// canonical ArtData (<c>XxHash3.HashToUInt64</c>), not an incremental hash
     /// and not IEEE CRC-32.
-    /// The destuffed source buffer is not retained. FieldTable
-    /// ranges are located on the materialized ArtData so Date/Path length changes cannot
-    /// leave offsets pointing at the discarded source.
+    /// The acquisition scratch is not retained. Date and Path materialization writes the retained
+    /// buffer directly: canonical headers and separator, body lines dot-stuffed by
+    /// <see cref="ArticleBodyWireStuffer"/> in that same write, and no NNTP terminator. FieldTable ranges are
+    /// located on that buffer. Header offsets match the logical article because stuffing
+    /// inserts bytes only in the body. <see cref="ArticleRecord.ArtId"/> is still BLAKE3 of
+    /// the Message-ID value. <see cref="ArticleRecord.ArtHash"/> is XXH3-64 of the retained
+    /// wire bytes.
     /// This factory has no request Message-ID parameter and does not match an IHAVE/ARTICLE
     /// request. Request matching remains an ingestion/orchestration responsibility.
     /// NNTPD TAKETHIS and POST construct the record before queue admission.

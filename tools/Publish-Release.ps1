@@ -6,7 +6,9 @@
 .DESCRIPTION
     Resolves this standalone repository from the script file, not the caller's
     working directory. Publishes src/BackFiller/BackFiller.csproj for win-x64,
-    linux-x64, or both. Output is a flat directory: release/win-64 or release/linux-64.
+    linux-x64, or both. Output is a flat directory: .artifacts/release/win-64 or
+    .artifacts/release/linux-64. The linux-64 directory also contains
+    deploy/systemd/vectornntp-backfiller.service and README.md.
     A failed publish leaves that platform directory unchanged and exits 1.
 
 .PARAMETER Platform
@@ -27,8 +29,12 @@ $Project = Join-Path $RepoRoot 'src\BackFiller\BackFiller.csproj'
 $ExeName = 'VectorNNTP.BackFiller'
 $RequiredPublishFiles = @(
     'VectorNNTP.BackFiller.json',
-    'RabbitMq.json'
+    'VectorNNTP.RabbitMQ.json'
 )
+$SystemdServiceFileName = 'vectornntp-backfiller.service'
+$SystemdServiceSource = Join-Path (Join-Path (Join-Path $RepoRoot 'deploy') 'systemd') $SystemdServiceFileName
+$LinuxDocumentationFileName = 'README.md'
+$LinuxDocumentationSource = Join-Path $RepoRoot $LinuxDocumentationFileName
 
 function Fail {
     param([string] $Message)
@@ -174,6 +180,28 @@ function Test-PublishedRelease {
         }
     }
 
+    foreach ($obsoleteName in @('appsettings.json', 'RabbitMq.json')) {
+        $obsoletePath = Join-Path $ReleaseDir $obsoleteName
+        if (Test-Path -LiteralPath $obsoletePath) {
+            Fail "Obsolete configuration file must not be packaged: $obsoletePath"
+        }
+    }
+
+    $servicePath = Join-Path $ReleaseDir $SystemdServiceFileName
+    $documentationPath = Join-Path $ReleaseDir $LinuxDocumentationFileName
+    if ($Rid -eq 'linux-x64') {
+        if (-not (Test-Path -LiteralPath $servicePath)) {
+            Fail "Missing systemd unit in the linux-x64 release: $servicePath"
+        }
+
+        if (-not (Test-Path -LiteralPath $documentationPath)) {
+            Fail "Missing documentation in the linux-x64 release: $documentationPath"
+        }
+    }
+    elseif (Test-Path -LiteralPath $servicePath) {
+        Fail "systemd unit must not be packaged for ${Rid}: $servicePath"
+    }
+
     Test-NativeAotBinary -Path $exePath -Rid $Rid
 }
 
@@ -184,7 +212,7 @@ function Publish-Platform {
         [string] $ExeSuffix
     )
 
-    $releaseDir = Join-Path (Join-Path $RepoRoot 'release') $Folder
+    $releaseDir = Join-Path (Join-Path (Join-Path $RepoRoot '.artifacts') 'release') $Folder
     $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("backfiller-release-" + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stagingRoot | Out-Null
     $stage = Join-Path $stagingRoot 'publish'
@@ -199,6 +227,19 @@ function Publish-Platform {
         $publishedExe = Join-Path $stage ($ExeName + $ExeSuffix)
         if (-not (Test-Path -LiteralPath $publishedExe)) {
             Fail "Publish did not produce $($ExeName)$ExeSuffix."
+        }
+
+        if ($Rid -eq 'linux-x64') {
+            if (-not (Test-Path -LiteralPath $SystemdServiceSource)) {
+                Fail "systemd unit was not found: $SystemdServiceSource"
+            }
+
+            if (-not (Test-Path -LiteralPath $LinuxDocumentationSource)) {
+                Fail "Linux documentation was not found: $LinuxDocumentationSource"
+            }
+
+            Copy-Item -LiteralPath $SystemdServiceSource -Destination (Join-Path $stage $SystemdServiceFileName)
+            Copy-Item -LiteralPath $LinuxDocumentationSource -Destination (Join-Path $stage $LinuxDocumentationFileName)
         }
 
         Test-PublishedRelease -ReleaseDir $stage -Rid $Rid -ExeSuffix $ExeSuffix

@@ -22,7 +22,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// Retention authority. This service calls <see cref="IArticleRetentionAuthority.SweepExpired"/>
         /// and <see cref="IArticleRetentionAuthority.BeginShutdown"/> and does not dispose it.
         /// </param>
-        /// <param name="logger">Logger used only when a sweep throws.</param>
+        /// <param name="logger">Logger used when an ordinary sweep failure is contained.</param>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="authority"/> or <paramref name="logger"/> is <see langword="null"/>.
         /// </exception>
@@ -47,8 +47,11 @@ namespace VectorNNTP.BackFiller.Retention
         /// <returns>A task that completes when the delay observes host cancellation.</returns>
         /// <remarks>
         /// <see cref="OperationCanceledException"/> from the delay is ignored when
-        /// <paramref name="stoppingToken"/> is already canceled. An exception from
-        /// <see cref="SweepOnce"/> is logged and rethrown, which faults this hosted service.
+        /// <paramref name="stoppingToken"/> is already canceled. An ordinary exception from
+        /// <see cref="SweepOnce"/> is logged and the loop continues. A process-fatal exception,
+        /// as classified by <see cref="ArticleRetentionAuthority.IsProcessFatal"/>, leaves this method
+        /// so the host <see cref="Microsoft.Extensions.Hosting.BackgroundServiceExceptionBehavior.StopHost"/>
+        /// policy can observe it.
         /// </remarks>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -87,8 +90,10 @@ namespace VectorNNTP.BackFiller.Retention
         /// </summary>
         /// <remarks>
         /// Sets <see cref="_sweeping"/> for the call and clears it in a finally block, including when
-        /// <see cref="IArticleRetentionAuthority.SweepExpired"/> throws. The caught exception is logged
-        /// with <see cref="ArticleRetentionSweepLogMessages.SweepFailed"/> and then rethrown.
+        /// <see cref="IArticleRetentionAuthority.SweepExpired"/> throws. An ordinary exception is logged
+        /// with <see cref="ArticleRetentionSweepLogMessages.SweepFailed"/> and is not rethrown, so the
+        /// hosted loop can sweep again after the interval. A process-fatal exception is not logged here
+        /// and leaves this method after the sweeping flag is cleared.
         /// </remarks>
         private void SweepOnce()
         {
@@ -101,10 +106,10 @@ namespace VectorNNTP.BackFiller.Retention
             {
                 _ = _authority.SweepExpired();
             }
-            catch (Exception ex)
+            // codeql[cs/catch-of-all-exceptions] An ordinary sweep failure is logged and must not stop later sweeps.
+            catch (Exception ex) when (!ArticleRetentionAuthority.IsProcessFatal(ex))
             {
                 ArticleRetentionSweepLogMessages.SweepFailed(_logger, ex);
-                throw;
             }
             finally
             {
@@ -113,12 +118,13 @@ namespace VectorNNTP.BackFiller.Retention
         }
     }
 
-    /// <summary>Sweep failure log. Unexpected exceptions are not swallowed.</summary>
+    /// <summary>Sweep failure log. An ordinary failed pass is logged and the sweep loop continues.</summary>
     internal static partial class ArticleRetentionSweepLogMessages
     {
         /// <summary>
         /// Writes event 5503 when <see cref="ArticleRetentionSweepService"/> catches a failure from
-        /// <see cref="IArticleRetentionAuthority.SweepExpired"/>. The service rethrows that failure after this event.
+        /// <see cref="IArticleRetentionAuthority.SweepExpired"/>. The service logs an ordinary failure and continues its loop.
+        /// A process-fatal exception is not passed to this method.
         /// </summary>
         /// <param name="logger">Logger that receives the error.</param>
         /// <param name="exception">The sweep failure. Logged by this method; not thrown by this method.</param>

@@ -7,8 +7,10 @@ namespace VectorNNTP.BackFiller.Retention
     /// </summary>
     /// <remarks>
     /// An openable RequestId is a hard ArticleWork Success capability: FIFO capacity reclaim must not
-    /// unindex an entry while <c>OpenableRequestIdCount &gt; 0</c>. TTL expiry, explicit cancel,
-    /// successful OPEN consumption, and process dispose remain the ways a capability ends.
+    /// unindex an entry while <c>OpenableRequestIdCount &gt; 0</c>. TTL expiry is a hard deadline:
+    /// at <c>ExpiresUtc</c> the entry is removed from every index, stops counting as retained payload,
+    /// and cannot start another transfer. An in-flight lease is revoked and does not extend that deadline.
+    /// Explicit cancel, successful OPEN consumption, and process dispose also end a capability.
     /// </remarks>
     internal interface IArticleRetentionAuthority
     {

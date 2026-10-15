@@ -47,7 +47,7 @@ src/BackFiller/
 
 Do NOT modify:
 
-- src/BackFiller.tests/
+- tests/BackFiller.tests/
 - tools/
 - `.github/`
 - `.artifacts/`

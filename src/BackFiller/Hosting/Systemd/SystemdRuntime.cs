@@ -114,7 +114,42 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
                 return null;
             }
 
-            var usecText = Environment.GetEnvironmentVariable(WatchdogUsecVariable);
+            return TryParseWatchdogTimeout(
+                Environment.GetEnvironmentVariable(WatchdogUsecVariable),
+                Environment.GetEnvironmentVariable(WatchdogPidVariable),
+                Environment.ProcessId,
+                _logger,
+                out reason);
+        }
+
+        /// <summary>
+        /// Parses watchdog environment text the way a Linux <see cref="SystemdRuntime"/> does after the platform check.
+        /// </summary>
+        /// <param name="usecText">Raw <c>WATCHDOG_USEC</c> value, or null when the variable is absent.</param>
+        /// <param name="pidText">Raw <c>WATCHDOG_PID</c> value, or null when the variable is absent.</param>
+        /// <param name="currentProcessId">Process id that a present PID must match.</param>
+        /// <param name="logger">Receives the malformed, mismatched, and out-of-range warnings.</param>
+        /// <param name="reason">
+        /// <c>WATCHDOG_USEC not set</c>, <c>WATCHDOG_USEC missing or invalid</c>, <c>WATCHDOG_PID malformed</c>,
+        /// <c>WATCHDOG_PID does not match current process</c>, <c>WATCHDOG_USEC out of range</c>,
+        /// or <c>WATCHDOG_USEC accepted</c>.
+        /// </param>
+        /// <returns>The deadline in microseconds, or null when keep-alives must stay disabled.</returns>
+        /// <remarks>
+        /// This method does not consult the operating system. <see cref="SystemdRuntime"/> returns
+        /// <c>non-Linux platform</c> before calling it. A non-positive or non-integer usec is logged and ignored.
+        /// An absent PID does not disable an otherwise accepted deadline.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException"><paramref name="logger"/> is null.</exception>
+        internal static TimeSpan? TryParseWatchdogTimeout(
+            string? usecText,
+            string? pidText,
+            int currentProcessId,
+            ILogger logger,
+            out string reason)
+        {
+            ArgumentNullException.ThrowIfNull(logger);
+
             if (string.IsNullOrWhiteSpace(usecText))
             {
                 reason = "WATCHDOG_USEC not set";
@@ -124,24 +159,23 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
             if (!ulong.TryParse(usecText, NumberStyles.None, CultureInfo.InvariantCulture, out var usec) || usec == 0)
             {
                 reason = "WATCHDOG_USEC missing or invalid";
-                SystemdLogMessages.MalformedWatchdogUsec(_logger);
+                SystemdLogMessages.MalformedWatchdogUsec(logger);
                 return null;
             }
 
-            var watchdogPidText = Environment.GetEnvironmentVariable(WatchdogPidVariable);
-            if (!string.IsNullOrWhiteSpace(watchdogPidText))
+            if (!string.IsNullOrWhiteSpace(pidText))
             {
-                if (!int.TryParse(watchdogPidText, NumberStyles.None, CultureInfo.InvariantCulture, out var watchdogPid))
+                if (!int.TryParse(pidText, NumberStyles.None, CultureInfo.InvariantCulture, out var watchdogPid))
                 {
                     reason = "WATCHDOG_PID malformed";
-                    SystemdLogMessages.MalformedWatchdogPid(_logger);
+                    SystemdLogMessages.MalformedWatchdogPid(logger);
                     return null;
                 }
 
-                if (watchdogPid != Environment.ProcessId)
+                if (watchdogPid != currentProcessId)
                 {
                     reason = "WATCHDOG_PID does not match current process";
-                    SystemdLogMessages.WatchdogConfiguredForDifferentPid(_logger);
+                    SystemdLogMessages.WatchdogConfiguredForDifferentPid(logger);
                     return null;
                 }
             }
@@ -150,12 +184,12 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
             if (usec > (ulong)(TimeSpan.MaxValue.Ticks / 10))
             {
                 reason = "WATCHDOG_USEC out of range";
-                SystemdLogMessages.WatchdogUsecOutOfRange(_logger);
+                SystemdLogMessages.WatchdogUsecOutOfRange(logger);
                 return null;
             }
 
             reason = "WATCHDOG_USEC accepted";
-            return TimeSpan.FromTicks((long)usec * 10);
+            return TimeSpan.FromTicks(checked((long)usec * 10));
         }
     }
 }

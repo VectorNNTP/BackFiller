@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// The application-options section name is <see cref="SectionName"/> (<c>NntpDb</c>).
     /// The connection string is <c>ConnectionStrings:NntpDB</c> (<see cref="ConnectionStringName"/>).
     /// Credentials are supplied through the Generic Host environment mapping
-    /// <see cref="ConnectionStringEnvironmentVariable"/>, not production appsettings.
+    /// <see cref="ConnectionStringEnvironmentVariable"/>, not <c>VectorNNTP.BackFiller.json</c>.
     /// Provider pooling, pool size, and idle reaping belong in that connection string.
     /// </para>
     /// <para>

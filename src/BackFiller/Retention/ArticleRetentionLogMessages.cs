@@ -47,5 +47,16 @@ namespace VectorNNTP.BackFiller.Retention
             Level = LogLevel.Debug,
             Message = "Article retention sweep releasedBytes={ReleasedBytes} retainedBytes={RetainedPayloadBytes}")]
         internal static partial void Swept(ILogger logger, long ReleasedBytes, long RetainedPayloadBytes);
+
+        /// <summary>
+        /// Writes event 5504 when one lease revocation throws. Later leases in the same pass are still revoked.
+        /// </summary>
+        /// <param name="logger">Logger that receives the error.</param>
+        /// <param name="exception">The revocation failure. Logged here and not rethrown.</param>
+        [LoggerMessage(
+            EventId = 5504,
+            Level = LogLevel.Error,
+            Message = "Article retention lease revocation failed.")]
+        internal static partial void LeaseRevokeFailed(ILogger logger, Exception exception);
     }
 }

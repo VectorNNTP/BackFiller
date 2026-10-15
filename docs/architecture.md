@@ -14,7 +14,7 @@ After start, non-null `IApplicationService.Execution` tasks are watched. A fault
 
 `SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. Readiness is not inferred from DI registration order.
 
-`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `src/BackFiller.tests/` constructs it. It is not the live host lifecycle.
+`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `tests/BackFiller.tests/` constructs it. It is not the live host lifecycle.
 
 Article Work shutdown uses `BackFillerShutdownOptions`:
 
@@ -51,7 +51,7 @@ Publisher confirms (`BasicAcksAsync` / `BasicNacksAsync` on an async-confirm pub
 
 `NntpStartTlsTests` assert the client does not send `COMPRESS`. There is no NNTP listener, `IHAVE`, `TAKETHIS`, `MODE STREAM`, or `LIST` implementation.
 
-`NntpArticleParser` parses transport-normalized article bytes after acquisition has removed the multiline terminator and undone dot-stuffing once. `ArticleTypeClassifier` sets control and cancel bits from `Control: cancel`, and a PGP-message bit from ASCII armor. That classification does not implement cancel propagation or PGPVERIFY.
+`NntpArticleParser` parses transport-normalized article bytes after acquisition has removed the multiline terminator and undone dot-stuffing once. `NntpArticleCanonicalMaterializer` writes the retained VATP buffer in that same pass, and `ArticleBodyWireStuffer` dot-stuffs body lines into that buffer. Headers are not stuffed, and the NNTP terminator is not stored. `ArticleId` remains BLAKE3 of the Message-ID value. `ArticleTypeClassifier` sets control and cancel bits from `Control: cancel`, and a PGP-message bit from ASCII armor. That classification does not implement cancel propagation or PGPVERIFY.
 
 Per-provider steady-state session count comes from MySQL `maxconnections` (`BackFillerProviderDefinition.MaxSessions`). `BackFillerNntpOptions.MaxConcurrentSessionEstablishments` bounds how many sessions may be connecting at once. The pool throws if it would exceed `MaxSessions`.
 
@@ -61,7 +61,7 @@ Relevant local RFC text is under `docs/standards/rfcs/`. For this client, start 
 
 NNTP command bytes stay bytes through session I/O. `NntpProtocolIo` pre-encodes `DATE`, `CAPABILITIES`, `STARTTLS`, and the `ARTICLE`, `AUTHINFO USER`, and `AUTHINFO PASS` prefixes, and appends CRLF as bytes. The Message-ID argument is sent as ASCII bytes. A non-ASCII Message-ID is not placed on the wire.
 
-Incoming status lines and article payloads are read as bytes. Dot-stuffing is removed in the stream reader before the parser sees the article. Header and body slices alias the caller buffer.
+Incoming status lines and article payloads are read as bytes. Dot-stuffing is removed in the stream reader before the parser sees the article. Header and body slices alias the caller buffer. The retained VATP image is that canonical article with body lines dot-stuffed once in the materializer's output buffer.
 
 Strings are used at explicit boundaries: configuration, logging, AMQP metadata, and article-identity keys such as the Message-ID string stored by retention. Do not add a bytes-to-string-to-bytes conversion on the session I/O path because an API currently accepts a string.
 
