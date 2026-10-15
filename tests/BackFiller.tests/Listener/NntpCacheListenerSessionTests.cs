@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Listener;
+using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
@@ -197,6 +198,76 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(created.Record.ArtData.Span.SequenceEqual(retained));
             Assert.Equal(0, authority.RetainedCount);
             Assert.Equal(0, authority.RetainedPayloadBytes);
+        }
+
+        [Fact]
+        public async Task Listener_wire_round_trips_through_nntp_stream_reader()
+        {
+            var logical = Encoding.ASCII.GetBytes(
+                "Date: Fri, 23 Aug 2024 07:30:10 +0000\r\n"
+                + "Message-ID: <dot-roundtrip@example.test>\r\n"
+                + "Newsgroups: alt.test\r\n"
+                + "From: user@example.test\r\n"
+                + "Subject: dots\r\n"
+                + "Path: peer.example\r\n"
+                + ".X-Dot: kept\r\n"
+                + "\r\n"
+                + ".only\r\n"
+                + ".\r\n"
+                + "..two\r\n"
+                + "...three\r\n"
+                + "after\r\n");
+            var parser = new NntpArticleParser("backfiller.test");
+            var created = ArticleRecordFactory.TryCreate(parser, logical);
+            Assert.True(created.IsAccepted, created.ParseFailure.ToString());
+            var retained = created.Record.ArtData.ToArray();
+            var retainedSeparator = retained.AsSpan().IndexOf("\r\n\r\n"u8);
+            var logicalSeparator = logical.AsSpan().IndexOf("\r\n\r\n"u8);
+            Assert.True(retainedSeparator > 0);
+            Assert.True(logicalSeparator > 0);
+            Assert.Contains(".X-Dot: kept\r\n"u8, retained.AsSpan(0, retainedSeparator + 4));
+            Assert.DoesNotContain("..X-Dot:"u8, retained);
+            Assert.Contains("..only\r\n"u8, retained);
+            Assert.Contains("..\r\n...two\r\n"u8, retained);
+            Assert.Contains("....three\r\n"u8, retained);
+
+            var expected = new byte[retainedSeparator + 4 + (logical.Length - (logicalSeparator + 4))];
+            retained.AsSpan(0, retainedSeparator + 4).CopyTo(expected);
+            logical.AsSpan(logicalSeparator + 4).CopyTo(expected.AsSpan(retainedSeparator + 4));
+
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            Assert.Equal(
+                ArticleRetentionKind.Retained,
+                authority.RetainCanonical(
+                    "<dot-roundtrip@example.test>",
+                    Guid.NewGuid(),
+                    created.Record,
+                    created.SelectedDateHeaderName).Kind);
+
+            var written = await RunAsync(authority, "ARTICLE <dot-roundtrip@example.test>\r\n");
+            var follows = Status("<dot-roundtrip@example.test>");
+            Assert.True(written.AsSpan(0, Greeting.Length).SequenceEqual(Greeting));
+            Assert.True(written.AsSpan(Greeting.Length, follows.Length).SequenceEqual(follows));
+            var multiline = written.AsSpan(Greeting.Length + follows.Length).ToArray();
+            Assert.True(multiline.AsSpan().EndsWith(Terminator));
+            Assert.Contains("..X-Dot: kept\r\n"u8, multiline);
+            Assert.Contains("..\r\n...two\r\n"u8, multiline);
+
+            var contiguous = await ReadWithProductionReaderAsync(multiline, chunk: int.MaxValue);
+            var fragmented = await ReadWithProductionReaderAsync(multiline, chunk: 1);
+
+            Assert.Equal(expected, contiguous);
+            Assert.Equal(expected, fragmented);
+            Assert.Contains(".X-Dot: kept\r\n"u8, contiguous);
+            Assert.DoesNotContain("..X-Dot:"u8, contiguous);
+            Assert.Contains(".only\r\n"u8, contiguous);
+            Assert.Contains(".\r\n..two\r\n"u8, contiguous);
+            Assert.Contains("...three\r\n"u8, contiguous);
+            Assert.Contains("after\r\n"u8, contiguous);
+            Assert.DoesNotContain("..only\r\n"u8, contiguous);
+            Assert.True(created.Record.ArtData.Span.SequenceEqual(retained));
+            Assert.Equal(0, authority.RetainedCount);
         }
 
         [Fact]
@@ -529,6 +600,63 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
 
             return buffer.AsSpan(0, written).ToArray();
+        }
+
+        private static async Task<byte[]> ReadWithProductionReaderAsync(byte[] multiline, int chunk)
+        {
+            Stream stream = chunk == int.MaxValue
+                ? new MemoryStream(multiline, writable: false)
+                : new OneByteStream(multiline);
+            var reader = new NntpStreamReader(stream, 1024);
+            return await reader.ReadArticlePayloadAsync(1024 * 1024, TimeSpan.FromSeconds(5), CancellationToken.None);
+        }
+
+        private sealed class OneByteStream(byte[] data) : Stream
+        {
+            private int _position;
+
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => false;
+
+            public override long Length => data.Length;
+
+            public override long Position
+            {
+                get => _position;
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+            public override int Read(Span<byte> buffer)
+            {
+                if (_position >= data.Length || buffer.IsEmpty)
+                {
+                    return 0;
+                }
+
+                buffer[0] = data[_position++];
+                return 1;
+            }
+
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return new ValueTask<int>(Read(buffer.Span));
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
         private static byte[] Status(string messageId) =>
