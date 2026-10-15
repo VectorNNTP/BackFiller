@@ -20,12 +20,12 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         internal const string CanonicalReplyTo = "nnrpd.rpc.responses";
         internal const string CanonicalMessageId = "<12345@example.invalid>";
         internal const string CanonicalFqdn = "backfiller01.usenet.ninja";
-        internal const int CanonicalVatpPort = 119;
+        internal const int CanonicalListenerPort = 119;
         /// <summary>BLAKE3 ArticleId hex for <see cref="CanonicalMessageId"/>.</summary>
         internal const string CanonicalArticleIdHex =
             "dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14";
         internal const string CanonicalSuccessResponseJson =
-            """{"version":1,"requestId":"7c1cb8a0-95f9-4c13-8e53-339773e3afaa","messageId":"<12345@example.invalid>","backbone":"Giganews","outcome":"Success","fqdn":"backfiller01.usenet.ninja","vatpPort":119,"articleId":"dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14"}""";
+            """{"version":1,"requestId":"7c1cb8a0-95f9-4c13-8e53-339773e3afaa","messageId":"<12345@example.invalid>","backbone":"Giganews","outcome":"Success","fqdn":"backfiller01.usenet.ninja","listenerPort":119,"articleId":"dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14"}""";
         internal const string CanonicalNotFoundResponseJson =
             """{"version":1,"requestId":"7c1cb8a0-95f9-4c13-8e53-339773e3afaa","messageId":"<12345@example.invalid>","backbone":"Giganews","outcome":"ArticleNotFound","error":"No article with that message-id"}""";
 

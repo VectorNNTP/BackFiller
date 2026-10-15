@@ -3,9 +3,9 @@ using System.Diagnostics.CodeAnalysis;
 namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>
-    /// Validates the structured VATP dial fields carried by Article Work and storage lookup.
+    /// Validates the listener FQDN and TCP port carried by Article Work and storage lookup.
     /// </summary>
-    internal static class VatpEndpointFields
+    internal static class ListenerEndpointFields
     {
         /// <summary>
         /// Returns whether <paramref name="fqdn"/> is a lowercase dotted DNS name.

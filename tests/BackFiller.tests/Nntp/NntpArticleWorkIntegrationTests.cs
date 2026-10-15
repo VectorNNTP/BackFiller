@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
@@ -34,12 +33,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(ArticleWorkOutcome.Success, outcome);
             Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, handler.LastKind);
             Assert.Equal(ArticleRetentionKind.Retained, handler.LastRetentionKind);
-            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
-            using var opened = retention.TryOpenTransfer(Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId), articleId);
-            Assert.Equal(VatpOpenKind.Opened, opened.Kind);
-            Assert.Contains("body"u8, opened.Lease!.Record.ArtData.Span);
+            var claimed = retention.TryClaimForDelivery(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.Contains("body"u8, claimed.Claim!.ArticleBytes.Span);
+            claimed.Claim.Dispose();
             Assert.Equal("backfiller.test", handler.LastFqdn);
-            Assert.Equal(1190, handler.LastVatpPort);
+            Assert.Equal(1190, handler.LastListenerPort);
             Assert.Empty(publisher.Published);
             var settlement = Assert.Single(channel.Settlements);
             Assert.False(settlement.Acknowledge);
@@ -75,13 +74,13 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             Assert.Equal(ArticleWorkOutcome.Success, outcome);
             Assert.Equal("backfiller.test", handler.LastFqdn);
-            Assert.Equal(1190, handler.LastVatpPort);
+            Assert.Equal(1190, handler.LastListenerPort);
             var publication = Assert.Single(
                 Assert.IsType<FakeBackFillerRabbitMqPublishChannel>(publisher.Channel).Publications);
             using var document = JsonDocument.Parse(publication.Body);
             Assert.Equal("Success", document.RootElement.GetProperty("outcome").GetString());
             Assert.Equal(handler.LastFqdn, document.RootElement.GetProperty("fqdn").GetString());
-            Assert.Equal(handler.LastVatpPort, document.RootElement.GetProperty("vatpPort").GetInt32());
+            Assert.Equal(handler.LastListenerPort, document.RootElement.GetProperty("listenerPort").GetInt32());
             Assert.False(document.RootElement.TryGetProperty("uri", out _));
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalRequestId, document.RootElement.GetProperty("requestId").GetString());
             Assert.True(Assert.Single(channel.Settlements).Acknowledge);

@@ -24,15 +24,13 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             Assert.Equal(ArticleRetentionKind.Retained, retained.Kind);
             Assert.Equal("backfiller.test", retained.Fqdn);
-            Assert.Equal(1190, retained.VatpPort);
+            Assert.Equal(1190, retained.ListenerPort);
             Assert.Equal(prepared.Record.ArtId.ToLowerHexString(), retained.Identity!.Value.ArticleIdHex);
             Assert.Equal(prepared.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
 
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
-            Assert.Equal(prepared.Record.ArtId.ToLowerHexString(), open.Lease.Identity.ArticleIdHex);
+            using var claim = Claim(authority, "<a@b>", prepared.ArtData);
+            Assert.Equal("<a@b>", claim.MessageId);
         }
 
         [Fact]
@@ -49,23 +47,18 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(first.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
 
-            using var open = authority.TryOpenTransfer(second.RequestId, first.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(first.ArtData));
-            Assert.False(open.Lease.Record.ArtData.Span.SequenceEqual(second.ArtData));
+            using var claim = Claim(authority, "<a@b>", first.ArtData);
+            Assert.False(claim.ArticleBytes.Span.SequenceEqual(second.ArtData.AsSpan()));
         }
 
         [Fact]
-        public void Open_after_ttl_is_rejected_and_sweep_reclaims_bytes()
+        public void Claim_after_ttl_is_rejected_and_sweep_finds_nothing()
         {
             var time = new ManualTimeProvider(Start);
             var authority = Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
-            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
+            _ = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
             time.Advance(TimeSpan.FromSeconds(10));
-            using (var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Rejected, open.Kind);
-            }
+            AssertNotFound(authority, "<a@b>");
 
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.SweepExpired());
@@ -79,16 +72,11 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var authority = Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(5));
             var old = RetentionTestArticles.RetainPrepared(authority, "<a@b>", "old\r\n");
             time.Advance(TimeSpan.FromSeconds(5));
-            using (var expired = authority.TryOpenTransfer(old.RequestId, old.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Rejected, expired.Kind);
-            }
+            AssertNotFound(authority, "<a@b>");
 
             var newer = RetentionTestArticles.RetainPrepared(authority, "<a@b>", "new-payload\r\n");
             Assert.Equal(0, authority.SweepExpired());
-            using var open = authority.TryOpenTransfer(newer.RequestId, newer.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(newer.ArtData));
+            using var claim = Claim(authority, "<a@b>", newer.ArtData);
         }
 
         [Fact]
@@ -109,13 +97,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             Assert.Equal(ArticleRetentionKind.InvalidPayload, rejected.Kind);
             Assert.Null(rejected.Fqdn);
-            Assert.Null(rejected.VatpPort);
+            Assert.Null(rejected.ListenerPort);
             Assert.Equal(fit.Record.ArtSize, rejected.RetainedPayloadBytes);
             Assert.Equal(0, rejected.ReleasedPayloadBytes);
             Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
-            using var open = authority.TryOpenTransfer(fit.RequestId, fit.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            using var claim = Claim(authority, "<fit@b>", fit.ArtData);
         }
 
         [Fact]
@@ -136,13 +123,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleRetentionKind.PayloadExceedsCapacity, rejected.Kind);
             Assert.True(rejected.IsCapacityRejected);
             Assert.Null(rejected.Fqdn);
-            Assert.Null(rejected.VatpPort);
+            Assert.Null(rejected.ListenerPort);
             Assert.Equal(fit.Record.ArtSize, rejected.RetainedPayloadBytes);
             Assert.Equal(0, rejected.ReleasedPayloadBytes);
             Assert.Equal(fit.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
-            using var open = authority.TryOpenTransfer(fit.RequestId, fit.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            using var claim = Claim(authority, "<fit-cap@b>", fit.ArtData);
         }
 
         [Fact]
@@ -163,15 +149,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var third = authority.RetainCanonical(
                 "<three@b>", three.RequestId, three.Record, three.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, third.Kind);
-            using (var missing = authority.TryOpenTransfer(one.RequestId, one.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Rejected, missing.Kind);
-            }
-
-            using (var stillOpenable = authority.TryOpenTransfer(two.RequestId, two.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Opened, stillOpenable.Kind);
-            }
+            AssertNotFound(authority, "<one@b>");
+            using var stillHeld = Claim(authority, "<two@b>", two.ArtData);
 
             Assert.Equal(two.Record.ArtSize + three.Record.ArtSize, authority.RetainedPayloadBytes);
         }
@@ -192,10 +171,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var rejected = authority.RetainCanonical(
                 "<three-pin@b>", three.RequestId, three.Record, three.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.CapacityUnavailable, rejected.Kind);
-            using var openOne = authority.TryOpenTransfer(one.RequestId, one.Record.ArtId);
-            using var openTwo = authority.TryOpenTransfer(two.RequestId, two.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, openOne.Kind);
-            Assert.Equal(VatpOpenKind.Opened, openTwo.Kind);
+            using var claimOne = Claim(authority, "<one-pin@b>", one.ArtData);
+            using var claimTwo = Claim(authority, "<two-pin@b>", two.ArtData);
             Assert.Equal(one.Record.ArtSize + two.Record.ArtSize, authority.RetainedPayloadBytes);
         }
 
@@ -208,8 +185,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var later = RetentionTestArticles.Create("<b@c>");
             Assert.Equal(ArticleRetentionKind.ShuttingDown, authority.RetainCanonical(
                 "<b@c>", later.RequestId, later.Record, later.SelectedDateHeaderName).Kind);
-            using var open = authority.TryOpenTransfer(keep.RequestId, keep.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            using var claim = Claim(authority, "<a@b>", keep.ArtData);
         }
 
         [Fact]
@@ -243,35 +219,35 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(32, results.Count(static r => r.Kind == ArticleRetentionKind.Retained));
             Assert.Equal(prepared.Sum(static p => p.Record.ArtSize), authority.RetainedPayloadBytes);
 
-            var opens = prepared.Select(async item =>
+            var claims = prepared.Select(async item =>
             {
                 await Task.Yield();
-                using var open = authority.TryOpenTransfer(item.RequestId, item.Record.ArtId);
-                return open.Kind;
+                using var claim = Claim(authority, item.MessageId, item.ArtData);
+                return claim.MessageId;
             });
-            var kinds = await Task.WhenAll(opens);
-            Assert.All(kinds, static kind => Assert.Equal(VatpOpenKind.Opened, kind));
+            var claimed = await Task.WhenAll(claims);
+            Assert.Equal(32, claimed.Length);
         }
 
         [Fact]
-        public async Task Open_while_expiry_occurs_does_not_return_expired_bytes()
+        public async Task Claim_while_expiry_occurs_does_not_return_expired_bytes()
         {
             var time = new ManualTimeProvider(Start);
             var authority = Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(1));
-            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
+            _ = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var openTask = Task.Run(async () =>
+            var claimTask = Task.Run(async () =>
             {
                 started.TrySetResult();
                 await release.Task.ConfigureAwait(false);
-                return authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+                return authority.TryClaimForDelivery(Encoding.ASCII.GetBytes("<a@b>"));
             });
             await started.Task;
             time.Advance(TimeSpan.FromSeconds(1));
             release.TrySetResult();
-            using var result = await openTask;
-            Assert.Equal(VatpOpenKind.Rejected, result.Kind);
+            var result = await claimTask;
+            Assert.Equal(ArticleDeliveryClaimKind.NotFound, result.Kind);
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
@@ -304,11 +280,10 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         {
             var authority = Create(new ManualTimeProvider(Start), maxBytes: 1024 * 1024);
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
-            using (var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            using (var claim = Claim(authority, "<a@b>", prepared.ArtData))
             {
                 authority.BeginShutdown();
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
-                Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
             }
 
             var later = RetentionTestArticles.Create("<c@d>");
@@ -339,6 +314,23 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 parseStatus,
                 source.ArtData.ToArray(),
                 source.Fields);
+
+        internal static ArticleRetentionAuthority.ArticleDeliveryClaim Claim(
+            ArticleRetentionAuthority authority,
+            string messageId,
+            ReadOnlyMemory<byte> expected)
+        {
+            var result = authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(messageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, result.Kind);
+            Assert.NotNull(result.Claim);
+            Assert.True(result.Claim.ArticleBytes.Span.SequenceEqual(expected.Span));
+            return result.Claim;
+        }
+
+        internal static void AssertNotFound(ArticleRetentionAuthority authority, string messageId) =>
+            Assert.Equal(
+                ArticleDeliveryClaimKind.NotFound,
+                authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(messageId)).Kind);
 
         internal static ArticleRetentionAuthority Create(
             TimeProvider time,

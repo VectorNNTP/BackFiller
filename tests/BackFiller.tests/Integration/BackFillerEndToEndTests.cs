@@ -2,6 +2,7 @@ using System.Text.Json;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
+using VectorNNTP.BackFiller.Tests.Retention;
 using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Integration
@@ -11,7 +12,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
         private static readonly byte[] CanonicalPayload = ArticleWorkTestArticles.Valid();
 
         [Fact]
-        public async Task Successful_article_work_confirms_then_acks_and_vatp_open_serves_artdata()
+        public async Task Successful_article_work_confirms_then_acks_and_delivery_serves_artdata()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync();
             harness.EnqueueArticle(CanonicalPayload);
@@ -29,7 +30,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal("Giganews", document.RootElement.GetProperty("backbone").GetString());
             Assert.Equal("Success", document.RootElement.GetProperty("outcome").GetString());
             Assert.Equal(harness.Handler.LastFqdn, document.RootElement.GetProperty("fqdn").GetString());
-            Assert.Equal(harness.Handler.LastVatpPort, document.RootElement.GetProperty("vatpPort").GetInt32());
+            Assert.Equal(harness.Handler.LastListenerPort, document.RootElement.GetProperty("listenerPort").GetInt32());
             Assert.False(document.RootElement.TryGetProperty("uri", out _));
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalCorrelationId, publication.CorrelationId);
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalReplyTo, publication.RoutingKey);
@@ -42,15 +43,15 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             var articleIdHex = document.RootElement.GetProperty("articleId").GetString();
             Assert.Equal(ArticleId.HexLength, articleIdHex!.Length);
             Assert.Equal("backfiller.test", harness.Handler.LastFqdn);
-            Assert.Equal(1190, harness.Handler.LastVatpPort);
+            Assert.Equal(1190, harness.Handler.LastListenerPort);
             Assert.True(ArticleId.TryParseLowerHex(articleIdHex, out var articleId));
-            using var open = harness.Retention.TryOpenTransfer(
-                Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
-                articleId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            var retained = open.Lease!.Record.ArtData.ToArray();
+            var claimed = harness.Retention.TryClaimForDelivery(
+                Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            var retained = claimed.Claim!.ArticleBytes.ToArray();
             Assert.Contains("body"u8, retained);
-            Assert.Equal(open.Lease.Record.ArtId, articleId);
+            Assert.Equal(ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId)), articleId);
+            claimed.Claim.Dispose();
             Assert.Equal(retained.Length, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
@@ -113,7 +114,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
         }
 
         [Fact]
-        public async Task Same_message_id_first_wins_and_vatp_open_keeps_original_artdata()
+        public async Task Same_message_id_first_wins_and_delivery_keeps_original_artdata()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync();
             var first = ArticleWorkTestArticles.Valid(body: "first-body\r\n");
@@ -131,13 +132,12 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(2, channel.Settlements.Count);
             Assert.All(channel.Settlements, static settlement => Assert.True(settlement.Acknowledge));
 
-            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
-            using var open = harness.Retention.TryOpenTransfer(
-                Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
-                articleId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.Contains("first-body"u8, open.Lease!.Record.ArtData.Span);
-            Assert.DoesNotContain("second-body"u8, open.Lease.Record.ArtData.Span);
+            var claimed = harness.Retention.TryClaimForDelivery(
+                Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.Contains("first-body"u8, claimed.Claim!.ArticleBytes.Span);
+            Assert.DoesNotContain("second-body"u8, claimed.Claim.ArticleBytes.Span);
+            claimed.Claim.Dispose();
             Assert.Equal(firstLength, harness.Retention.RetainedPayloadBytes);
         }
 
@@ -187,15 +187,13 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(ArticleRetentionKind.AlreadyPresent, harness.Retention.RetainCanonical(
                 second.MessageId, second.RequestId, second.Record, second.SelectedDateHeaderName).Kind);
 
-            using (var openA = harness.Retention.TryOpenTransfer(first.RequestId, first.Record.ArtId))
+            using (var claim = ArticleRetentionAuthorityTests.Claim(harness.Retention, first.MessageId, first.ArtData))
             {
-                Assert.Equal(VatpOpenKind.Opened, openA.Kind);
-                Assert.True(openA.Lease!.Record.ArtData.Span.SequenceEqual(first.ArtData));
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(first.ArtData.AsSpan()));
             }
 
-            using var openB = harness.Retention.TryOpenTransfer(second.RequestId, first.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, openB.Kind);
-            Assert.True(openB.Lease!.Record.ArtData.Span.SequenceEqual(first.ArtData));
+            Assert.True(harness.Retention.TryCancelPendingRequest(first.RequestId));
+            Assert.True(harness.Retention.TryCancelPendingRequest(second.RequestId));
             Assert.Equal(first.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
         }
 
@@ -233,11 +231,11 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 harness.Retention.RetainCanonical(
                     pressure.MessageId, pressure.RequestId, pressure.Record, pressure.SelectedDateHeaderName).Kind);
 
-            var requestId = Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId);
-            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
-            using var open = harness.Retention.TryOpenTransfer(requestId, articleId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.Contains("body"u8, open.Lease!.Record.ArtData.Span);
+            var claimed = harness.Retention.TryClaimForDelivery(
+                Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.Contains("body"u8, claimed.Claim!.ArticleBytes.Span);
+            claimed.Claim.Dispose();
             Assert.Equal(successBytes + pressure.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
         }
 

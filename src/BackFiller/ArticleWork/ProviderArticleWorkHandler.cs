@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
@@ -14,7 +12,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 {
     /// <summary>
     /// Retrieves an ARTICLE, builds a CanonicalV1 <see cref="ArticleRecord"/>, then retains it for
-    /// VATP OPEN by RequestId. Article Work Success publishes this BackFiller's FQDN, VATP port, and the
+    /// NNTP delivery by Message-ID. Article Work Success publishes this BackFiller's FQDN, listener port, and the
     /// lowercase hexadecimal <see cref="ArticleId"/>. Those fields are routing metadata, not a transfer protocol.
     /// </summary>
     /// <remarks>
@@ -130,11 +128,11 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <summary>Gets the last retained BackFiller FQDN (tests).</summary>
         internal string? LastFqdn { get; private set; }
 
-        /// <summary>Gets the last retained VATP listen port (tests).</summary>
-        internal int? LastVatpPort { get; private set; }
+        /// <summary>Gets the last retained listener port (tests).</summary>
+        internal int? LastListenerPort { get; private set; }
 
         /// <summary>
-        /// Retrieves the requested article, accepts a CanonicalV1 record, and retains it for VATP OPEN.
+        /// Retrieves the requested article, accepts a CanonicalV1 record, and retains it for NNTP delivery.
         /// </summary>
         /// <param name="item">Admitted work.</param>
         /// <param name="cancellationToken">
@@ -143,11 +141,12 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <see cref="ArticleWorkOutcome.Cancelled"/> and retention is not attempted.
         /// </param>
         /// <returns>
-        /// <see cref="ArticleWorkOutcome.Success"/> with FQDN, VATP port, and article id when retention reports the article available.
+        /// <see cref="ArticleWorkOutcome.Success"/> with FQDN, listener port, and article id when retention reports the article available.
         /// <see cref="ArticleRetrievalKind.ArticleNotFound"/> and <see cref="ArticleRetrievalKind.InvalidArticle"/> stay terminal.
         /// <see cref="ArticleRetrievalKind.AuthenticationFailure"/> and every other non-retrieved kind become
-        /// <see cref="ArticleWorkOutcome.ProviderFailure"/>. Parse failure and Message-ID mismatch become
-        /// <see cref="ArticleWorkOutcome.InvalidArticle"/>. A retrieved body that cannot be transferred or is not an
+        /// <see cref="ArticleWorkOutcome.ProviderFailure"/>. Parse failure, Message-ID mismatch, and an article that
+        /// <see cref="NntpDeliveryFraming"/> cannot send as a multiline block become
+        /// <see cref="ArticleWorkOutcome.InvalidArticle"/> before retention is called. A retrieved body that cannot be transferred or is not an
         /// owned contiguous buffer becomes <see cref="ArticleWorkOutcome.RetentionRejected"/>.
         /// Success routing fields are null unless retention made the article available.
         /// <see cref="ArticleWorkHandlerResult.Article"/> is always null. The production success path does not allocate
@@ -172,7 +171,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             ArgumentNullException.ThrowIfNull(item);
             LastRetentionKind = null;
             LastFqdn = null;
-            LastVatpPort = null;
+            LastListenerPort = null;
             if (cancellationToken.IsCancellationRequested)
             {
                 LastKind = ArticleRetrievalKind.Cancelled;
@@ -280,6 +279,18 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         "MessageIdMismatch");
                 }
 
+                if (!NntpDeliveryFraming.IsFrameable(record.ArtData.Span))
+                {
+                    LogArticleProcessed(
+                        item,
+                        OutcomeValidationFailed,
+                        "NotFrameable",
+                        retrieval.CommandStartedTimestamp);
+                    return new ArticleWorkHandlerResult(
+                        ArticleWorkOutcome.InvalidArticle,
+                        "NotFrameable");
+                }
+
                 LogArticleProcessed(item, OutcomeFound, string.Empty, retrieval.CommandStartedTimestamp);
 
                 if (!System.Runtime.InteropServices.MemoryMarshal.TryGetArray(record.ArtData, out var segment)
@@ -301,7 +312,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                     endpointFqdn);
                 LastRetentionKind = retained.Kind;
                 LastFqdn = retained.Fqdn;
-                LastVatpPort = retained.VatpPort;
+                LastListenerPort = retained.ListenerPort;
                 if (retained.IsAvailable)
                 {
                     return new ArticleWorkHandlerResult(
@@ -309,7 +320,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         null,
                         Article: null,
                         Fqdn: retained.Fqdn,
-                        VatpPort: retained.VatpPort,
+                        ListenerPort: retained.ListenerPort,
                         ArticleId: record.ArtId);
                 }
 
@@ -318,7 +329,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                     retained.Kind.ToString(),
                     Article: null,
                     Fqdn: null,
-                    VatpPort: null,
+                    ListenerPort: null,
                     ArticleId: null);
             }
         }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Core

@@ -81,7 +81,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// <param name="MaximumRetainedPayloadBytes">Maximum retained payload capacity in bytes.</param>
     /// <param name="RetentionTtl">Maximum retention lifetime from insertion.</param>
     /// <param name="SweepInterval">Retention sweep cadence.</param>
-    /// <param name="MaxOpenableRequestIdsPerArticle">Maximum concurrently openable VATP RequestIds for one retained Message-ID.</param>
+    /// <param name="MaxOpenableRequestIdsPerArticle">Maximum concurrently openable Article Work RequestIds for one retained Message-ID.</param>
     internal sealed record BackFillerArticleRetentionRuntimeOptions(
         long MaximumRetainedPayloadBytes,
         TimeSpan RetentionTtl,

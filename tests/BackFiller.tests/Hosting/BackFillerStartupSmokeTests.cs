@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Logging;
-using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {

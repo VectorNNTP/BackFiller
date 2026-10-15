@@ -1,4 +1,3 @@
-using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Articles.YEnc;
 using VectorNNTP.BackFiller.Nntp;

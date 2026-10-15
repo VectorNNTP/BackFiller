@@ -4,7 +4,6 @@ using Serilog.Core;
 using Serilog.Events;
 using Serilog.Formatting;
 using Serilog.Formatting.Display;
-using Serilog.Sinks.File;
 
 namespace VectorNNTP.BackFiller.Logging
 {

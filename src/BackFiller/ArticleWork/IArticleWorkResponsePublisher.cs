@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// </summary>
     /// <remarks>
     /// Identities are never invented: missing parse fields stay null.
-    /// <see cref="Fqdn"/> and <see cref="VatpPort"/> are the Success dial endpoint.
+    /// <see cref="Fqdn"/> and <see cref="ListenerPort"/> are the Success dial endpoint.
     /// The publisher must not encode them into a URI.
     /// </remarks>
     /// <param name="Outcome">Terminal protocol outcome.</param>
@@ -16,7 +16,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// <param name="ReplyTo">AMQP reply destination.</param>
     /// <param name="Error">Failure reason for terminal non-success outcomes.</param>
     /// <param name="Fqdn">BackFiller FQDN for Success. Must be absent otherwise.</param>
-    /// <param name="VatpPort">TLS VATP listen port for Success. Must be absent otherwise.</param>
+    /// <param name="ListenerPort">TLS listener port for Success. Must be absent otherwise.</param>
     /// <param name="ArticleIdHex">64-char lowercase BLAKE3 ArtId hex for Success. Must be absent otherwise.</param>
     internal sealed record ArticleWorkResponseIntent(
         ArticleWorkOutcome Outcome,
@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         string? ReplyTo,
         string? Error,
         string? Fqdn = null,
-        int? VatpPort = null,
+        int? ListenerPort = null,
         string? ArticleIdHex = null);
 
     /// <summary>

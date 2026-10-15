@@ -1,5 +1,4 @@
 using VectorNNTP.BackFiller.Configuration;
-using VectorNNTP.BackFiller.Core;
 
 namespace VectorNNTP.BackFiller.Core
 {

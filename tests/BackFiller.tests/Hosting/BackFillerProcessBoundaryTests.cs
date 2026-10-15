@@ -1,7 +1,6 @@
 using VectorNNTP.BackFiller.Acme.Protocol;
 using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.NntpDb;
-using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {

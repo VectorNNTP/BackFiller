@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// </summary>
     /// <remarks>
     /// Property names are <c>version</c>, <c>serverId</c>, <c>fqdn</c>, <c>state</c>
-    /// (<c>Draining</c>), <c>timestamp</c> (UTC ISO-8601 round-trip), and <c>vatpPort</c>.
+    /// (<c>Draining</c>), <c>timestamp</c> (UTC ISO-8601 round-trip), and <c>listenerPort</c>.
     /// Version 1 accepts only <c>Draining</c>. Any other <c>state</c> string, including
     /// <c>Ready</c>, is invalid and is not treated as an advertisement. An object without
     /// <c>state</c> is not a lifecycle announcement. Unknown properties are ignored.
@@ -50,10 +50,10 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     $"Unsupported StorageServer lifecycle state '{announcement.State}'.");
             }
 
-            if (announcement.VatpPort is < 1 or > 65535)
+            if (announcement.ListenerPort is < 1 or > 65535)
             {
                 throw new InvalidOperationException(
-                    "StorageServer lifecycle announcement vatpPort must be in the range 1–65535.");
+                    "StorageServer lifecycle announcement listenerPort must be in the range 1–65535.");
             }
 
             var writer = new ArrayBufferWriter<byte>();
@@ -72,7 +72,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             jsonWriter.WriteString(
                 "timestamp",
                 announcement.Timestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
-            jsonWriter.WriteNumber("vatpPort", announcement.VatpPort);
+            jsonWriter.WriteNumber("listenerPort", announcement.ListenerPort);
             jsonWriter.WriteEndObject();
             jsonWriter.Flush();
             return writer.WrittenSpan.ToArray();
@@ -162,10 +162,10 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     return false;
                 }
 
-                if (!TryReadInt32(root, "vatpPort", out var vatpPort, out reason) || vatpPort is < 1 or > 65535)
+                if (!TryReadInt32(root, "listenerPort", out var listenerPort, out reason) || listenerPort is < 1 or > 65535)
                 {
-                    reason = vatpPort is < 1 or > 65535 && string.IsNullOrEmpty(reason)
-                        ? "Lifecycle announcement vatpPort must be in the range 1–65535."
+                    reason = listenerPort is < 1 or > 65535 && string.IsNullOrEmpty(reason)
+                        ? "Lifecycle announcement listenerPort must be in the range 1–65535."
                         : reason;
                     return false;
                 }
@@ -176,7 +176,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     fqdn.Trim(),
                     state,
                     timestamp,
-                    vatpPort);
+                    listenerPort);
                 reason = string.Empty;
                 return true;
             }

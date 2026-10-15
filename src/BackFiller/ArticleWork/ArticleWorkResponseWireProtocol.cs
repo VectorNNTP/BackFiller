@@ -7,7 +7,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 {
     /// <summary>
     /// Compact UTF-8 JSON contract for Article Work v1 responses.
-    /// Property names are exact: version, requestId, messageId, backbone, outcome, fqdn, vatpPort, articleId, error.
+    /// Property names are exact: version, requestId, messageId, backbone, outcome, fqdn, listenerPort, articleId, error.
     /// </summary>
     internal static class ArticleWorkResponseWireProtocol
     {
@@ -28,7 +28,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
 
         /// <summary>Serializes one validated v1 response. Does not embed article bytes.</summary>
         /// <param name="intent">
-        /// Pipeline intent. Success carries <c>fqdn</c>, <c>vatpPort</c>, and <c>articleId</c>.
+        /// Pipeline intent. Success carries <c>fqdn</c>, <c>listenerPort</c>, and <c>articleId</c>.
         /// Other publishable outcomes carry <c>error</c> and omit those success fields.
         /// </param>
         /// <returns>Compact UTF-8 JSON with the property names declared by this type.</returns>
@@ -87,7 +87,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             if (intent.Outcome == ArticleWorkOutcome.Success)
             {
                 json.WriteString("fqdn", intent.Fqdn);
-                json.WriteNumber("vatpPort", intent.VatpPort!.Value);
+                json.WriteNumber("listenerPort", intent.ListenerPort!.Value);
                 json.WriteString("articleId", intent.ArticleIdHex);
             }
             else
@@ -134,14 +134,14 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 case ArticleWorkOutcome.Success:
                     RequireIdentity(intent);
-                    if (!VatpEndpointFields.IsCanonicalFqdn(intent.Fqdn))
+                    if (!ListenerEndpointFields.IsCanonicalFqdn(intent.Fqdn))
                     {
                         throw new InvalidOperationException("Success response requires a lowercase dotted DNS fqdn.");
                     }
 
-                    if (intent.VatpPort is not { } vatpPort || !VatpEndpointFields.IsCanonicalPort(vatpPort))
+                    if (intent.ListenerPort is not { } listenerPort || !ListenerEndpointFields.IsCanonicalPort(listenerPort))
                     {
-                        throw new InvalidOperationException("Success response requires a vatpPort in the range 1–65535.");
+                        throw new InvalidOperationException("Success response requires a listenerPort in the range 1–65535.");
                     }
 
                     if (string.IsNullOrWhiteSpace(intent.ArticleIdHex)
@@ -161,9 +161,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 case ArticleWorkOutcome.ArticleNotFound:
                 case ArticleWorkOutcome.InvalidArticle:
                     RequireIdentity(intent);
-                    if (intent.Fqdn is not null || intent.VatpPort is not null)
+                    if (intent.Fqdn is not null || intent.ListenerPort is not null)
                     {
-                        throw new InvalidOperationException("Terminal failure response must not include fqdn or vatpPort.");
+                        throw new InvalidOperationException("Terminal failure response must not include fqdn or listenerPort.");
                     }
 
                     if (intent.ArticleIdHex is not null)
@@ -184,9 +184,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         throw new InvalidOperationException("InvalidRequest must not use Guid.Empty.");
                     }
 
-                    if (intent.Fqdn is not null || intent.VatpPort is not null)
+                    if (intent.Fqdn is not null || intent.ListenerPort is not null)
                     {
-                        throw new InvalidOperationException("InvalidRequest must not include fqdn or vatpPort.");
+                        throw new InvalidOperationException("InvalidRequest must not include fqdn or listenerPort.");
                     }
 
                     if (intent.ArticleIdHex is not null)

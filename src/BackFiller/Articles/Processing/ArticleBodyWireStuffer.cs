@@ -1,14 +1,15 @@
 namespace VectorNNTP.BackFiller.Articles.Processing
 {
     /// <summary>
-    /// Applies NNTP body dot-stuffing to a canonical logical article for VATP retention.
+    /// Applies NNTP body dot-stuffing to a canonical logical article before retention.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Representation boundary. <see cref="Nntp.NntpStreamReader"/> removes transport dot-stuffing once,
     /// and the parser and <see cref="NntpArticleCanonicalMaterializer"/> operate on that logical article.
-    /// This type is the only place that puts dot-stuffing back, and it does so only on article-body lines.
-    /// VATP writes the resulting buffer directly and does not stuff again.
+    /// This type is the only place that puts dot-stuffing into the retained buffer, and it does so only on
+    /// article-body lines. The NNTP listener copies that body unchanged. A header line that begins with
+    /// <c>.</c> is stuffed only in the bytes written to the socket.
     /// </para>
     /// <para>
     /// Headers, including a header line that begins with <c>.</c>, and the header/body separator are copied unchanged.

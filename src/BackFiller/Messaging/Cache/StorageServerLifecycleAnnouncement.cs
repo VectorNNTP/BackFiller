@@ -15,7 +15,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <param name="Fqdn">StorageServer FQDN. This is the fleet registry key.</param>
     /// <param name="State">Draining. Version 1 has no other state.</param>
     /// <param name="Timestamp">UTC time when this process published the announcement.</param>
-    /// <param name="VatpPort">TLS VATP listen port (<c>1</c>–<c>65535</c>).</param>
+    /// <param name="ListenerPort">TLS listener port (<c>1</c>–<c>65535</c>).</param>
     /// <remarks>
     /// This is not a capacity advertisement, not a liveness heartbeat, and not a readiness signal.
     /// Periodic advertisements remain the readiness, capacity, and liveness source.
@@ -28,5 +28,5 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         string Fqdn,
         StorageServerLifecycleState State,
         DateTimeOffset Timestamp,
-        int VatpPort);
+        int ListenerPort);
 }

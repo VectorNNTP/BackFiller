@@ -30,16 +30,17 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
 
             Assert.Equal(ArticleWorkOutcome.Success, result.Outcome);
             Assert.Null(result.Article);
-            using var opened = retention.TryOpenTransfer(requestId, result.ArticleId!.Value);
-            Assert.Equal(VatpOpenKind.Opened, opened.Kind);
-            Assert.True(MemoryMarshal.TryGetArray(opened.Lease!.Record.ArtData, out var retained));
+            var claimed = retention.TryClaimForDelivery(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.True(MemoryMarshal.TryGetArray(claimed.Claim!.ArticleBytes, out var retained));
             Assert.NotNull(retained.Array);
             Assert.NotSame(source, retained.Array);
             Assert.Equal(expectedBytes, retained.Array);
             Assert.All(source, static value => Assert.Equal(0xFF, value));
+            claimed.Claim.Dispose();
             Assert.Equal(ArticleRetentionKind.Retained, handler.LastRetentionKind);
             Assert.Equal("backfiller.test", handler.LastFqdn);
-            Assert.Equal(563, handler.LastVatpPort);
+            Assert.Equal(563, handler.LastListenerPort);
             Assert.True(retriever.Invoked);
         }
 

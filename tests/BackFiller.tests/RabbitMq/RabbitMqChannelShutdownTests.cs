@@ -1,7 +1,6 @@
 using System.Reflection;
 using RabbitMQ.Client;
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
-using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {

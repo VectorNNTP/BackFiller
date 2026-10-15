@@ -430,7 +430,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 ArticleWorkTestDeliveries.CanonicalReplyTo,
                 Error: null,
                 ArticleWorkTestDeliveries.CanonicalFqdn,
-                ArticleWorkTestDeliveries.CanonicalVatpPort,
+                ArticleWorkTestDeliveries.CanonicalListenerPort,
                 ArticleWorkTestDeliveries.CanonicalArticleIdHex);
             var consumer = new FakeBackFillerRabbitMqChannel(1);
 
@@ -541,7 +541,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             {
                 Outcome = ArticleWorkOutcome.Success,
                 Fqdn = ArticleWorkTestDeliveries.CanonicalFqdn,
-                VatpPort = ArticleWorkTestDeliveries.CanonicalVatpPort,
+                ListenerPort = ArticleWorkTestDeliveries.CanonicalListenerPort,
                 ArticleId = VectorNNTP.BackFiller.Articles.ArticleId.ParseLowerHex(
                     ArticleWorkTestDeliveries.CanonicalArticleIdHex),
             };
