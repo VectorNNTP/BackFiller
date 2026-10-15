@@ -70,7 +70,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         {
             var time = new ManualTimeProvider(Start);
             var authority = Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(5));
-            var old = RetentionTestArticles.RetainPrepared(authority, "<a@b>", "old\r\n");
+            _ = RetentionTestArticles.RetainPrepared(authority, "<a@b>", "old\r\n");
             time.Advance(TimeSpan.FromSeconds(5));
             AssertNotFound(authority, "<a@b>");
 
