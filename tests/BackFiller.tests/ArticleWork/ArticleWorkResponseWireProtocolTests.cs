@@ -21,7 +21,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("Giganews", root.GetProperty("backbone").GetString());
             Assert.Equal("Success", root.GetProperty("outcome").GetString());
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalFqdn, root.GetProperty("fqdn").GetString());
-            Assert.Equal(ArticleWorkTestDeliveries.CanonicalVatpPort, root.GetProperty("vatpPort").GetInt32());
+            Assert.Equal(ArticleWorkTestDeliveries.CanonicalListenerPort, root.GetProperty("listenerPort").GetInt32());
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalArticleIdHex, root.GetProperty("articleId").GetString());
             Assert.False(root.TryGetProperty("uri", out _));
             Assert.False(root.TryGetProperty("error", out _));
@@ -44,7 +44,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             using var document = JsonDocument.Parse(json);
             Assert.False(document.RootElement.TryGetProperty("uri", out _));
             Assert.False(document.RootElement.TryGetProperty("fqdn", out _));
-            Assert.False(document.RootElement.TryGetProperty("vatpPort", out _));
+            Assert.False(document.RootElement.TryGetProperty("listenerPort", out _));
             Assert.False(document.RootElement.TryGetProperty("articleId", out _));
             Assert.Equal("No article with that message-id", document.RootElement.GetProperty("error").GetString());
         }
@@ -69,7 +69,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("InvalidRequest", root.GetProperty("outcome").GetString());
             Assert.False(root.TryGetProperty("uri", out _));
             Assert.False(root.TryGetProperty("fqdn", out _));
-            Assert.False(root.TryGetProperty("vatpPort", out _));
+            Assert.False(root.TryGetProperty("listenerPort", out _));
             Assert.Equal("Malformed JSON.", root.GetProperty("error").GetString());
         }
 
@@ -78,7 +78,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         {
             using var document = JsonDocument.Parse(ArticleWorkResponseWireProtocol.SerializeV1(SuccessIntent()));
             var names = document.RootElement.EnumerateObject().Select(static property => property.Name).ToArray();
-            Assert.Equal(["version", "requestId", "messageId", "backbone", "outcome", "fqdn", "vatpPort", "articleId"], names);
+            Assert.Equal(["version", "requestId", "messageId", "backbone", "outcome", "fqdn", "listenerPort", "articleId"], names);
         }
 
         [Theory]
@@ -86,7 +86,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         [InlineData("")]
         [InlineData("nodots")]
         [InlineData("Backfiller01.usenet.ninja")]
-        [InlineData("vatp" + "://" + "backfiller01.usenet.ninja:119/dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14")]
+        [InlineData("https" + "://" + "backfiller01.usenet.ninja:119/dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14")]
         public void Success_rejects_invalid_fqdn(string? fqdn)
         {
             var intent = SuccessIntent() with { Fqdn = fqdn };
@@ -98,9 +98,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         [InlineData(0)]
         [InlineData(-1)]
         [InlineData(65536)]
-        public void Success_rejects_invalid_vatp_port(int? port)
+        public void Success_rejects_invalid_listener_port(int? port)
         {
-            var intent = SuccessIntent() with { VatpPort = port };
+            var intent = SuccessIntent() with { ListenerPort = port };
             Assert.Throws<InvalidOperationException>(() => ArticleWorkResponseWireProtocol.SerializeV1(intent));
         }
 
@@ -154,7 +154,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 ArticleWorkTestDeliveries.CanonicalReplyTo,
                 Error: null,
                 ArticleWorkTestDeliveries.CanonicalFqdn,
-                ArticleWorkTestDeliveries.CanonicalVatpPort,
+                ArticleWorkTestDeliveries.CanonicalListenerPort,
                 ArticleWorkTestDeliveries.CanonicalArticleIdHex);
     }
 }

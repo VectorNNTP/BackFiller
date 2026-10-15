@@ -80,11 +80,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
-            public VatpOpenResult TryOpenTransfer(
-                Guid requestId,
-                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
-                Func<int, bool>? tryReserveOutboundBytes = null) =>
-                VatpOpenResult.Rejected();
+            public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
+                ArticleDeliveryClaimResult.NotFound();
 
             public bool TryCancelPendingRequest(Guid requestId) => false;
 
@@ -122,11 +119,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
-            public VatpOpenResult TryOpenTransfer(
-                Guid requestId,
-                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
-                Func<int, bool>? tryReserveOutboundBytes = null) =>
-                VatpOpenResult.Rejected();
+            public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
+                ArticleDeliveryClaimResult.NotFound();
 
             public bool TryCancelPendingRequest(Guid requestId) => false;
 
@@ -164,11 +158,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
-            public VatpOpenResult TryOpenTransfer(
-                Guid requestId,
-                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
-                Func<int, bool>? tryReserveOutboundBytes = null) =>
-                VatpOpenResult.Rejected();
+            public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
+                ArticleDeliveryClaimResult.NotFound();
 
             public bool TryCancelPendingRequest(Guid requestId) => false;
 

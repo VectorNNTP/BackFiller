@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <remarks>
     /// Request properties: <c>version</c>, <c>requestId</c>, <c>articleId</c>.
     /// Response properties: <c>version</c>, <c>requestId</c>, <c>serverId</c>, <c>fqdn</c>,
-    /// <c>articleId</c>, <c>vatpPort</c>. A response that includes <c>uri</c> is rejected.
+    /// <c>articleId</c>, <c>listenerPort</c>. A response that includes <c>uri</c> is rejected.
     /// AMQP <c>CorrelationId</c>, <c>ReplyTo</c>, and
     /// <c>Expiration</c> are never JSON fields.
     /// </remarks>
@@ -115,14 +115,14 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                 throw new InvalidOperationException("Storage lookup response requires a non-empty fqdn.");
             }
 
-            if (!VatpEndpointFields.IsCanonicalFqdn(response.Fqdn))
+            if (!ListenerEndpointFields.IsCanonicalFqdn(response.Fqdn))
             {
                 throw new InvalidOperationException("Storage lookup response requires a canonical fqdn.");
             }
 
-            if (!VatpEndpointFields.IsCanonicalPort(response.VatpPort))
+            if (!ListenerEndpointFields.IsCanonicalPort(response.ListenerPort))
             {
-                throw new InvalidOperationException("Storage lookup response requires a vatpPort in the range 1–65535.");
+                throw new InvalidOperationException("Storage lookup response requires a listenerPort in the range 1–65535.");
             }
 
             var writer = new ArrayBufferWriter<byte>();
@@ -133,7 +133,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             jsonWriter.WriteNumber("serverId", response.ServerId);
             jsonWriter.WriteString("fqdn", response.Fqdn);
             jsonWriter.WriteString("articleId", response.ArticleId.ToLowerHexString());
-            jsonWriter.WriteNumber("vatpPort", response.VatpPort);
+            jsonWriter.WriteNumber("listenerPort", response.ListenerPort);
             jsonWriter.WriteEndObject();
             jsonWriter.Flush();
             return writer.WrittenSpan.ToArray();
@@ -195,14 +195,14 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     return false;
                 }
 
-                if (!TryReadInt32(root, "vatpPort", out var vatpPort, out reason)
-                    || !VatpEndpointFields.IsCanonicalPort(vatpPort))
+                if (!TryReadInt32(root, "listenerPort", out var listenerPort, out reason)
+                    || !ListenerEndpointFields.IsCanonicalPort(listenerPort))
                 {
-                    reason = "Lookup response vatpPort must be an integer in the range 1–65535.";
+                    reason = "Lookup response listenerPort must be an integer in the range 1–65535.";
                     return false;
                 }
 
-                if (!VatpEndpointFields.IsCanonicalFqdn(fqdn))
+                if (!ListenerEndpointFields.IsCanonicalFqdn(fqdn))
                 {
                     reason = "Lookup response fqdn must be a lowercase dotted DNS name.";
                     return false;
@@ -214,7 +214,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     serverId,
                     fqdn.Trim(),
                     articleId,
-                    vatpPort);
+                    listenerPort);
                 reason = string.Empty;
                 return true;
             }

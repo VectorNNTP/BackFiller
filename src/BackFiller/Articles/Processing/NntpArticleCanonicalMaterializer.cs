@@ -179,7 +179,7 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// <param name="maxArticleBytes">
         /// Article-size boundary for this operation. It bounds two different lengths:
         /// the canonical projection after Date and Path edits and before body dot-stuffing,
-        /// and the stuffed wire length that becomes <see cref="NntpArticleCanonicalMaterializeResult.CanonicalLength"/> and VATP ArtSize.
+        /// and the stuffed wire length that becomes <see cref="NntpArticleCanonicalMaterializeResult.CanonicalLength"/> and retained ArtSize.
         /// </param>
         /// <param name="organizationalTrackerHost">Path tracker component captured with <paramref name="maxArticleBytes"/>.</param>
         /// <param name="rentFrom">

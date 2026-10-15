@@ -1,5 +1,4 @@
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
-using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Configuration
 {

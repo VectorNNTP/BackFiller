@@ -1,5 +1,3 @@
-using VectorNNTP.BackFiller.Configuration;
-
 namespace VectorNNTP.BackFiller.Configuration
 {
     /// <summary>

@@ -4,14 +4,14 @@ namespace VectorNNTP.BackFiller.Retention
     /// <param name="Kind">Admission classification.</param>
     /// <param name="Identity">Computed identity when hashing ran.</param>
     /// <param name="Fqdn">BackFiller FQDN when the article is or remains available.</param>
-    /// <param name="VatpPort">TLS VATP listen port when the article is or remains available.</param>
+    /// <param name="ListenerPort">TLS listener port when the article is or remains available.</param>
     /// <param name="RetainedPayloadBytes">Authority-owned payload bytes after the attempt.</param>
     /// <param name="ReleasedPayloadBytes">Bytes released by expiry/eviction during this attempt.</param>
     internal readonly record struct ArticleRetentionResult(
         ArticleRetentionKind Kind,
         ArticleIdentity? Identity,
         string? Fqdn,
-        int? VatpPort,
+        int? ListenerPort,
         long RetainedPayloadBytes,
         long ReleasedPayloadBytes)
     {

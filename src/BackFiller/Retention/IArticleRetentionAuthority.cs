@@ -3,14 +3,15 @@ namespace VectorNNTP.BackFiller.Retention
     /// <summary>
     /// Single owner of retained CanonicalV1 <see cref="VectorNNTP.BackFiller.Articles.ArticleRecord"/> values,
     /// identity, TTL, and capacity. Independent of RabbitMQ and NNTP sessions.
-    /// VATP OPEN is the only data-plane consumer of retained ArtData.
+    /// <see cref="TryClaimForDelivery"/> is the NNTP delivery claim; the article is removed only when that claim is committed.
     /// </summary>
     /// <remarks>
     /// An openable RequestId is a hard ArticleWork Success capability: FIFO capacity reclaim must not
-    /// unindex an entry while <c>OpenableRequestIdCount &gt; 0</c>. TTL expiry is a hard deadline:
+    /// unindex an entry while <c>OpenableRequestIdCount &gt; 0</c>. An active NNTP delivery claim is also
+    /// a FIFO pin, including after its RequestIds are cancelled. TTL expiry is a hard deadline:
     /// at <c>ExpiresUtc</c> the entry is removed from every index, stops counting as retained payload,
-    /// and cannot start another transfer. An in-flight lease is revoked and does not extend that deadline.
-    /// Explicit cancel, successful OPEN consumption, and process dispose also end a capability.
+    /// and cannot start another delivery. An in-flight delivery claim does not extend that deadline.
+    /// Explicit cancel, committed NNTP delivery, and process dispose also end a capability.
     /// </remarks>
     internal interface IArticleRetentionAuthority
     {
@@ -24,17 +25,17 @@ namespace VectorNNTP.BackFiller.Retention
         int RetainedCount { get; }
 
         /// <summary>
-        /// Retains a CanonicalV1 article record and attaches a VATP OPEN RequestId capability.
+        /// Retains a CanonicalV1 article record and attaches an Article Work RequestId capability.
         /// </summary>
         /// <param name="messageId">Exact Message-ID. Not normalized.</param>
         /// <param name="requestId">ArticleWork Success RequestId to attach as an openable capability.</param>
         /// <param name="record">CanonicalV1 record. ArtData is referenced on first admission and is not copied.</param>
-        /// <param name="selectedDateHeaderName">Date-family header name stored for VATP META on first admission.</param>
+        /// <param name="selectedDateHeaderName">Date-family header name captured on first admission.</param>
         /// <param name="endpointFqdn">
         /// FQDN captured with the rest of this article's shared snapshot. Null uses the authority's constructed FQDN.
         /// </param>
         /// <returns>
-        /// Admission classification, identity when one was resolved, the VATP endpoint when the article
+        /// Admission classification, identity when one was resolved, the listener endpoint when the article
         /// is available, and the payload-byte totals after the attempt.
         /// </returns>
         /// <remarks>
@@ -55,25 +56,25 @@ namespace VectorNNTP.BackFiller.Retention
             string? endpointFqdn = null);
 
         /// <summary>
-        /// Resolves a VATP OPEN: RequestId is primary; ArticleId is verified.
-        /// Successful OPEN consumes only that RequestId after optional outbound-byte reservation succeeds.
-        /// Wrong ArticleId does not consume RequestId and does not reserve.
+        /// Claims one retained article for an NNTP <c>ARTICLE</c> delivery.
         /// </summary>
-        /// <param name="requestId">ArticleWork Success RequestId capability.</param>
-        /// <param name="expectedArticleId">ArticleId from the OPEN frame.</param>
-        /// <param name="tryReserveOutboundBytes">
-        /// Optional session admission for found/outbound bytes (ArtSize). Invoked under the retention
-        /// gate before RequestId consumption. Returning <see langword="false"/> rejects OPEN and
-        /// leaves the RequestId available for retry.
+        /// <param name="messageIdOctets">
+        /// Message-ID octets, including angle brackets. Compared to the stored key with the same
+        /// low-8-bit match as article admission. Not trimmed or case-folded.
         /// </param>
         /// <returns>
-        /// <see cref="VatpOpenKind.Opened"/> with a reader lease after that RequestId is consumed, or
-        /// <see cref="VatpOpenKind.Rejected"/> with no lease.
+        /// <see cref="ArticleDeliveryClaimKind.Claimed"/> with a claim whose
+        /// <see cref="ArticleRetentionAuthority.ArticleDeliveryClaim.ArticleBytes"/> references the existing ArtData,
+        /// or a rejection that does not claim the entry and does not consume a RequestId.
         /// </returns>
-        VatpOpenResult TryOpenTransfer(
-            Guid requestId,
-            VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
-            Func<int, bool>? tryReserveOutboundBytes = null);
+        /// <remarks>
+        /// Does not copy ArtData. Does not remove the entry. RequestIds stay openable until
+        /// <see cref="ArticleRetentionAuthority.ArticleDeliveryClaim.Commit"/>.
+        /// An entry that does not end in CRLF is <see cref="ArticleDeliveryClaimKind.NotFrameable"/>.
+        /// A second claim while one is active is <see cref="ArticleDeliveryClaimKind.InDelivery"/>.
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">The authority has been disposed.</exception>
+        ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets);
 
         /// <summary>Cancels one openable RequestId without releasing the Message-ID entry.</summary>
         /// <param name="requestId">Openable RequestId to detach.</param>
@@ -90,7 +91,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// <summary>Stops new admissions.</summary>
         /// <remarks>
         /// Closes <see cref="RetainCanonical"/> only. Existing entries, openable RequestIds,
-        /// <see cref="TryOpenTransfer"/>, <see cref="TryCancelPendingRequest"/>, and
+        /// <see cref="TryClaimForDelivery"/>, <see cref="TryCancelPendingRequest"/>, and
         /// <see cref="SweepExpired"/> stay available until the authority is disposed.
         /// </remarks>
         void BeginShutdown();

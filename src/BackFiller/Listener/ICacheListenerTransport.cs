@@ -29,7 +29,7 @@ namespace VectorNNTP.BackFiller.Listener
     /// the linked source after the configured no-progress timeout. A timeout with the caller token still
     /// active becomes <see cref="TimeoutException"/>. Caller cancellation propagates as
     /// <see cref="OperationCanceledException"/>. An empty write returns zero and does not start a timeout.
-    /// This type does not interpret VATP frames.
+    /// This type does not interpret NNTP commands or article bytes.
     /// </remarks>
     internal sealed class StreamCacheListenerTransport : ICacheListenerTransport
     {

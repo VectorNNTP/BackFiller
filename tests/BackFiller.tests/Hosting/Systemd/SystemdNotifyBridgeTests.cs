@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting.Systemd;
 using Microsoft.Extensions.Logging;
 using VectorNNTP.BackFiller.Hosting.Systemd;
-using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {

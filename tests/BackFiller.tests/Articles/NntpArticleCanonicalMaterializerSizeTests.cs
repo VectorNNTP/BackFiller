@@ -1,7 +1,6 @@
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Articles.Processing;
-using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
 namespace VectorNNTP.BackFiller.Tests.Articles
 {
@@ -132,49 +131,6 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.NotNull(materialized.ArticleBytes);
             Assert.Equal(materialized.CanonicalLength, materialized.ArticleBytes.Length);
             Assert.InRange(materialized.CanonicalLength, 1, ArticleResourceLimits.MaxArticleBytes);
-        }
-
-        [Fact]
-        public void Receive_stream_rejects_advertised_art_size_above_the_ceiling_before_the_buffer()
-        {
-            var over = AcceptMeta(ArticleResourceLimits.MaxArticleBytes + 1);
-            Assert.False(over.Applied.Success);
-            Assert.Equal(VatpErrorCode.ArticleTooLarge, over.Applied.Error);
-            Assert.Equal(ArticleTransferPhase.Failed, over.Stream.Phase);
-            Assert.Equal(0, over.Stream.ReceivedBytes);
-
-            var zero = AcceptMeta(0);
-            Assert.False(zero.Applied.Success);
-            Assert.Equal(VatpErrorCode.ArticleTooLarge, zero.Applied.Error);
-            Assert.Equal(0, zero.Stream.ReceivedBytes);
-
-            var within = AcceptMeta(1);
-            Assert.True(within.Applied.Success);
-            Assert.Equal(ArticleTransferPhase.ReceivingData, within.Stream.Phase);
-            Assert.Equal(0, within.Stream.ReceivedBytes);
-        }
-
-        private static (ArticleTransferApplyResult Applied, ArticleTransferReceiveStream Stream) AcceptMeta(int artSize)
-        {
-            var meta = new ArticleCanonicalTransferMeta(
-                0,
-                0,
-                artSize,
-                NntpArticleHeaderName.Date,
-                new ArticleFieldTable(
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent,
-                    ArticleByteRange.Absent));
-            var stream = new ArticleTransferReceiveStream(
-                1,
-                Guid.NewGuid(),
-                ArticleId.FromMessageId("<size-boundary@example.com>"u8));
-            var applied = stream.TryAcceptMeta(VatpMetaCodec.Encode(in meta));
-            return (applied, stream);
         }
 
         private static MeasuredArticle Measure(in NntpArticleParseResult parsed)

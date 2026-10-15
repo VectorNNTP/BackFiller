@@ -4,9 +4,9 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
     /// <summary>
-    /// Hard Success capability: FIFO reclaim must not invalidate openable RequestIds before TTL.
+    /// An openable RequestId pins an entry against FIFO reclaim until cancel, TTL, or committed delivery.
     /// </summary>
-    public sealed class VatpSuccessPinningTests
+    public sealed class ArticleRetentionRequestPinTests
     {
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
@@ -29,9 +29,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 pressure.MessageId, pressure.RequestId, pressure.Record, pressure.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.CapacityUnavailable, rejected.Kind);
             Assert.Equal(pinned.Record.ArtSize, authority.RetainedPayloadBytes);
-
-            using var open = authority.TryOpenTransfer(pinned.RequestId, pinned.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            using var claim = ArticleRetentionAuthorityTests.Claim(authority, pinned.MessageId, pinned.ArtData);
         }
 
         [Fact]
@@ -53,11 +51,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 next.MessageId, next.RequestId, next.Record, next.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, admitted.Kind);
             Assert.Equal(next.Record.ArtSize, authority.RetainedPayloadBytes);
-
-            using var missing = authority.TryOpenTransfer(unpinned.RequestId, unpinned.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, missing.Kind);
-            using var openNext = authority.TryOpenTransfer(next.RequestId, next.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, openNext.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, unpinned.MessageId);
+            using var claim = ArticleRetentionAuthorityTests.Claim(authority, next.MessageId, next.ArtData);
         }
 
         [Fact]
@@ -84,16 +79,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 incoming.MessageId, incoming.RequestId, incoming.Record, incoming.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, admitted.Kind);
 
-            using (var openPinned = authority.TryOpenTransfer(pinned.RequestId, pinned.Record.ArtId))
+            using (var claim = ArticleRetentionAuthorityTests.Claim(authority, pinned.MessageId, pinned.ArtData))
             {
-                Assert.Equal(VatpOpenKind.Opened, openPinned.Kind);
+                Assert.Equal(pinned.MessageId, claim.MessageId);
             }
 
-            using (var missingUnpinned = authority.TryOpenTransfer(unpinned.RequestId, unpinned.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Rejected, missingUnpinned.Kind);
-            }
-
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, unpinned.MessageId);
             Assert.Equal(pinned.Record.ArtSize + incoming.Record.ArtSize, authority.RetainedPayloadBytes);
         }
 
@@ -118,15 +109,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 three.MessageId, three.RequestId, three.Record, three.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.CapacityUnavailable, rejected.Kind);
             Assert.Equal(one.Record.ArtSize + two.Record.ArtSize, authority.RetainedPayloadBytes);
-
-            using var openOne = authority.TryOpenTransfer(one.RequestId, one.Record.ArtId);
-            using var openTwo = authority.TryOpenTransfer(two.RequestId, two.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, openOne.Kind);
-            Assert.Equal(VatpOpenKind.Opened, openTwo.Kind);
+            using var claimOne = ArticleRetentionAuthorityTests.Claim(authority, one.MessageId, one.ArtData);
+            using var claimTwo = ArticleRetentionAuthorityTests.Claim(authority, two.MessageId, two.ArtData);
         }
 
         [Fact]
-        public void MultipleRequestIdsKeepEntryPinned_UntilLastConsumed()
+        public void MultipleRequestIdsKeepEntryPinned_UntilTheLastIsCancelled()
         {
             var seed = RetentionTestArticles.Create("<tmul@ex>", "body-aa\r\n");
             var tight = ArticleRetentionAuthorityTests.Create(
@@ -140,22 +128,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 ArticleRetentionKind.AlreadyPresent,
                 tight.RetainCanonical(second.MessageId, second.RequestId, second.Record, second.SelectedDateHeaderName).Kind);
 
-            using (var openFirst = tight.TryOpenTransfer(seed.RequestId, seed.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Opened, openFirst.Kind);
-            }
-
+            Assert.True(tight.TryCancelPendingRequest(seed.RequestId));
             var blocked = RetentionTestArticles.Create("<tblk@ex>", "body-aa\r\n");
             Assert.Equal(seed.Record.ArtSize, blocked.Record.ArtSize);
             Assert.Equal(
                 ArticleRetentionKind.CapacityUnavailable,
                 tight.RetainCanonical(blocked.MessageId, blocked.RequestId, blocked.Record, blocked.SelectedDateHeaderName).Kind);
 
-            using (var openSecond = tight.TryOpenTransfer(second.RequestId, seed.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Opened, openSecond.Kind);
-            }
-
+            Assert.True(tight.TryCancelPendingRequest(second.RequestId));
             var replacement = RetentionTestArticles.Create("<trep@ex>", "body-aa\r\n");
             Assert.Equal(seed.Record.ArtSize, replacement.Record.ArtSize);
             Assert.Equal(
@@ -184,8 +164,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 ArticleRetentionKind.Retained,
                 authority.RetainCanonical(
                     replacement.MessageId, replacement.RequestId, replacement.Record, replacement.SelectedDateHeaderName).Kind);
-            using var missing = authority.TryOpenTransfer(pinned.RequestId, pinned.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, missing.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, pinned.MessageId);
         }
 
         [Fact]
@@ -199,13 +178,13 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<ttl-pin@b>");
             time.Advance(TimeSpan.FromSeconds(5));
             Assert.True(authority.SweepExpired() > 0);
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, open.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, prepared.MessageId);
+            Assert.False(authority.TryCancelPendingRequest(prepared.RequestId));
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
         [Fact]
-        public async Task ConcurrentOpenAndReclaim_DoesNotInvalidateOpenableCapability()
+        public async Task ConcurrentClaimAndReclaim_DoesNotDropAnOpenableEntry()
         {
             const string body = "same-body\r\n";
             var prepared = RetentionTestArticles.Create("<copen@ex>", body);
@@ -220,10 +199,10 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                     prepared.MessageId, prepared.RequestId, prepared.Record, prepared.SelectedDateHeaderName).Kind);
 
             using var barrier = new Barrier(2);
-            var openTask = Task.Run(() =>
+            var claimTask = Task.Run(() =>
             {
                 barrier.SignalAndWait(TestTimeout);
-                return authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+                return authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(prepared.MessageId));
             });
             var reclaimTask = Task.Run(() =>
             {
@@ -232,24 +211,13 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                     pressure.MessageId, pressure.RequestId, pressure.Record, pressure.SelectedDateHeaderName);
             });
 
-            await Task.WhenAll(openTask, reclaimTask).WaitAsync(TestTimeout);
-            using var open = await openTask;
+            await Task.WhenAll(claimTask, reclaimTask).WaitAsync(TestTimeout);
+            var claim = await claimTask;
             var reclaim = await reclaimTask;
-
-            // Under the gate, either OPEN wins first (RequestId consumed; reclaim may admit after unpin)
-            // or reclaim runs first and must CapacityUnavailable while RequestId remains openable.
-            if (open.Kind == VatpOpenKind.Opened)
-            {
-                Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
-                Assert.True(
-                    reclaim.Kind is ArticleRetentionKind.Retained or ArticleRetentionKind.CapacityUnavailable);
-            }
-            else
-            {
-                Assert.Equal(ArticleRetentionKind.CapacityUnavailable, reclaim.Kind);
-                using var retry = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-                Assert.Equal(VatpOpenKind.Opened, retry.Kind);
-            }
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claim.Kind);
+            Assert.True(claim.Claim!.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            Assert.Equal(ArticleRetentionKind.CapacityUnavailable, reclaim.Kind);
+            claim.Claim.Dispose();
         }
 
         [Fact]
@@ -288,20 +256,17 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             if (attachResult.Kind == ArticleRetentionKind.AlreadyPresent)
             {
-                using var open = authority.TryOpenTransfer(attach.RequestId, first.Record.ArtId);
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
+                using var claim = ArticleRetentionAuthorityTests.Claim(authority, attach.MessageId, first.ArtData);
                 Assert.Equal(ArticleRetentionKind.CapacityUnavailable, reclaimResult.Kind);
             }
             else if (attachResult.Kind == ArticleRetentionKind.Retained)
             {
-                using var open = authority.TryOpenTransfer(attach.RequestId, attach.Record.ArtId);
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
+                using var claim = ArticleRetentionAuthorityTests.Claim(authority, attach.MessageId, attach.ArtData);
             }
             else
             {
                 Assert.Equal(ArticleRetentionKind.Retained, reclaimResult.Kind);
-                using var open = authority.TryOpenTransfer(pressure.RequestId, pressure.Record.ArtId);
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
+                using var claim = ArticleRetentionAuthorityTests.Claim(authority, pressure.MessageId, pressure.ArtData);
             }
         }
     }

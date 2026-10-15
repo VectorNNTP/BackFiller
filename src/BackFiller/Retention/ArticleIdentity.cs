@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.Retention
     /// <summary>
     /// Message-ID plus its canonical <see cref="ArticleId"/> hex used in Article Work Success
     /// metadata and retention collision checks.
-    /// Not a VATP transfer key (VATP uses RequestId + ArticleId).
+    /// Message-ID identity. NNTP delivery looks up this Message-ID. RequestIds are separate Article Work capabilities.
     /// </summary>
     /// <param name="MessageId">Exact Message-ID string. Not normalized.</param>
     /// <param name="ArticleIdHex">64-character lowercase hexadecimal <see cref="ArticleId"/>.</param>

@@ -1,5 +1,3 @@
-using VectorNNTP.BackFiller.NntpDb;
-
 namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>

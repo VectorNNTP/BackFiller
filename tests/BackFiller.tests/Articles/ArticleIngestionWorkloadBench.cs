@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
-using System.Text;
 using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Articles.Processing;

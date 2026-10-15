@@ -10,8 +10,8 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <param name="UsedBytes">Authoritative used storage bytes for the cache volume.</param>
     /// <param name="AvailableBytes">Authoritative available storage bytes for the cache volume.</param>
     /// <param name="Timestamp">UTC timestamp when the advertisement was produced.</param>
-    /// <param name="VatpPort">
-    /// TLS VATP listen port (<c>1</c>–<c>65535</c>) when the server is a placement target.
+    /// <param name="ListenerPort">
+    /// TLS listener port (<c>1</c>–<c>65535</c>) when the server is a placement target.
     /// Omitted advertisements remain valid liveness records and are not placement targets.
     /// </param>
     public sealed record StorageServerAdvertisement(
@@ -22,5 +22,5 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         long UsedBytes,
         long AvailableBytes,
         DateTimeOffset Timestamp,
-        int? VatpPort = null);
+        int? ListenerPort = null);
 }

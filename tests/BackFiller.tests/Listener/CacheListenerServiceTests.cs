@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Security;
 using System.Reflection;
@@ -13,9 +12,7 @@ using VectorNNTP.BackFiller.Listener;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 using VectorNNTP.BackFiller.Networking.Certificates;
-using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
@@ -82,12 +79,8 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             try
             {
                 await using var client = await ConnectAsync(runtime.BindPortTls);
-                await ExchangeHelloAsync(client.Stream);
-                var articleId = ArticleId.FromSpan(new byte[ArticleId.Length]);
-                Span<byte> idBytes = stackalloc byte[VatpProtocol.ArticleIdLength];
-                articleId.CopyTo(idBytes);
-                await client.Stream.WriteAsync(
-                    VatpFrameEncoder.ToSingleBuffer(VatpFrameEncoder.EncodeOpen(1, Guid.NewGuid(), idBytes)));
+                await ReadGreetingAsync(client.Stream);
+                await client.Stream.WriteAsync("ARTICLE <a@b>\r\n"u8.ToArray());
                 await ArticleWorkTestDeliveries.WaitUntilAsync(
                     () => service.State == CacheListenerState.Running && service.ActiveConnections == 0,
                     TimeSpan.FromSeconds(2));
@@ -106,11 +99,34 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
-        public async Task Tls_client_can_complete_vatp_hello_on_the_listener()
+        public async Task Tls_client_receives_the_nntp_greeting()
         {
             await using var context = await ListenerContext.StartAsync();
             await using var client = await ConnectAsync(context);
-            await ExchangeHelloAsync(client.Stream);
+            await ReadGreetingAsync(client.Stream);
+        }
+
+        [Fact]
+        public async Task Tls_article_writes_exact_bytes_and_the_next_request_is_430()
+        {
+            await using var context = await ListenerContext.StartAsync();
+            var prepared = RetentionTestArticles.RetainPrepared(context.Authority, "<a@b>", ".\r\n");
+            await using var client = await ConnectAsync(context);
+            await ReadGreetingAsync(client.Stream);
+            await client.Stream.WriteAsync("ARTICLE <a@b>\r\nARTICLE <a@b>\r\n"u8.ToArray());
+
+            var status = "220 0 <a@b> article follows\r\n"u8.ToArray();
+            var article = new byte[status.Length + prepared.ArtData.Length + ".\r\n"u8.Length];
+            await client.Stream.ReadExactlyAsync(article);
+            Assert.True(article.AsSpan(0, status.Length).SequenceEqual(status));
+            Assert.True(article.AsSpan(status.Length, prepared.ArtData.Length).SequenceEqual(prepared.ArtData));
+            Assert.True(article.AsSpan(status.Length + prepared.ArtData.Length).SequenceEqual(".\r\n"u8));
+            Assert.Contains("\r\n..\r\n"u8, prepared.ArtData);
+
+            var missing = new byte["430 No Such Article Found\r\n"u8.Length];
+            await client.Stream.ReadExactlyAsync(missing);
+            Assert.True(missing.AsSpan().SequenceEqual("430 No Such Article Found\r\n"u8));
+            Assert.Equal(0, context.Authority.RetainedCount);
         }
 
         [Fact]
@@ -162,6 +178,57 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await ArticleWorkTestDeliveries.WaitUntilAsync(
                 () => !overflow.Connected || overflow.Available >= 0,
                 TimeSpan.FromSeconds(2));
+            Assert.Equal(1, context.Service.ActiveConnections);
+        }
+
+        [Fact]
+        public async Task Writer_failure_releases_connection_admission()
+        {
+            var runtime = CreateRuntime(GetFreePort(), maxConnections: 1);
+            runtime = runtime with
+            {
+                Listener = runtime.Listener with { IoProgressTimeout = TimeSpan.FromMilliseconds(200) },
+            };
+            await using var context = await ListenerContext.StartAsync(runtime: runtime);
+            Assert.Equal(0, context.Service.ActiveConnections);
+
+            await using var client = await ConnectAsync(context);
+            using var floodCts = new CancellationTokenSource();
+            var flood = Task.Run(async () =>
+            {
+                var command = "NOPE\r\n"u8.ToArray();
+                while (!floodCts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await client.Stream.WriteAsync(command, floodCts.Token);
+                    }
+                    catch (OperationCanceledException) when (floodCts.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        return;
+                    }
+                }
+            });
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => context.Service.ActiveConnections == 0,
+                TimeSpan.FromSeconds(15));
+            await floodCts.CancelAsync();
+            try
+            {
+                await flood;
+            }
+            catch (IOException)
+            {
+            }
+
+            Assert.Equal(0, context.Service.ActiveConnections);
+            await using var second = await ConnectAsync(context);
+            await ReadGreetingAsync(second.Stream);
             Assert.Equal(1, context.Service.ActiveConnections);
         }
 
@@ -256,7 +323,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
-        public async Task Tls12_client_can_complete_handshake_and_fetch()
+        public async Task Tls12_client_can_complete_handshake()
         {
             await AssertHandshakeProtocolAsync(SslProtocols.Tls12);
         }
@@ -276,18 +343,20 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
-        public async Task Non_vatp_first_frame_is_rejected_without_legacy_fallback()
+        public async Task Legacy_get_is_an_unknown_nntp_command()
         {
             await using var context = await ListenerContext.StartAsync();
             await using var client = await ConnectAsync(context);
-            // Legacy cache GET framing is not a VATP HELLO; listener must not fall through.
-            var legacyLooking = new byte[16];
-            legacyLooking[0] = 0x01; // non-VATP version
-            BinaryPrimitives.WriteUInt32BigEndian(legacyLooking.AsSpan(4, 4), 1);
-            BinaryPrimitives.WriteUInt32BigEndian(legacyLooking.AsSpan(8, 4), 32);
-            await client.Stream.WriteAsync(legacyLooking);
-            var fail = await ReadVatpFrameAsync(client.Stream);
-            Assert.Equal(VatpFrameType.Fail, fail.Header.Type);
+            await ReadGreetingAsync(client.Stream);
+            // A legacy cache request is not an NNTP article command.
+            await client.Stream.WriteAsync("GET /legacy\r\n"u8.ToArray());
+            var unknown = new byte["500 Unknown command\r\n"u8.Length];
+            await client.Stream.ReadExactlyAsync(unknown);
+            Assert.True(unknown.AsSpan().SequenceEqual("500 Unknown command\r\n"u8));
+            await client.Stream.WriteAsync("QUIT\r\n"u8.ToArray());
+            var closing = new byte["205 Connection closing\r\n"u8.Length];
+            await client.Stream.ReadExactlyAsync(closing);
+            Assert.True(closing.AsSpan().SequenceEqual("205 Connection closing\r\n"u8));
             await ArticleWorkTestDeliveries.WaitUntilAsync(
                 () => context.Service.State == CacheListenerState.Running && context.Service.ActiveConnections == 0,
                 TimeSpan.FromSeconds(2));
@@ -356,29 +425,15 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await using var context = await ListenerContext.StartAsync();
             await using var client = await ConnectAsync(context, protocol);
             Assert.Equal(protocol, client.Stream.SslProtocol);
-            await ExchangeHelloAsync(client.Stream);
+            await ReadGreetingAsync(client.Stream);
         }
 
-        private static async Task ExchangeHelloAsync(SslStream stream)
+        private static async Task ReadGreetingAsync(SslStream stream)
         {
-            await stream.WriteAsync(
-                VatpFrameEncoder.ToSingleBuffer(VatpFrameEncoder.EncodeHello(VatpProtocol.DefaultMaxFramePayload)));
-            var hello = await ReadVatpFrameAsync(stream);
-            Assert.Equal(VatpFrameType.Hello, hello.Header.Type);
-        }
-
-        private static async Task<VatpParsedFrame> ReadVatpFrameAsync(Stream stream)
-        {
-            var headerBytes = new byte[VatpProtocol.HeaderLengthBytes];
-            await stream.ReadExactlyAsync(headerBytes);
-            var header = VatpFrameHeader.ReadFrom(headerBytes);
-            var payload = new byte[header.PayloadLength];
-            if (payload.Length > 0)
-            {
-                await stream.ReadExactlyAsync(payload);
-            }
-
-            return new VatpParsedFrame(header, new System.Buffers.ReadOnlySequence<byte>(payload));
+            var expected = "201 NNTP Service Ready, posting prohibited\r\n"u8.ToArray();
+            var greeting = new byte[expected.Length];
+            await stream.ReadExactlyAsync(greeting);
+            Assert.Equal(expected, greeting);
         }
 
         private static Task<TlsClient> ConnectAsync(
@@ -504,10 +559,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 string? endpointFqdn = null) =>
                 throw new NotSupportedException("retention boom");
 
-            public VatpOpenResult TryOpenTransfer(
-                Guid requestId,
-                ArticleId expectedArticleId,
-                Func<int, bool>? tryReserveOutboundBytes = null) =>
+            public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
                 throw new NotSupportedException("retention boom");
 
             public bool TryCancelPendingRequest(Guid requestId) =>
@@ -522,14 +574,21 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
         private sealed class ListenerContext : IAsyncDisposable
         {
-            private ListenerContext(CacheListenerService service, int port, TlsCertificateContextProvider certificates)
+            private ListenerContext(
+                CacheListenerService service,
+                ArticleRetentionAuthority authority,
+                int port,
+                TlsCertificateContextProvider certificates)
             {
                 Service = service;
+                Authority = authority;
                 Port = port;
                 Certificates = certificates;
             }
 
             public CacheListenerService Service { get; }
+
+            public ArticleRetentionAuthority Authority { get; }
 
             public TlsCertificateContextProvider Certificates { get; }
 
@@ -546,12 +605,13 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                     authority,
                     NullLogger<CacheListenerService>.Instance);
                 await service.StartAsync(CancellationToken.None);
-                return new ListenerContext(service, runtime.BindPortTls, certificates);
+                return new ListenerContext(service, authority, runtime.BindPortTls, certificates);
             }
 
             public async ValueTask DisposeAsync()
             {
                 await Service.DisposeAsync();
+                await Authority.DisposeAsync();
                 await Certificates.DisposeAsync();
             }
         }

@@ -21,12 +21,12 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <param name="ServerId">Responding StorageServer numeric identity.</param>
     /// <param name="Fqdn">Responding StorageServer FQDN.</param>
     /// <param name="ArticleId">Article identity confirmed present.</param>
-    /// <param name="VatpPort">TLS VATP listen port used for subsequent retrieval.</param>
+    /// <param name="ListenerPort">TLS listener port used for subsequent retrieval.</param>
     internal sealed record StorageArticleLookupResponse(
         int Version,
         Guid RequestId,
         int ServerId,
         string Fqdn,
         ArticleId ArticleId,
-        int VatpPort);
+        int ListenerPort);
 }

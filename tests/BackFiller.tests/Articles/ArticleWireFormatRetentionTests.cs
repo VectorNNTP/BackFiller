@@ -4,12 +4,11 @@ using VectorNNTP.BackFiller.Articles.Parsing;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Retention;
-using VectorNNTP.BackFiller.Transport.ArticleTransfer;
 
 namespace VectorNNTP.BackFiller.Tests.Articles
 {
     /// <summary>
-    /// Proves destuffing, canonicalization, body restuffing, retention, and VATP delivery compose once.
+    /// Proves destuffing, canonicalization, body restuffing, and retention compose once.
     /// </summary>
     public sealed class ArticleWireFormatRetentionTests
     {
@@ -33,7 +32,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             ".last\r\n");
 
         [Fact]
-        public async Task Retrieval_canonicalization_retention_and_vatp_deliver_one_stuffed_body()
+        public async Task Retrieval_canonicalization_and_retention_keep_one_stuffed_body()
         {
             var wireResponse = FrameStuffedMultiline(LogicalArticle);
             var destuffed = await ReadPayloadAsync(wireResponse);
@@ -64,14 +63,13 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 created.Record,
                 created.SelectedDateHeaderName);
             Assert.Equal(ArticleRetentionKind.Retained, retention.Kind);
-            using var opened = authority.TryOpenTransfer(requestId, created.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, opened.Kind);
-            var delivered = VatpFrameEncoder.EncodeData(1, opened.Lease!.Record.ArtData, fin: true);
-            Assert.Equal(retained.Length, delivered.Payload.Length);
-            Assert.True(delivered.Payload.Span.SequenceEqual(retained));
-            Assert.True(MemoryMarshal.TryGetArray(delivered.Payload, out var deliveredSegment));
-            Assert.True(MemoryMarshal.TryGetArray(opened.Lease.Record.ArtData, out var retainedSegment));
-            Assert.Same(retainedSegment.Array, deliveredSegment.Array);
+            var claimed = authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(MessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            Assert.True(claimed.Claim!.ArticleBytes.Span.SequenceEqual(retained));
+            Assert.True(MemoryMarshal.TryGetArray(claimed.Claim.ArticleBytes, out var retainedSegment));
+            Assert.True(MemoryMarshal.TryGetArray(created.Record.ArtData, out var createdSegment));
+            Assert.Same(createdSegment.Array, retainedSegment.Array);
+            claimed.Claim.Dispose();
         }
 
         /// <summary>

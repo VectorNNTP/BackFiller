@@ -277,12 +277,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var publication = Assert.Single(harness.PublishChannel.Publications);
             using var document = JsonDocument.Parse(publication.Body);
             var articleIdHex = document.RootElement.GetProperty("articleId").GetString();
-            Assert.True(ArticleId.TryParseLowerHex(articleIdHex, out var articleId));
-            using var open = harness.Retention.TryOpenTransfer(
-                Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
-                articleId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            return open.Lease!.Record.ArtData.ToArray();
+            Assert.True(ArticleId.TryParseLowerHex(articleIdHex, out _));
+            var claimed = harness.Retention.TryClaimForDelivery(
+                Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
+            var bytes = claimed.Claim!.ArticleBytes.ToArray();
+            claimed.Claim.Dispose();
+            return bytes;
         }
 
         private static int CountOccurrences(string source, string value)

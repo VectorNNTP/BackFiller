@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Security.Authentication;
-using System.Threading.Channels;
 using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Hosting;
@@ -13,8 +12,8 @@ using VectorNNTP.BackFiller.Networking.Listeners;
 namespace VectorNNTP.BackFiller.Listener
 {
     /// <summary>
-    /// Process-wide VATP TLS listener: binds configured endpoints, authenticates TLS, and serves retained
-    /// CanonicalV1 articles over VATP only. Does not own retention, RabbitMQ, or Article Work settlement.
+    /// Process-wide TLS listener: binds configured endpoints, authenticates TLS, and serves retained
+    /// CanonicalV1 articles with a partial RFC 3977 session. Does not own retention, RabbitMQ, or Article Work settlement.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -22,8 +21,9 @@ namespace VectorNNTP.BackFiller.Listener
     /// <see cref="ITlsCertificateContextProvider.IsAvailable"/>. Bind plans come from
     /// <see cref="ListenEndpointPlanner.Plan"/>. Each admitted socket gets one TLS handshake
     /// (TLS 1.2 or 1.3, no client certificate, revocation checks off) and one
-    /// <see cref="VatpListenerSession"/>. The certificate lease is acquired per connection and disposed
+    /// <see cref="NntpCacheListenerSession"/>. The certificate lease is acquired per connection and disposed
     /// with that connection. This service does not reload retired certificate generations.
+    /// The session does not own the socket or the certificate.
     /// </para>
     /// <para>
     /// Admission is a compare-and-swap on <see cref="ActiveConnections"/> against
@@ -40,7 +40,7 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>Supplies the server certificate context for each handshake. Leases are taken per connection.</summary>
         private readonly ITlsCertificateContextProvider _certificates;
 
-        /// <summary>Retention authority passed to each <see cref="VatpListenerSession"/>. This service does not retain articles.</summary>
+        /// <summary>Retention authority passed to each <see cref="NntpCacheListenerSession"/>. This service does not retain articles.</summary>
         private readonly IArticleRetentionAuthority _retention;
 
         /// <summary>ACME readiness gate. Start throws when <see cref="IAcmeCertificateReadiness.IsReady"/> is false.</summary>
@@ -87,7 +87,7 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>Initializes the Listener service for isolated tests with a pre-ready certificate gate.</summary>
         /// <param name="runtime">Runtime snapshot. Must not be null.</param>
         /// <param name="certificates">Certificate provider. Must not be null.</param>
-        /// <param name="retention">Retention authority handed to VATP sessions. Must not be null.</param>
+        /// <param name="retention">Retention authority handed to NNTP sessions. Must not be null.</param>
         /// <param name="logger">Listener logger. Must not be null.</param>
         /// <remarks>
         /// Marks a new <see cref="AcmeCertificateReadiness"/> ready and uses a new
@@ -106,7 +106,7 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>Initializes the Listener service.</summary>
         /// <param name="runtime">Runtime snapshot. Must not be null.</param>
         /// <param name="certificates">Certificate provider. Must not be null.</param>
-        /// <param name="retention">Retention authority handed to VATP sessions. Must not be null.</param>
+        /// <param name="retention">Retention authority handed to NNTP sessions. Must not be null.</param>
         /// <param name="readiness">Certificate readiness gate consulted by <see cref="StartAsync"/>.</param>
         /// <param name="journal">Startup journal that records listener start.</param>
         /// <param name="logger">Listener logger. Must not be null.</param>
@@ -455,10 +455,10 @@ namespace VectorNNTP.BackFiller.Listener
             }
         }
 
-        /// <summary>Handshakes one accepted socket and runs a single VATP session.</summary>
+        /// <summary>Handshakes one accepted socket and runs a single NNTP session.</summary>
         /// <param name="accepted">Accepted socket. Owned by the <see cref="NetworkStream"/> created here.</param>
         /// <param name="remote">Remote endpoint text captured before processing, used only in logs.</param>
-        /// <param name="cancellationToken">Service run token passed to the handshake link and the VATP session.</param>
+        /// <param name="cancellationToken">Service run token passed to the handshake link and the NNTP session.</param>
         /// <returns>A task that completes when the connection has been released from the admission count.</returns>
         /// <remarks>
         /// The handshake uses a linked token cancelled after <see cref="BackFillerListenerRuntimeOptions.TlsHandshakeTimeout"/>.
@@ -498,18 +498,13 @@ namespace VectorNNTP.BackFiller.Listener
                 }
 
                 handshakeCompleted = true;
-                // VATP is the only data-plane protocol. Non-VATP first frames are rejected by
-                // VatpListenerSession (HELLO required) using VATP FAIL / connection close semantics.
+                // The NNTP session starts only after TLS succeeds. It does not own the socket or the certificate lease.
                 await using var transport = new StreamCacheListenerTransport(
                     ssl,
                     _runtime.Listener.IoProgressTimeout,
                     leaveInnerStreamOpen: true);
-                await using var vatpSession = new VatpListenerSession(
-                    transport,
-                    _retention,
-                    _runtime.Listener,
-                    _logger);
-                await vatpSession.RunAsync(cancellationToken).ConfigureAwait(false);
+                var session = new NntpCacheListenerSession(transport, _retention);
+                await session.RunAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

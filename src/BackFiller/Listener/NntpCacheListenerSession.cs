@@ -1,0 +1,494 @@
+using VectorNNTP.BackFiller.Articles.Validation;
+using VectorNNTP.BackFiller.Retention;
+
+namespace VectorNNTP.BackFiller.Listener
+{
+    /// <summary>
+    /// Partial RFC 3977 session on an already-authenticated TLS transport.
+    /// Serves <c>ARTICLE</c> by Message-ID and <c>QUIT</c>. Does not own the socket or the certificate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The greeting is <c>201</c> because this server does not implement <c>POST</c>.
+    /// Commands are parsed from bytes. A command line longer than 512 octets, including CRLF, is rejected
+    /// whole and is not split into a later command. Bytes after one command stay in the buffer for the next.
+    /// </para>
+    /// <para>
+    /// A successful <c>ARTICLE</c> writes <c>220 0</c>, the exact retained ArtData, and one <c>.CRLF</c> terminator.
+    /// The retained entry is removed only after all three writes complete. A failure before that rolls the claim
+    /// back when the entry is still eligible. Completion of the local writes is not proof the peer processed the article.
+    /// A disconnect during the write can leave the peer with a prefix and, after rollback, a later retry can deliver
+    /// the article again. A commit followed by a lost connection cannot be delivered again.
+    /// </para>
+    /// </remarks>
+    internal sealed class NntpCacheListenerSession
+    {
+        private const int MaximumCommandOctets = 512;
+
+        private static readonly byte[] Greeting = "201 NNTP Service Ready, posting prohibited\r\n"u8.ToArray();
+
+        private static readonly byte[] ArticleFollowsSuffix = " article follows\r\n"u8.ToArray();
+
+        private static readonly byte[] ArticlePrefix = "220 0 "u8.ToArray();
+
+        private static readonly byte[] Terminator = ".\r\n"u8.ToArray();
+
+        private static readonly byte[] NoSuchArticle = "430 No Such Article Found\r\n"u8.ToArray();
+
+        private static readonly byte[] NotAvailable = "403 Article not available\r\n"u8.ToArray();
+
+        private static readonly byte[] NoNewsgroup = "412 No newsgroup selected\r\n"u8.ToArray();
+
+        private static readonly byte[] SyntaxError = "501 Syntax error\r\n"u8.ToArray();
+
+        private static readonly byte[] UnknownCommand = "500 Unknown command\r\n"u8.ToArray();
+
+        private static readonly byte[] Closing = "205 Connection closing\r\n"u8.ToArray();
+
+        private static readonly byte[] ArticleKeyword = "ARTICLE"u8.ToArray();
+
+        private static readonly byte[] QuitKeyword = "QUIT"u8.ToArray();
+
+        /// <summary>Connected transport. Disposed by the listener, not by this session.</summary>
+        private readonly ICacheListenerTransport _transport;
+
+        /// <summary>Retention authority. This session does not index or copy articles.</summary>
+        private readonly IArticleRetentionAuthority _retention;
+
+        /// <summary>Unread command bytes, including any pipelined commands after the one just parsed.</summary>
+        private byte[] _pending = new byte[MaximumCommandOctets];
+
+        /// <summary>Valid prefix length of <see cref="_pending"/>.</summary>
+        private int _pendingCount;
+
+        /// <summary>Largest single write passed to the transport.</summary>
+        private const int MaxWriteProgressChunkBytes = 32 * 1024;
+
+        /// <summary>Initializes a session over an established transport.</summary>
+        /// <param name="transport">Connected transport. Not disposed by this session.</param>
+        /// <param name="retention">Article owner. Claims are committed only after a complete article write.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="transport"/> or <paramref name="retention"/> is null.</exception>
+        internal NntpCacheListenerSession(ICacheListenerTransport transport, IArticleRetentionAuthority retention)
+        {
+            ArgumentNullException.ThrowIfNull(transport);
+            ArgumentNullException.ThrowIfNull(retention);
+            _transport = transport;
+            _retention = retention;
+        }
+
+        /// <summary>
+        /// Sends the greeting, then reads commands until <c>QUIT</c>, peer close, or cancellation.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels a blocked read or write. Does not commit an in-progress delivery.</param>
+        /// <returns>A task that completes when the session stops reading.</returns>
+        /// <remarks>
+        /// <see cref="IOException"/> and <see cref="OperationCanceledException"/> propagate to the listener.
+        /// An article claim is rolled back if the write sequence throws.
+        /// </remarks>
+        internal async Task RunAsync(CancellationToken cancellationToken)
+        {
+            await WriteFullyAsync(Greeting, cancellationToken).ConfigureAwait(false);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var read = await ReadCommandAsync(cancellationToken).ConfigureAwait(false);
+                if (read.Kind == CommandReadKind.Disconnected)
+                {
+                    return;
+                }
+
+                if (read.Kind == CommandReadKind.Overlong)
+                {
+                    await WriteFullyAsync(SyntaxError, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                var line = read.Line;
+                if (EqualsIgnoreCase(Keyword(line), QuitKeyword))
+                {
+                    if (HasArgument(line))
+                    {
+                        await WriteFullyAsync(SyntaxError, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    await WriteFullyAsync(Closing, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                if (!EqualsIgnoreCase(Keyword(line), ArticleKeyword))
+                {
+                    await WriteFullyAsync(UnknownCommand, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                await HandleArticleAsync(line, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>Resolves one <c>ARTICLE</c> command and writes the response without holding the retention gate.</summary>
+        /// <param name="line">Command line without its CRLF.</param>
+        /// <param name="cancellationToken">Cancels the response writes.</param>
+        /// <returns>A task that completes when the response has been written or the claim has been rolled back.</returns>
+        private async Task HandleArticleAsync(ReadOnlyMemory<byte> line, CancellationToken cancellationToken)
+        {
+            if (!TryReadSingleArgument(line.Span, out var argument))
+            {
+                await WriteFullyAsync(argument.IsEmpty ? NoNewsgroup : SyntaxError, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsArticleNumber(argument.Span))
+            {
+                await WriteFullyAsync(NoNewsgroup, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!NntpMessageIdValidation.IsValidMessageId(argument.Span))
+            {
+                await WriteFullyAsync(SyntaxError, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var claimed = _retention.TryClaimForDelivery(argument.Span);
+            if (claimed.Kind == ArticleDeliveryClaimKind.NotFound)
+            {
+                await WriteFullyAsync(NoSuchArticle, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (claimed.Kind != ArticleDeliveryClaimKind.Claimed)
+            {
+                await WriteFullyAsync(NotAvailable, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            using var claim = claimed.Claim!;
+            await WriteFullyAsync(BuildFollowsLine(argument.Span), cancellationToken).ConfigureAwait(false);
+            await WriteFullyAsync(claim.ArticleBytes, cancellationToken).ConfigureAwait(false);
+            await WriteFullyAsync(Terminator, cancellationToken).ConfigureAwait(false);
+            claim.Commit();
+        }
+
+        /// <summary>Reads one command, or reports that the peer closed or the line exceeded 512 octets.</summary>
+        /// <param name="cancellationToken">Cancels the transport read.</param>
+        /// <returns>The next command, an overlong marker, or disconnect.</returns>
+        private async Task<CommandRead> ReadCommandAsync(CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                var crlf = IndexOfCrlf(_pending.AsSpan(0, _pendingCount));
+                if (crlf >= 0)
+                {
+                    var lineLength = crlf + 2;
+                    if (lineLength > MaximumCommandOctets)
+                    {
+                        RemoveFront(lineLength);
+                        return CommandRead.Overlong();
+                    }
+
+                    var line = _pending.AsMemory(0, crlf).ToArray();
+                    RemoveFront(lineLength);
+                    return CommandRead.Command(line);
+                }
+
+                if (_pendingCount >= MaximumCommandOctets)
+                {
+                    if (!await DiscardThroughCrlfAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        return CommandRead.Disconnected();
+                    }
+
+                    return CommandRead.Overlong();
+                }
+
+                if (_pendingCount == _pending.Length)
+                {
+                    Array.Resize(ref _pending, _pending.Length * 2);
+                }
+
+                var read = await _transport.ReadAsync(_pending.AsMemory(_pendingCount), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return CommandRead.Disconnected();
+                }
+
+                _pendingCount += read;
+            }
+        }
+
+        /// <summary>Drops bytes until a CRLF, keeping any pipelined bytes that follow it.</summary>
+        /// <param name="cancellationToken">Cancels the transport read.</param>
+        /// <returns><see langword="false"/> when the peer closes before a CRLF arrives.</returns>
+        /// <remarks>
+        /// A trailing CR is kept when the buffer has no CRLF yet. The next read may supply the LF,
+        /// and dropping that CR would hide the terminator or glue the following command to a bare LF.
+        /// </remarks>
+        private async Task<bool> DiscardThroughCrlfAsync(CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                var crlf = IndexOfCrlf(_pending.AsSpan(0, _pendingCount));
+                if (crlf >= 0)
+                {
+                    RemoveFront(crlf + 2);
+                    return true;
+                }
+
+                var keepTrailingCr = _pendingCount > 0 && _pending[_pendingCount - 1] == (byte)'\r';
+                _pendingCount = 0;
+                if (keepTrailingCr)
+                {
+                    _pending[0] = (byte)'\r';
+                    _pendingCount = 1;
+                }
+
+                var read = await _transport.ReadAsync(_pending.AsMemory(_pendingCount), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return false;
+                }
+
+                _pendingCount += read;
+            }
+        }
+
+        /// <summary>Writes every byte of <paramref name="payload"/>, or throws before the caller treats the write as complete.</summary>
+        /// <param name="payload">Bytes to write. Empty input completes without a transport call.</param>
+        /// <param name="cancellationToken">Cancels the transport write.</param>
+        /// <returns>A task that completes when every byte has been accepted.</returns>
+        /// <exception cref="IOException">The transport accepted zero or fewer bytes.</exception>
+        private async Task WriteFullyAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+        {
+            var written = 0;
+            while (written < payload.Length)
+            {
+                var chunk = Math.Min(payload.Length - written, MaxWriteProgressChunkBytes);
+                var accepted = await _transport.WriteAsync(payload.Slice(written, chunk), cancellationToken).ConfigureAwait(false);
+                if (accepted <= 0)
+                {
+                    throw new IOException("Transport returned zero accepted bytes.");
+                }
+
+                written += accepted;
+            }
+        }
+
+        /// <summary>Drops <paramref name="count"/> bytes from the front of the pending buffer.</summary>
+        /// <param name="count">Bytes already parsed, including a CRLF when the caller consumed a line.</param>
+        private void RemoveFront(int count)
+        {
+            var remaining = _pendingCount - count;
+            if (remaining > 0)
+            {
+                Buffer.BlockCopy(_pending, count, _pending, 0, remaining);
+            }
+
+            _pendingCount = Math.Max(0, remaining);
+        }
+
+        /// <summary>Finds the first CRLF in <paramref name="buffer"/>.</summary>
+        /// <param name="buffer">Pending command bytes.</param>
+        /// <returns>The index of CR, or -1 when no CRLF is present. A bare CR or LF is not a terminator.</returns>
+        private static int IndexOfCrlf(ReadOnlySpan<byte> buffer)
+        {
+            for (var i = 0; i < buffer.Length - 1; i++)
+            {
+                if (buffer[i] == (byte)'\r' && buffer[i + 1] == (byte)'\n')
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>Returns the keyword at the start of <paramref name="line"/>, stopping at the first space or tab.</summary>
+        /// <param name="line">Command line without CRLF.</param>
+        /// <returns>The keyword span. Empty when <paramref name="line"/> is empty.</returns>
+        private static ReadOnlySpan<byte> Keyword(ReadOnlyMemory<byte> line)
+        {
+            var span = line.Span;
+            var end = 0;
+            while (end < span.Length && span[end] is not (byte)' ' and not (byte)'\t')
+            {
+                end++;
+            }
+
+            return span[..end];
+        }
+
+        /// <summary>Reports whether <paramref name="line"/> has a non-empty argument after the keyword.</summary>
+        /// <param name="line">Command line without CRLF.</param>
+        /// <returns><see langword="true"/> when any octet remains after the keyword and its following spaces or tabs.</returns>
+        private static bool HasArgument(ReadOnlyMemory<byte> line)
+        {
+            var span = line.Span;
+            var index = KeywordLength(span);
+            while (index < span.Length && span[index] is (byte)' ' or (byte)'\t')
+            {
+                index++;
+            }
+
+            return index < span.Length;
+        }
+
+        /// <summary>
+        /// Reads the single argument of an <c>ARTICLE</c> command.
+        /// </summary>
+        /// <param name="line">Command line without CRLF.</param>
+        /// <param name="argument">
+        /// The argument when there is exactly one. Empty when the argument is missing.
+        /// When extra arguments are present, <paramref name="argument"/> is non-empty and the method returns false.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> when there is exactly one argument.
+        /// <see langword="false"/> when the argument is missing or more than one argument is present.
+        /// </returns>
+        private static bool TryReadSingleArgument(ReadOnlySpan<byte> line, out ReadOnlyMemory<byte> argument)
+        {
+            var index = KeywordLength(line);
+            while (index < line.Length && line[index] is (byte)' ' or (byte)'\t')
+            {
+                index++;
+            }
+
+            if (index >= line.Length)
+            {
+                argument = ReadOnlyMemory<byte>.Empty;
+                return false;
+            }
+
+            var start = index;
+            while (index < line.Length && line[index] is not (byte)' ' and not (byte)'\t')
+            {
+                index++;
+            }
+
+            var end = index;
+            while (index < line.Length && line[index] is (byte)' ' or (byte)'\t')
+            {
+                index++;
+            }
+
+            argument = line.Slice(start, end - start).ToArray();
+            return index >= line.Length;
+        }
+
+        /// <summary>Counts the keyword octets at the start of <paramref name="line"/>.</summary>
+        /// <param name="line">Command line without CRLF.</param>
+        /// <returns>The index of the first space, tab, or the line length.</returns>
+        private static int KeywordLength(ReadOnlySpan<byte> line)
+        {
+            var end = 0;
+            while (end < line.Length && line[end] is not (byte)' ' and not (byte)'\t')
+            {
+                end++;
+            }
+
+            return end;
+        }
+
+        /// <summary>Reports whether <paramref name="argument"/> is an article-number form.</summary>
+        /// <param name="argument">The single command argument.</param>
+        /// <returns><see langword="true"/> when every octet is a decimal digit.</returns>
+        private static bool IsArticleNumber(ReadOnlySpan<byte> argument)
+        {
+            if (argument.IsEmpty)
+            {
+                return false;
+            }
+
+            foreach (var value in argument)
+            {
+                if (value is < (byte)'0' or > (byte)'9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Compares an ASCII keyword without allocating.</summary>
+        /// <param name="value">Keyword octets from the command.</param>
+        /// <param name="expected">Uppercase keyword.</param>
+        /// <returns><see langword="true"/> when the letters match ignoring ASCII case.</returns>
+        private static bool EqualsIgnoreCase(ReadOnlySpan<byte> value, ReadOnlySpan<byte> expected)
+        {
+            if (value.Length != expected.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var current = value[i];
+                if ((uint)(current - (byte)'a') <= (byte)'z' - (byte)'a')
+                {
+                    current = (byte)(current - 32);
+                }
+
+                if (current != expected[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Builds <c>220 0 &lt;message-id&gt; article follows</c> ending in CRLF.</summary>
+        /// <param name="messageId">Message-ID octets from the command. Not rewritten.</param>
+        /// <returns>The status line, including CRLF.</returns>
+        private static byte[] BuildFollowsLine(ReadOnlySpan<byte> messageId)
+        {
+            var line = new byte[ArticlePrefix.Length + messageId.Length + ArticleFollowsSuffix.Length];
+            ArticlePrefix.CopyTo(line);
+            messageId.CopyTo(line.AsSpan(ArticlePrefix.Length));
+            ArticleFollowsSuffix.CopyTo(line.AsSpan(ArticlePrefix.Length + messageId.Length));
+            return line;
+        }
+
+        /// <summary>One read from the command buffer.</summary>
+        private readonly struct CommandRead
+        {
+            private CommandRead(CommandReadKind kind, byte[]? line)
+            {
+                Kind = kind;
+                Line = line;
+            }
+
+            /// <summary>Gets whether a command, an overlong line, or disconnect was observed.</summary>
+            internal CommandReadKind Kind { get; }
+
+            /// <summary>Gets the command line without CRLF when <see cref="Kind"/> is <see cref="CommandReadKind.Command"/>.</summary>
+            internal ReadOnlyMemory<byte> Line { get; }
+
+            /// <summary>Creates a parsed command.</summary>
+            /// <param name="line">Command bytes without CRLF.</param>
+            /// <returns>A command read.</returns>
+            internal static CommandRead Command(byte[] line) => new(CommandReadKind.Command, line);
+
+            /// <summary>Creates an overlong-line result.</summary>
+            /// <returns>A read that must be answered with <c>501</c> and not interpreted.</returns>
+            internal static CommandRead Overlong() => new(CommandReadKind.Overlong, null);
+
+            /// <summary>Creates a disconnect result.</summary>
+            /// <returns>A read that ends the session without a further response.</returns>
+            internal static CommandRead Disconnected() => new(CommandReadKind.Disconnected, null);
+        }
+
+        /// <summary>Classification of one command-buffer read.</summary>
+        private enum CommandReadKind : byte
+        {
+            /// <summary>A CRLF-terminated command of at most 512 octets was copied out of the buffer.</summary>
+            Command = 0,
+
+            /// <summary>The line exceeded 512 octets and was discarded through its CRLF.</summary>
+            Overlong = 1,
+
+            /// <summary>The peer closed before another command was complete.</summary>
+            Disconnected = 2,
+        }
+    }
+}

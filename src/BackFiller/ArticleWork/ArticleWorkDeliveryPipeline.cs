@@ -119,7 +119,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         delivery.ReplyTo,
                         failure.Reason,
                         fqdn: null,
-                        vatpPort: null,
+                        listenerPort: null,
                         articleIdHex: null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -143,7 +143,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             ArticleWorkOutcome outcome;
             string? error;
             string? fqdn = null;
-            int? vatpPort = null;
+            int? listenerPort = null;
             string? articleIdHex = null;
             try
             {
@@ -160,7 +160,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         : result.Outcome;
                     error = result.Error;
                     fqdn = result.Fqdn;
-                    vatpPort = result.VatpPort;
+                    listenerPort = result.ListenerPort;
                     articleIdHex = result.ArticleId?.ToLowerHexString();
                     result.Article?.Dispose();
                 }
@@ -211,7 +211,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         item.ReplyTo,
                         error,
                         fqdn,
-                        vatpPort,
+                        listenerPort,
                         articleIdHex,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -299,7 +299,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="replyTo">AMQP reply destination. May be null when the delivery is not replyable.</param>
         /// <param name="error">Failure text for a non-success outcome. Null for success.</param>
         /// <param name="fqdn">Success FQDN. Ignored unless <paramref name="outcome"/> is <see cref="ArticleWorkOutcome.Success"/>.</param>
-        /// <param name="vatpPort">Success VATP port. Ignored unless <paramref name="outcome"/> is <see cref="ArticleWorkOutcome.Success"/>.</param>
+        /// <param name="listenerPort">Success listener port. Ignored unless <paramref name="outcome"/> is <see cref="ArticleWorkOutcome.Success"/>.</param>
         /// <param name="articleIdHex">Success article id hex. Ignored unless <paramref name="outcome"/> is <see cref="ArticleWorkOutcome.Success"/>.</param>
         /// <param name="cancellationToken">Cancellation passed to <see cref="IArticleWorkResponsePublisher.PublishAsync"/>.</param>
         /// <returns>
@@ -317,7 +317,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             string? replyTo,
             string? error,
             string? fqdn,
-            int? vatpPort,
+            int? listenerPort,
             string? articleIdHex,
             CancellationToken cancellationToken)
         {
@@ -338,7 +338,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
                             replyTo,
                             error,
                             outcome == ArticleWorkOutcome.Success ? fqdn : null,
-                            outcome == ArticleWorkOutcome.Success ? vatpPort : null,
+                            outcome == ArticleWorkOutcome.Success ? listenerPort : null,
                             outcome == ArticleWorkOutcome.Success ? articleIdHex : null),
                         cancellationToken)
                     .ConfigureAwait(false);

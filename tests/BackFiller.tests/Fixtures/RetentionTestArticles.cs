@@ -4,7 +4,7 @@ using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {
-    /// <summary>Builds CanonicalV1 articles for retention / VATP tests.</summary>
+    /// <summary>Builds CanonicalV1 articles for retention tests.</summary>
     internal static class RetentionTestArticles
     {
         internal static PreparedCanonical Create(string messageId, string body = "body\r\n")

@@ -24,7 +24,7 @@ Implement and review NNTP behavior from **local RFC text**, not memory.
 
 Primary path: `docs/standards/rfcs/` (see `docs/standards/rfcs/README.md`).
 
-BackFiller speaks a client subset: greeting check, `CAPABILITIES`, `STARTTLS` when advertised and the session is not already implicit TLS, `AUTHINFO USER`/`PASS`, `ARTICLE` by Message-ID, and `DATE` as idle keepalive. It does not implement an NNTP listener, `COMPRESS`, streaming (`IHAVE`/`TAKETHIS`/`MODE STREAM`), `LIST`, PGPVERIFY, or SPAMD. `docs/standards/pgpverify/` and `docs/standards/spamd/` are not in this repository. Article parsing recognizes `Control: cancel` and PGP armor as article-type bits. That is not cancel propagation or PGPVERIFY.
+BackFiller speaks a client subset: greeting check, `CAPABILITIES`, `STARTTLS` when advertised and the session is not already implicit TLS, `AUTHINFO USER`/`PASS`, `ARTICLE` by Message-ID, and `DATE` as idle keepalive. It also has an NNTP listener, deliberately a partial RFC 3977 session: the greeting is `201 NNTP Service Ready, posting prohibited`, and the only commands are `ARTICLE <message-id>` and `QUIT`. Article delivery takes a retention claim and consumes the article only after the local socket has accepted the status line, the retained article bytes, and the terminating `.\r\n`. A successful local write does not prove that the peer received the article. The listener does not implement `COMPRESS`, streaming (`IHAVE`/`TAKETHIS`/`MODE STREAM`), `LIST`, PGPVERIFY, or SPAMD. `docs/standards/pgpverify/` and `docs/standards/spamd/` are not in this repository. Article parsing recognizes `Control: cancel` and PGP armor as article-type bits. That is not cancel propagation or PGPVERIFY.
 
 | Start with | Role |
 |------------|------|

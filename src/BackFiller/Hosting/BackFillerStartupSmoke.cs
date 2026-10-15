@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Configuration;
 using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Hosting

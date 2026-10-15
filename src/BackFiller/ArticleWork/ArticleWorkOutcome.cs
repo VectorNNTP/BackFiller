@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// </remarks>
     internal enum ArticleWorkOutcome
     {
-        /// <summary>Article recovered and retained for cache/VATP transfer.</summary>
+        /// <summary>Article recovered and retained for NNTP delivery.</summary>
         Success = 0,
 
         /// <summary>Provider did not have the article.</summary>

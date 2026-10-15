@@ -9,8 +9,8 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <remarks>
     /// Property names are <c>version</c>, <c>serverId</c>, <c>fqdn</c>, <c>totalBytes</c>,
     /// <c>usedBytes</c>, <c>availableBytes</c>, and <c>timestamp</c> (UTC ISO-8601 round-trip).
-    /// Optional <c>vatpPort</c> (<c>1</c>–<c>65535</c>) is written when present. Unknown
-    /// properties are ignored. A missing <c>vatpPort</c> parses as no placement port.
+    /// Optional <c>listenerPort</c> (<c>1</c>–<c>65535</c>) is written when present. Unknown
+    /// properties are ignored. A missing <c>listenerPort</c> parses as no placement port.
     /// AMQP <c>Expiration</c>, <c>AppId</c>, and <c>MessageId</c> are never JSON fields.
     /// Serialization writes compact UTF-8 with no indentation.
     /// </remarks>
@@ -25,8 +25,8 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         /// <summary>Serializes a version-1 advertisement into compact UTF-8 JSON.</summary>
         /// <param name="advertisement">Concrete valid v1 advertisement.</param>
         /// <returns>
-        /// Compact UTF-8 JSON for the required advertisement properties, plus <c>vatpPort</c> when
-        /// <see cref="StorageServerAdvertisement.VatpPort"/> has a value.
+        /// Compact UTF-8 JSON for the required advertisement properties, plus <c>listenerPort</c> when
+        /// <see cref="StorageServerAdvertisement.ListenerPort"/> has a value.
         /// </returns>
         internal static byte[] SerializeV1(StorageServerAdvertisement advertisement)
         {
@@ -54,9 +54,9 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                 throw new InvalidOperationException("StorageServer advertisement byte counts must be non-negative.");
             }
 
-            if (advertisement.VatpPort is < 1 or > 65535)
+            if (advertisement.ListenerPort is < 1 or > 65535)
             {
-                throw new InvalidOperationException("StorageServer advertisement vatpPort must be in the range 1–65535.");
+                throw new InvalidOperationException("StorageServer advertisement listenerPort must be in the range 1–65535.");
             }
 
             var writer = new ArrayBufferWriter<byte>();
@@ -75,9 +75,9 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             jsonWriter.WriteNumber("usedBytes", advertisement.UsedBytes);
             jsonWriter.WriteNumber("availableBytes", advertisement.AvailableBytes);
             jsonWriter.WriteString("timestamp", advertisement.Timestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
-            if (advertisement.VatpPort is int vatpPort)
+            if (advertisement.ListenerPort is int listenerPort)
             {
-                jsonWriter.WriteNumber("vatpPort", vatpPort);
+                jsonWriter.WriteNumber("listenerPort", listenerPort);
             }
 
             jsonWriter.WriteEndObject();
@@ -158,22 +158,22 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     return false;
                 }
 
-                int? vatpPort = null;
-                if (root.TryGetProperty("vatpPort", out var portProperty))
+                int? listenerPort = null;
+                if (root.TryGetProperty("listenerPort", out var portProperty))
                 {
                     if (portProperty.ValueKind != JsonValueKind.Number || !portProperty.TryGetInt32(out var parsedPort))
                     {
-                        reason = "Advertisement vatpPort must be an integer.";
+                        reason = "Advertisement listenerPort must be an integer.";
                         return false;
                     }
 
                     if (parsedPort is < 1 or > 65535)
                     {
-                        reason = "Advertisement vatpPort must be in the range 1–65535.";
+                        reason = "Advertisement listenerPort must be in the range 1–65535.";
                         return false;
                     }
 
-                    vatpPort = parsedPort;
+                    listenerPort = parsedPort;
                 }
 
                 advertisement = new StorageServerAdvertisement(
@@ -184,7 +184,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
                     usedBytes,
                     availableBytes,
                     timestamp,
-                    vatpPort);
+                    listenerPort);
                 reason = string.Empty;
                 return true;
             }

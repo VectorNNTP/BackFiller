@@ -6,7 +6,6 @@ using Serilog.Formatting.Display;
 using Serilog.Sinks.File;
 using Serilog.Parsing;
 using VectorNNTP.BackFiller.Logging;
-using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {

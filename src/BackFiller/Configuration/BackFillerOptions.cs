@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Configuration
 {
@@ -337,7 +336,7 @@ namespace VectorNNTP.BackFiller.Configuration
         public int RetentionTtlSeconds { get; set; } = 60;
 
         /// <summary>
-        /// Maximum concurrently openable VATP RequestIds attached to one retained Message-ID.
+        /// Maximum concurrently openable Article Work RequestIds attached to one retained Message-ID.
         /// AlreadyPresent attachments beyond this limit are rejected without revoking existing RequestIds.
         /// </summary>
         public int MaxOpenableRequestIdsPerArticle { get; set; } = 16;

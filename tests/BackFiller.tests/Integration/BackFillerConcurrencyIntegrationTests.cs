@@ -1,7 +1,7 @@
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
-using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
+using VectorNNTP.BackFiller.Tests.Retention;
 
 namespace VectorNNTP.BackFiller.Tests.Integration
 {
@@ -202,7 +202,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
         }
 
         [Fact]
-        public async Task Vatp_open_before_and_after_expiry_follows_retention_ttl()
+        public async Task Claim_before_and_after_expiry_follows_retention_ttl()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync(retentionTtl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(
@@ -211,54 +211,40 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 "ttl-body\r\n");
 
             harness.Time.Advance(TimeSpan.FromSeconds(9));
-            using (var open = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            using (var claim = ArticleRetentionAuthorityTests.Claim(
+                harness.Retention,
+                ArticleWorkTestDeliveries.CanonicalMessageId,
+                prepared.ArtData))
             {
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
-                Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
+                Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
             }
 
-            // RequestId was consumed; re-attach for the post-expiry attempt.
-            var reattach = RetentionTestArticles.Create(
-                ArticleWorkTestDeliveries.CanonicalMessageId,
-                "ttl-body\r\n");
-            Assert.Equal(ArticleRetentionKind.AlreadyPresent, harness.Retention.RetainCanonical(
-                reattach.MessageId,
-                reattach.RequestId,
-                reattach.Record,
-                reattach.SelectedDateHeaderName).Kind);
-
             harness.Time.Advance(TimeSpan.FromSeconds(1));
-            using var expired = harness.Retention.TryOpenTransfer(reattach.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, expired.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(harness.Retention, ArticleWorkTestDeliveries.CanonicalMessageId);
             Assert.Equal(0, harness.Retention.RetainedCount);
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
         }
 
         [Fact]
-        public async Task Sweep_while_vatp_transfer_lease_is_held_drops_authority_bytes_and_revokes_the_lease()
+        public async Task Sweep_while_a_delivery_claim_is_held_drops_authority_bytes_and_keeps_captured_bytes()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync(retentionTtl: TimeSpan.FromSeconds(1));
             var prepared = RetentionTestArticles.RetainPrepared(
                 harness.Retention,
                 ArticleWorkTestDeliveries.CanonicalMessageId,
                 "lease-body\r\n");
-            using (var open = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
-            {
-                Assert.Equal(VatpOpenKind.Opened, open.Kind);
-                Assert.NotNull(open.Lease);
+            var claim = ArticleRetentionAuthorityTests.Claim(
+                harness.Retention,
+                ArticleWorkTestDeliveries.CanonicalMessageId,
+                prepared.ArtData);
 
-                harness.Time.Advance(TimeSpan.FromSeconds(1));
-                Assert.Equal(prepared.Record.ArtSize, harness.Retention.SweepExpired());
-                Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
-                Assert.Equal(0, harness.Retention.RetainedCount);
-                Assert.True(open.Lease.IsRevoked);
-                Assert.False(open.Lease.HoldsArticle);
-
-                using (var second = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
-                {
-                    Assert.Equal(VatpOpenKind.Rejected, second.Kind);
-                }
-            }
+            harness.Time.Advance(TimeSpan.FromSeconds(1));
+            Assert.Equal(prepared.Record.ArtSize, harness.Retention.SweepExpired());
+            Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
+            Assert.Equal(0, harness.Retention.RetainedCount);
+            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            ArticleRetentionAuthorityTests.AssertNotFound(harness.Retention, ArticleWorkTestDeliveries.CanonicalMessageId);
+            claim.Dispose();
 
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(0, harness.Retention.RetainedCount);

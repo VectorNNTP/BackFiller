@@ -12,7 +12,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         public string? Fqdn { get; set; }
 
-        public int? VatpPort { get; set; }
+        public int? ListenerPort { get; set; }
 
         public ArticleId? ArticleId { get; set; }
 
@@ -53,7 +53,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                     stage.Outcome,
                     stage.Error,
                     Fqdn: stage.Fqdn,
-                    VatpPort: stage.VatpPort,
+                    ListenerPort: stage.ListenerPort,
                     ArticleId: stage.ArticleId);
             }
 
@@ -69,7 +69,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 throw Throw;
             }
 
-            return new ArticleWorkHandlerResult(Outcome, Error, Fqdn: Fqdn, VatpPort: VatpPort, ArticleId: ArticleId);
+            return new ArticleWorkHandlerResult(Outcome, Error, Fqdn: Fqdn, ListenerPort: ListenerPort, ArticleId: ArticleId);
         }
     }
 
@@ -79,7 +79,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         ArticleWorkOutcome Outcome,
         string? Error = null,
         string? Fqdn = null,
-        int? VatpPort = null,
+        int? ListenerPort = null,
         Exception? Throw = null,
         ArticleId? ArticleId = null);
 }

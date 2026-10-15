@@ -6,8 +6,7 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
     /// <summary>
-    /// Hard TTL: expiry drops indexes, accounting, and the authority's article reference
-    /// even while a transfer lease still exists.
+    /// Hard TTL: expiry drops indexes and accounting even while a delivery claim still holds captured bytes.
     /// </summary>
     public sealed class ArticleRetentionHardTtlTests
     {
@@ -25,31 +24,28 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 authority.RetainCanonical(prepared.MessageId, second, prepared.Record, prepared.SelectedDateHeaderName).Kind);
 
             time.Advance(TimeSpan.FromSeconds(10) - TimeSpan.FromTicks(1));
-            using (var early = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            using (var early = ArticleRetentionAuthorityTests.Claim(authority, "<exact@example.test>", prepared.ArtData))
             {
-                Assert.Equal(VatpOpenKind.Opened, early.Kind);
+                Assert.True(authority.RetainedPayloadBytes > 0);
             }
 
-            Assert.True(authority.RetainedPayloadBytes > 0);
             time.Advance(TimeSpan.FromTicks(1));
-            using var late = authority.TryOpenTransfer(second, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, late.Kind);
-            Assert.Null(late.Lease);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, "<exact@example.test>");
+            Assert.False(authority.TryCancelPendingRequest(second));
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
             Assert.Equal(0, authority.SweepExpired());
         }
 
         [Fact]
-        public async Task Expired_entry_is_not_discoverable_and_cannot_acquire_a_lease_before_the_sweep()
+        public async Task Expired_entry_is_not_discoverable_before_the_sweep()
         {
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
-            var prepared = RetentionTestArticles.RetainPrepared(authority, "<hidden@example.test>");
+            _ = RetentionTestArticles.RetainPrepared(authority, "<hidden@example.test>");
             time.Advance(TimeSpan.FromSeconds(10));
 
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, open.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, "<hidden@example.test>");
             Assert.Equal(0, authority.RetainedPayloadBytes);
 
             var replacement = RetentionTestArticles.Create("<hidden@example.test>", "fresh\r\n");
@@ -63,7 +59,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
-        public async Task Expiry_during_an_active_transfer_drops_authority_state_and_completion_releases_the_lease()
+        public async Task Expiry_during_an_active_claim_drops_authority_state_and_keeps_captured_bytes()
         {
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
@@ -72,66 +68,53 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(
                 ArticleRetentionKind.AlreadyPresent,
                 authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName).Kind);
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            var lease = open.Lease!;
+            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<active@example.test>", prepared.ArtData);
             var payloadBytes = prepared.Record.ArtSize;
 
             time.Advance(TimeSpan.FromSeconds(10));
             Assert.Equal(payloadBytes, authority.SweepExpired());
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
-            Assert.True(lease.IsRevoked);
-            Assert.False(lease.HoldsArticle);
-            Assert.Throws<InvalidOperationException>(() => _ = lease.Record);
+            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            Assert.False(authority.TryCancelPendingRequest(sibling));
 
-            using var siblingOpen = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, siblingOpen.Kind);
-
-            open.Dispose();
+            claim.Dispose();
             Assert.Equal(0, authority.RetainedPayloadBytes);
-            Assert.False(lease.HoldsArticle);
-            open.Dispose();
+            claim.Dispose();
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.SweepExpired());
         }
 
         [Fact]
-        public async Task Lookup_during_an_active_transfer_expires_the_entry_without_waiting_for_the_sweep()
+        public async Task A_second_claim_at_expiry_removes_the_entry_without_a_sweep()
         {
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<lookup@example.test>");
-            var sibling = Guid.NewGuid();
-            authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<lookup@example.test>", prepared.ArtData);
 
             time.Advance(TimeSpan.FromSeconds(10));
-            using var siblingOpen = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, siblingOpen.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, "<lookup@example.test>");
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
-            Assert.True(open.Lease!.IsRevoked);
-            Assert.False(open.Lease.HoldsArticle);
-            open.Dispose();
+            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            claim.Dispose();
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
         [Fact]
-        public async Task An_undisposed_lease_does_not_keep_expired_bytes_in_the_authority()
+        public async Task An_unsettled_claim_does_not_keep_expired_bytes_in_the_authority()
         {
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<pinned@example.test>");
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<pinned@example.test>", prepared.ArtData);
             time.Advance(TimeSpan.FromSeconds(10));
             Assert.True(authority.SweepExpired() > 0);
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
-            Assert.True(open.Lease!.IsRevoked);
-            open.Dispose();
+            Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
+            claim.Dispose();
         }
 
         [Fact]
@@ -147,10 +130,9 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 authority.RetainCanonical(later.MessageId, later.RequestId, later.Record, later.SelectedDateHeaderName).Kind);
 
             time.Advance(TimeSpan.FromSeconds(1));
-            using var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            using var second = authority.TryOpenTransfer(later.RequestId, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Rejected, first.Kind);
-            Assert.Equal(VatpOpenKind.Rejected, second.Kind);
+            ArticleRetentionAuthorityTests.AssertNotFound(authority, "<dup@example.test>");
+            Assert.False(authority.TryCancelPendingRequest(prepared.RequestId));
+            Assert.False(authority.TryCancelPendingRequest(later.RequestId));
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
         }
@@ -178,7 +160,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
-        public async Task Expiry_and_lease_release_subtract_the_expired_entry_once()
+        public async Task Expiry_and_claim_release_subtract_the_expired_entry_once()
         {
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(
@@ -188,15 +170,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var first = RetentionTestArticles.RetainPrepared(authority, "<acct-a@example.test>", "a\r\n");
             time.Advance(TimeSpan.FromSeconds(10));
             var second = RetentionTestArticles.RetainPrepared(authority, "<acct-b@example.test>", "longer-body-bytes\r\n");
-            using var open = authority.TryOpenTransfer(first.RequestId, first.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<acct-a@example.test>", first.ArtData);
             Assert.Equal(first.Record.ArtSize + second.Record.ArtSize, authority.RetainedPayloadBytes);
 
             time.Advance(TimeSpan.FromSeconds(20));
             Assert.Equal(first.Record.ArtSize, authority.SweepExpired());
             Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
-            open.Dispose();
+            claim.Dispose();
             Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
 
             time.Advance(TimeSpan.FromSeconds(10));
@@ -211,17 +192,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var time = new ManualTimeProvider(Start);
             var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<idem@example.test>");
-            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            var observed = 0;
-            open.Lease!.SetRevocationObserver(() => observed++);
+            var claim = ArticleRetentionAuthorityTests.Claim(authority, "<idem@example.test>", prepared.ArtData);
             time.Advance(TimeSpan.FromSeconds(10));
             Assert.True(authority.SweepExpired() > 0);
             Assert.Equal(0, authority.SweepExpired());
-            Assert.Equal(1, observed);
-            open.Lease.Revoke();
-            Assert.Equal(1, observed);
-            open.Dispose();
-            open.Dispose();
+            claim.Dispose();
+            claim.Dispose();
             Assert.Equal(0, authority.RetainedPayloadBytes);
 
             authority.BeginShutdown();
@@ -236,58 +212,6 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedCount);
             await authority.DisposeAsync();
             Assert.Equal(0, authority.SweepExpired());
-        }
-
-        [Fact]
-        public async Task A_failing_lease_observer_does_not_skip_later_leases()
-        {
-            var time = new ManualTimeProvider(Start);
-            await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
-            var prepared = RetentionTestArticles.RetainPrepared(authority, "<observers@example.test>");
-            var sibling = Guid.NewGuid();
-            authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
-            using var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            using var second = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
-            Assert.Equal(VatpOpenKind.Opened, first.Kind);
-            Assert.Equal(VatpOpenKind.Opened, second.Kind);
-            first.Lease!.SetRevocationObserver(static () => throw new InvalidOperationException("observer failed"));
-            var secondObserved = 0;
-            second.Lease!.SetRevocationObserver(() => secondObserved++);
-
-            time.Advance(TimeSpan.FromSeconds(10));
-            Assert.True(authority.SweepExpired() > 0);
-            Assert.True(first.Lease.IsRevoked);
-            Assert.True(second.Lease.IsRevoked);
-            Assert.Equal(1, secondObserved);
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            first.Dispose();
-            second.Dispose();
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-        }
-
-        [Fact]
-        public async Task A_fatal_lease_observer_still_revokes_later_leases_and_then_propagates()
-        {
-            var time = new ManualTimeProvider(Start);
-            await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
-            var prepared = RetentionTestArticles.RetainPrepared(authority, "<fatal-observer@example.test>");
-            var sibling = Guid.NewGuid();
-            authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
-            using var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            using var second = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
-            first.Lease!.SetRevocationObserver(static () => throw new OutOfMemoryException("observer exhausted"));
-            var secondObserved = 0;
-            second.Lease!.SetRevocationObserver(() => secondObserved++);
-
-            time.Advance(TimeSpan.FromSeconds(10));
-            var thrown = Assert.Throws<OutOfMemoryException>(() => authority.SweepExpired());
-            Assert.Equal("observer exhausted", thrown.Message);
-            Assert.True(first.Lease.IsRevoked);
-            Assert.True(second.Lease.IsRevoked);
-            Assert.Equal(1, secondObserved);
-            Assert.Equal(0, authority.RetainedPayloadBytes);
-            first.Dispose();
-            second.Dispose();
         }
 
         [Fact]
