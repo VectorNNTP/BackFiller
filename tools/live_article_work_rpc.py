@@ -20,6 +20,7 @@ does not open a socket.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ipaddress
 import json
 import os
@@ -227,10 +228,9 @@ class NntpSession:
             sent += wrote
 
     def close(self) -> None:
-        try:
+        # Closing an already-closed socket raises OSError. That must not fail the test.
+        with contextlib.suppress(OSError):
             self._sock.close()
-        except OSError:
-            pass
 
     def _fill(self) -> None:
         try:
@@ -619,6 +619,31 @@ def _message_id_header(article: bytes) -> bytes | None:
     return found
 
 
+def _amqp_shutdown_errors() -> tuple[type[BaseException], ...]:
+    """Return the shutdown errors a best-effort close may ignore."""
+    try:
+        import pika.exceptions as pika_exceptions
+    except ImportError:
+        return (OSError,)
+    return (OSError, pika_exceptions.AMQPError)
+
+
+def _best_effort_close(connection: object) -> None:
+    """Close a socket or AMQP connection without hiding unexpected failures.
+
+    A closed socket raises ``OSError``. pika raises ``AMQPError`` when the
+    connection is already gone. Either may happen while this process is
+    finishing or reporting an earlier connection failure. Any other exception
+    propagates.
+    """
+    closer = getattr(connection, "close", None)
+    if closer is None:
+        return
+    with contextlib.suppress(*_amqp_shutdown_errors()):
+        if getattr(connection, "is_open", True):
+            closer()
+
+
 class RabbitSession:
     """One AMQP connection and the exclusive reply queue for this test."""
 
@@ -628,15 +653,7 @@ class RabbitSession:
         self.reply_to = reply_to
 
     def close(self) -> None:
-        connection = self.connection
-        closer = getattr(connection, "close", None)
-        if closer is None:
-            return
-        try:
-            if getattr(connection, "is_open", True):
-                closer()
-        except Exception:
-            pass
+        _best_effort_close(self.connection)
 
 
 def connect_rabbit(config: Config) -> RabbitSession:
@@ -652,10 +669,7 @@ def connect_rabbit(config: Config) -> RabbitSession:
         return RabbitSession(connection, channel, reply_to)
     except Exception as exc:
         if connection is not None:
-            try:
-                connection.close()
-            except Exception:
-                pass
+            _best_effort_close(connection)
         raise TestFailure(
             "RabbitMQ RPC failure or timeout",
             "Could not open the RabbitMQ reply queue: " + redact(str(exc), config.secrets()),
@@ -1121,6 +1135,76 @@ class _ChunkSocket:
         return None
 
 
+def _best_effort_close_failures() -> list[str]:
+    """Return failures from the local shutdown-suppression checks."""
+    failures: list[str] = []
+
+    class _ClosedSocket:
+        def close(self) -> None:
+            raise OSError("already closed")
+
+    class _BrokenSocket:
+        def close(self) -> None:
+            raise RuntimeError("socket close bug")
+
+    NntpSession(_ClosedSocket(), MAX_WIRE_LINE_CONTENT).close()
+    try:
+        NntpSession(_BrokenSocket(), MAX_WIRE_LINE_CONTENT).close()
+    except RuntimeError as exc:
+        if str(exc) != "socket close bug":
+            failures.append("unexpected socket close error was replaced")
+    else:
+        failures.append("unexpected socket close error was ignored")
+
+    class _ClosedAmqp:
+        is_open = True
+
+        def close(self) -> None:
+            raise OSError("amqp socket closed")
+
+    class _BrokenAmqp:
+        is_open = True
+
+        def close(self) -> None:
+            raise RuntimeError("amqp close bug")
+
+    RabbitSession(object(), None, "reply").close()
+
+    class _IdleAmqp:
+        is_open = False
+
+        def close(self) -> None:
+            raise RuntimeError("close called while idle")
+
+    try:
+        RabbitSession(_IdleAmqp(), None, "reply").close()
+    except RuntimeError:
+        failures.append("idle AMQP connection was closed")
+
+    RabbitSession(_ClosedAmqp(), None, "reply").close()
+    try:
+        RabbitSession(_BrokenAmqp(), None, "reply").close()
+    except RuntimeError as exc:
+        if str(exc) != "amqp close bug":
+            failures.append("unexpected AMQP close error was replaced")
+    else:
+        failures.append("unexpected AMQP close error was ignored")
+
+    try:
+        import pika.exceptions as pika_exceptions
+    except ImportError:
+        return failures
+
+    class _PikaClosed:
+        is_open = True
+
+        def close(self) -> None:
+            raise pika_exceptions.AMQPConnectionError("already gone")
+
+    RabbitSession(_PikaClosed(), None, "reply").close()
+    return failures
+
+
 def run_self_test() -> int:
     failures: list[str] = []
 
@@ -1149,9 +1233,12 @@ def run_self_test() -> int:
     for bad in ("12345@example.invalid", "<a@>", "<a..b@c>", "<.a@b>", "<>"):
         try:
             validate_message_id(bad)
-            check(False, f"invalid message-id was accepted: {bad}")
         except ConfigError:
-            pass
+            rejected = True
+        else:
+            rejected = False
+        check(rejected, f"invalid message-id was accepted: {bad}")
+    failures.extend(_best_effort_close_failures())
 
     check(is_canonical_fqdn("backfiller01.usenet.ninja"), "canonical fqdn was rejected")
     check(not is_canonical_fqdn("Backfiller01.usenet.ninja"), "uppercase fqdn was accepted")
