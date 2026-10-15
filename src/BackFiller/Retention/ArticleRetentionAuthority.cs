@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Articles;
@@ -952,21 +953,54 @@ namespace VectorNNTP.BackFiller.Retention
         /// Revokes leases collected under <see cref="_gate"/>. Each callback runs outside that lock.
         /// </summary>
         /// <param name="leases">Leases whose article references must be dropped. A failure on one does not skip the rest.</param>
+        /// <remarks>
+        /// <see cref="VatpTransferLease.Revoke"/> drops the article reference before it calls the observer.
+        /// An ordinary observer failure is logged and the remaining leases are still revoked.
+        /// A process-fatal exception is remembered, the remaining leases are still revoked, and that exception is then rethrown.
+        /// </remarks>
         private void RevokeOutsideLock(List<VatpTransferLease> leases)
         {
+            ExceptionDispatchInfo? fatal = null;
             foreach (var lease in leases)
             {
                 try
                 {
                     lease.Revoke();
                 }
-                // codeql[cs/catch-of-all-exceptions] A lease observer may throw any exception, and one failure must not skip the remaining leases.
+                // codeql[cs/catch-of-all-exceptions] A process-fatal observer failure is held until the remaining leases are revoked, then rethrown.
+                catch (Exception ex) when (IsProcessFatal(ex))
+                {
+                    fatal ??= ExceptionDispatchInfo.Capture(ex);
+                }
+                // codeql[cs/catch-of-all-exceptions] An observer may throw any ordinary exception, and one failure must not skip the remaining leases.
                 catch (Exception ex)
                 {
                     ArticleRetentionLogMessages.LeaseRevokeFailed(_logger, ex);
                 }
             }
+
+            fatal?.Throw();
         }
+
+        /// <summary>
+        /// Returns whether <paramref name="exception"/> is a process-fatal runtime failure that must leave this method.
+        /// </summary>
+        /// <param name="exception">Exception thrown by one lease observer.</param>
+        /// <returns>
+        /// <see langword="true"/> for <see cref="OutOfMemoryException"/> (including <see cref="InsufficientMemoryException"/>),
+        /// <see cref="StackOverflowException"/>, <see cref="AccessViolationException"/>,
+        /// <see cref="AppDomainUnloadedException"/>, and <see cref="SEHException"/>.
+        /// </returns>
+        /// <remarks>
+        /// These types exist on <c>net10.0</c>. <c>ThreadAbortException</c> does not.
+        /// <see cref="StackOverflowException"/> is rarely catchable; when the runtime does deliver it, it is not logged and dropped.
+        /// </remarks>
+        private static bool IsProcessFatal(Exception exception) =>
+            exception is OutOfMemoryException
+                or StackOverflowException
+                or AccessViolationException
+                or AppDomainUnloadedException
+                or SEHException;
 
         /// <summary>Adds <paramref name="bytes"/> to <see cref="_retainedBytes"/>. Called under <see cref="_gate"/>.</summary>
         /// <param name="bytes">ArtData length of an entry just indexed. Not checked against <see cref="_maximumBytes"/> here.</param>

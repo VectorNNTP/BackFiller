@@ -37,12 +37,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 Process(parser, File.ReadAllBytes(files[i]), out _, out _, out _, out _, out _, out _);
             }
 
-            // Labeled measurement boundary. The corpus report records gcCollectBeforeMeasuredPass=true.
-            // Removing it would change the published allocation baseline, so the calls stay in this diagnostic fact.
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
+            // No forced collection. The 2026-10-15 corpus report was measured after GC.Collect and is not
+            // comparable to a later run. That file stays under .artifacts and is not rewritten here.
             var sizes = new List<long>(files.Length);
             var samples = new List<long>(files.Length);
             var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -71,10 +67,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 {
                     bytes = File.ReadAllBytes(files[i]);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (TryClassifyReadFailure(ex, out var readReason))
                 {
                     unsupported++;
-                    var readReason = "read " + ex.GetType().Name;
                     Add(reasons, readReason);
                     rejectedPaths.Add(readReason + " " + Path.GetRelativePath(corpus, files[i]));
                     continue;
@@ -156,7 +151,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             report.AppendLine("not measured=live provider, RabbitMQ, retention admission");
             report.AppendLine($"runtime={RuntimeInformation.FrameworkDescription} os={RuntimeInformation.OSDescription} arch={RuntimeInformation.ProcessArchitecture} cpus={Environment.ProcessorCount} processor={Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER")}");
             report.AppendLine($"optimizerDisabled={typeof(ArticleRecordFactory).Assembly.GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled} config={typeof(ArticleRecordFactory).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration}");
-            report.AppendLine($"warmupFiles={Math.Min(warmupFiles, files.Length)} measuredPasses=1 gcCollectBeforeMeasuredPass=true");
+            report.AppendLine($"warmupFiles={Math.Min(warmupFiles, files.Length)} measuredPasses=1 gcCollectBeforeMeasuredPass=false");
             report.AppendLine($"files={files.Length} uniqueNames={names.Count} duplicateContentXxh3={duplicateContent}");
             report.AppendLine($"valid={valid} invalid={invalid} unsupported={unsupported}");
             report.AppendLine($"inputBytes={inputBytes} outputBytes={outputBytes} validStuffingExtraDots={validExtraDots}");
@@ -179,7 +174,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             }
 
             var text = report.ToString();
-            var reportPath = RepositoryFiles.Under(".artifacts", "article-corpus-bench-2026-10-15.txt");
+            var reportPath = RepositoryFiles.Under(".artifacts", "article-corpus-bench-no-forced-gc.txt");
             File.WriteAllText(reportPath, text);
             Console.WriteLine(text);
             Assert.Equal(files.Length, valid + invalid + unsupported);
@@ -201,47 +196,76 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             canonicalBytes = 0;
             stuffedDots = 0;
             reason = "";
-            try
+            var parseStart = Stopwatch.GetTimestamp();
+            var parsed = parser.Parse(bytes);
+            parseElapsed = Stopwatch.GetTimestamp() - parseStart;
+            if (parsed.BodyBytes.Length > 0)
             {
-                var parseStart = Stopwatch.GetTimestamp();
-                var parsed = parser.Parse(bytes);
-                parseElapsed = Stopwatch.GetTimestamp() - parseStart;
-                if (parsed.BodyBytes.Length > 0)
-                {
-                    stuffedDots = ArticleBodyWireStuffer.CountExtraDots(parsed.BodyBytes.Span);
-                }
-
-                if (!parsed.IsAccepted)
-                {
-                    reason = "parse " + parsed.FailureCode;
-                    return CorpusOutcome.Invalid;
-                }
-
-                var materializeStart = Stopwatch.GetTimestamp();
-                var materialized = NntpArticleCanonicalMaterializer.Materialize(
-                    in parsed,
-                    ArticlePathMode.Traverse);
-                materializeElapsed = Stopwatch.GetTimestamp() - materializeStart;
-                if (!materialized.IsAccepted || materialized.ArticleBytes is not { } artData)
-                {
-                    reason = "materialize " + materialized.FailureCode;
-                    return CorpusOutcome.Invalid;
-                }
-
-                var hashStart = Stopwatch.GetTimestamp();
-                var fields = ArticleFieldTable.Locate(artData, parsed.SelectedDateHeaderName);
-                _ = ArticleId.FromMessageId(fields.MessageId.Slice(artData));
-                _ = XxHash3.HashToUInt64(artData.AsSpan(0, materialized.CanonicalLength));
-                hashElapsed = Stopwatch.GetTimestamp() - hashStart;
-                canonicalBytes = materialized.CanonicalLength;
-                return CorpusOutcome.Valid;
+                stuffedDots = ArticleBodyWireStuffer.CountExtraDots(parsed.BodyBytes.Span);
             }
-            // codeql[cs/catch-of-all-exceptions] One article must be recorded as invalid so the corpus pass continues.
-            catch (Exception ex)
+
+            if (!parsed.IsAccepted)
             {
-                reason = ex.GetType().Name + ": " + ex.Message;
+                reason = "parse " + parsed.FailureCode;
                 return CorpusOutcome.Invalid;
             }
+
+            var materializeStart = Stopwatch.GetTimestamp();
+            var materialized = NntpArticleCanonicalMaterializer.Materialize(
+                in parsed,
+                ArticlePathMode.Traverse);
+            materializeElapsed = Stopwatch.GetTimestamp() - materializeStart;
+            if (!materialized.IsAccepted || materialized.ArticleBytes is not { } artData)
+            {
+                reason = "materialize " + materialized.FailureCode;
+                return CorpusOutcome.Invalid;
+            }
+
+            var hashStart = Stopwatch.GetTimestamp();
+            var fields = ArticleFieldTable.Locate(artData, parsed.SelectedDateHeaderName);
+            _ = ArticleId.FromMessageId(fields.MessageId.Slice(artData));
+            _ = XxHash3.HashToUInt64(artData.AsSpan(0, materialized.CanonicalLength));
+            hashElapsed = Stopwatch.GetTimestamp() - hashStart;
+            canonicalBytes = materialized.CanonicalLength;
+            return CorpusOutcome.Valid;
+        }
+
+        /// <summary>
+        /// Classifies one article the way <see cref="Process"/> does, without recording timings.
+        /// </summary>
+        /// <param name="parser">Parser used for the corpus pass.</param>
+        /// <param name="bytes">Article bytes.</param>
+        /// <param name="reason">Parse or materialize failure text when the result is invalid.</param>
+        /// <returns>Valid when canonical bytes were produced. Invalid when parse or materialize rejected the bytes.</returns>
+        /// <remarks>
+        /// Malformed articles return failure codes. This method does not catch exceptions.
+        /// An unexpected failure fails the caller instead of being counted as a bad article.
+        /// </remarks>
+        internal static CorpusOutcome ClassifyArticle(NntpArticleParser parser, byte[] bytes, out string reason)
+        {
+            var outcome = Process(parser, bytes, out _, out _, out _, out _, out _, out reason);
+            return outcome;
+        }
+
+        /// <summary>
+        /// Classifies a file-read failure that should be counted as an unreadable corpus file.
+        /// </summary>
+        /// <param name="exception">Exception from <see cref="File.ReadAllBytes(string)"/>.</param>
+        /// <param name="reason">Read-failure text when this method returns <see langword="true"/>.</param>
+        /// <returns>
+        /// <see langword="true"/> for <see cref="IOException"/> and <see cref="UnauthorizedAccessException"/>.
+        /// Any other exception returns <see langword="false"/> and must be rethrown by the caller.
+        /// </returns>
+        internal static bool TryClassifyReadFailure(Exception exception, out string reason)
+        {
+            if (exception is IOException or UnauthorizedAccessException)
+            {
+                reason = "read " + exception.GetType().Name;
+                return true;
+            }
+
+            reason = "";
+            return false;
         }
 
         private static void Add(Dictionary<string, int> reasons, string reason)
@@ -277,7 +301,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
         private static double TicksToSeconds(long ticks)
             => ticks / (double)Stopwatch.Frequency;
 
-        private enum CorpusOutcome
+        internal enum CorpusOutcome
         {
             Valid,
             Invalid,

@@ -439,10 +439,13 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <remarks>
         /// The caller has already published <see cref="ArticleWorkConsumerState.Retiring"/> and this task.
         /// This method does not take <see cref="_gate"/> until it clears the channel.
+        /// The shutdown callback is registered before Basic.Cancel waits for the settlement gate.
+        /// A blocked ACK or NACK therefore cannot postpone grace cancellation.
+        /// Basic.Cancel still waits for that operation to release the gate, and the channel is disposed only after this task holds the gate.
         /// Basic.Cancel failures are swallowed.
         /// When queued work is not drained, <see cref="RetireAsync(CancellationToken)"/> has already cancelled
-        /// <see cref="_queueCts"/>; the cancel here is idempotent and still runs before the wait.
-        /// When active articles are not finished, <see cref="_workCts"/> is cancelled before the wait.
+        /// <see cref="_queueCts"/>; the cancel here is idempotent and still runs after Basic.Cancel returns.
+        /// When active articles are not finished, <see cref="_workCts"/> is cancelled after Basic.Cancel returns.
         /// The channel is disposed of even when cancel or the wait fails. Generation is left at the value captured at the start.
         /// </remarks>
         private async Task RetireCoreAsync(
@@ -462,6 +465,10 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 _shutdown.FinishActiveArticles,
                 (int)_shutdown.GracePeriod.TotalSeconds);
 
+            // Arm the budget before Basic.Cancel waits on the settlement gate. The wait itself stays
+            // uncancellable so the in-flight ACK or NACK still finishes on this channel.
+            await using var grace = shutdownToken.Register(OnShutdownGraceExpired);
+
             if (channel is not null && consumerTag is not null && channel.IsOpen)
             {
                 _ = await TryBasicCancelAsync(channel, consumerTag).ConfigureAwait(false);
@@ -476,8 +483,6 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 await _workCts.CancelAsync().ConfigureAwait(false);
             }
-
-            await using var grace = shutdownToken.Register(OnShutdownGraceExpired);
 
             try
             {

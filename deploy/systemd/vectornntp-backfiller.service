@@ -3,7 +3,8 @@ Description=VectorNNTP BackFiller
 # Install the flat linux-x64 release directory at this path. It contains
 # VectorNNTP.BackFiller, VectorNNTP.BackFiller.json, VectorNNTP.RabbitMQ.json,
 # README.md, and vectornntp-backfiller.service. Copy the unit to
-# /etc/systemd/system/ and create user and group vectornntp before enable.
+# /etc/systemd/system/. Create user and group vectornntp, and create
+# logs/ and certs/ owned by that account, before enable.
 Documentation=file:///opt/vectornntp/backfiller/README.md
 After=network-online.target
 Wants=network-online.target
@@ -51,13 +52,14 @@ Environment=DOTNET_ENVIRONMENT=Production
 # stdout and stderr still reach the journal. The console sink is off unless
 # ExecStart includes --console.
 # Hardening. BackFiller binds TLS and opens outbound NNTP, RabbitMQ, MySQL, and Cloudflare.
-# ProtectSystem=strict leaves the install tree writable only through ReadWritePaths,
-# which covers the JSON files, logs/, and certs/.
+# ProtectSystem=strict mounts the filesystem read-only. ReadWritePaths re-opens only
+# logs/ and certs/. It does not grant Unix ownership; those directories must already
+# exist and be writable by the vectornntp account. The executable and JSON stay read-only.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/vectornntp/backfiller
+ReadWritePaths=/opt/vectornntp/backfiller/logs /opt/vectornntp/backfiller/certs
 
 KillSignal=SIGTERM
 SendSIGKILL=yes

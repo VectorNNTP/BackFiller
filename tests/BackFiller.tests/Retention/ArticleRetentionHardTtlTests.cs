@@ -266,6 +266,31 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
+        public async Task A_fatal_lease_observer_still_revokes_later_leases_and_then_propagates()
+        {
+            var time = new ManualTimeProvider(Start);
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<fatal-observer@example.test>");
+            var sibling = Guid.NewGuid();
+            authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
+            using var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var second = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
+            first.Lease!.SetRevocationObserver(static () => throw new OutOfMemoryException("observer exhausted"));
+            var secondObserved = 0;
+            second.Lease!.SetRevocationObserver(() => secondObserved++);
+
+            time.Advance(TimeSpan.FromSeconds(10));
+            var thrown = Assert.Throws<OutOfMemoryException>(() => authority.SweepExpired());
+            Assert.Equal("observer exhausted", thrown.Message);
+            Assert.True(first.Lease.IsRevoked);
+            Assert.True(second.Lease.IsRevoked);
+            Assert.Equal(1, secondObserved);
+            Assert.Equal(0, authority.RetainedPayloadBytes);
+            first.Dispose();
+            second.Dispose();
+        }
+
+        [Fact]
         public void Handler_does_not_keep_a_production_article_reference()
         {
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;

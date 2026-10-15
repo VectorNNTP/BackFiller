@@ -359,7 +359,47 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await processing.WaitAsync(TimeSpan.FromSeconds(2));
             await retire.WaitAsync(TimeSpan.FromSeconds(2));
 
+            Assert.False(context.Session.WorkCancellationToken.IsCancellationRequested);
             Assert.True(Assert.Single(context.Channel.Settlements).Acknowledge);
+            Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
+        }
+
+        [Fact]
+        public async Task Grace_expiry_during_blocked_ack_cancels_work_before_the_gate_is_released()
+        {
+            var handler = SuccessHandler();
+            await using var context = await ShutdownContext.StartAsync(handler, drainQueued: true, finishActive: true);
+            context.Channel.AckStarted = NewSource();
+            context.Channel.AckGate = NewSource();
+            var processing = context.Deliver(7);
+            await context.Channel.AckStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            using var grace = new CancellationTokenSource();
+            var retire = context.Session.RetireAsync(grace.Token);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(context.Channel) >= 1,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(0, context.Channel.CancelCount);
+            Assert.Equal(0, context.Channel.DisposeCount);
+            Assert.False(context.Session.WorkCancellationToken.IsCancellationRequested);
+
+            await grace.CancelAsync();
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => context.Session.WorkCancellationToken.IsCancellationRequested,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(0, context.Channel.CancelCount);
+            Assert.Equal(0, context.Channel.DisposeCount);
+            Assert.False(retire.IsCompleted);
+
+            context.Channel.AckGate.TrySetResult();
+            await processing.WaitAsync(TimeSpan.FromSeconds(2));
+            await retire.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var settlement = Assert.Single(context.Channel.Settlements);
+            Assert.True(settlement.Acknowledge);
+            Assert.Equal(1, context.Channel.CancelCount);
+            Assert.True(context.Channel.DisposeCount >= 1);
+            Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
         [Fact]

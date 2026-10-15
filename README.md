@@ -46,7 +46,23 @@ The standalone project has no external build/runtime dependency on a separate `V
 
 `tools/Publish-Release.ps1 -Platform linux-64` writes `.artifacts/release/linux-64/`. The Linux CI job writes `.artifacts/linux-x64/` and uploads that directory. Both contain `VectorNNTP.BackFiller`, `VectorNNTP.BackFiller.json`, `VectorNNTP.RabbitMQ.json`, `README.md`, and `vectornntp-backfiller.service`.
 
-Install that directory at `/opt/vectornntp/backfiller`. `deploy/systemd/vectornntp-backfiller.service` uses that path for `ExecStart`, `WorkingDirectory`, `ReadWritePaths`, and `Documentation=`. Create user and group `vectornntp`, install the unit as `/etc/systemd/system/vectornntp-backfiller.service`, then enable it. The shipped JSON writes file logs under `logs/` and ACME state under `certs/` in the install directory. `TimeoutStopSec=60` covers the shipped 30-second shutdown grace; raise it when `BackFiller:Shutdown:GracePeriodSeconds` is raised. `WatchdogSec` stays unset until readiness has been checked on the host.
+Install that directory at `/opt/vectornntp/backfiller`. `deploy/systemd/vectornntp-backfiller.service` uses that path for `ExecStart`, `WorkingDirectory`, and `Documentation=`. `ReadWritePaths` lists only `logs/` and `certs/`. Under `ProtectSystem=strict` that re-opens those two directories for writing. It does not change Unix ownership or mode. The shipped JSON writes file logs under `logs/` and ACME state under `certs/`, and startup creates files inside directories that must already exist.
+
+Create the account, install the release as root-owned files, and give `vectornntp` write access only to `logs/` and `certs/` before enabling the unit:
+
+```bash
+sudo groupadd --system vectornntp || true
+sudo useradd --system --gid vectornntp --home-dir /opt/vectornntp --shell /usr/sbin/nologin vectornntp || true
+sudo install -d -o root -g root -m 0755 /opt/vectornntp /opt/vectornntp/backfiller
+sudo install -o root -g root -m 0755 VectorNNTP.BackFiller /opt/vectornntp/backfiller/VectorNNTP.BackFiller
+sudo install -o root -g root -m 0644 VectorNNTP.BackFiller.json VectorNNTP.RabbitMQ.json README.md /opt/vectornntp/backfiller/
+sudo install -d -o vectornntp -g vectornntp -m 0750 /opt/vectornntp/backfiller/logs /opt/vectornntp/backfiller/certs
+sudo install -o root -g root -m 0644 vectornntp-backfiller.service /etc/systemd/system/vectornntp-backfiller.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now vectornntp-backfiller.service
+```
+
+`groupadd` and `useradd` may report that the account already exists; that is safe to ignore. Do not `chown -R` the install tree to `vectornntp` and do not use mode `0777`. The executable and JSON stay owned by root and are not writable by the service account. `TimeoutStopSec=60` covers the shipped 30-second shutdown grace; raise it when `BackFiller:Shutdown:GracePeriodSeconds` is raised. `WatchdogSec` stays unset until readiness has been checked on the host.
 
 ## CodeQL
 

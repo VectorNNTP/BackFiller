@@ -64,11 +64,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             MeasureConcurrent(parser, Article("d750", Repeat(".\r\n"u8, 750 * 1024), includePath: true), "750KiB-dot", 64);
 
             Console.WriteLine("layers: factory=TryCreate only; pipeline=NntpStreamReader consume callback plus TryCreate; retention=authority admission of an already built record. Live provider and RabbitMQ are not measured. Percentiles are order statistics of the printed sample count, not confidence intervals. p99 with fewer than 100 samples is a single tail observation.");
-            // Collection boundary before the repeated runs. Their generation counters are deltas from this heap.
-            // The printed rates stay mebibytes per second; this does not change the corpus-bench baseline.
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
+            // Generation deltas below are not taken from a forced collection. They are not comparable to a run that called GC.Collect first.
             var plain = Article("p750", Repeat("line\r\n"u8, 750 * 1024), includePath: true);
             var mixed = Article("m750", MixedBody(750 * 1024), includePath: true);
             var dots = Article("d750", Repeat(".\r\n"u8, 750 * 1024), includePath: true);
