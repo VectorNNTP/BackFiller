@@ -144,8 +144,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <see cref="ArticleWorkOutcome.Success"/> with FQDN, listener port, and article id when retention reports the article available.
         /// <see cref="ArticleRetrievalKind.ArticleNotFound"/> and <see cref="ArticleRetrievalKind.InvalidArticle"/> stay terminal.
         /// <see cref="ArticleRetrievalKind.AuthenticationFailure"/> and every other non-retrieved kind become
-        /// <see cref="ArticleWorkOutcome.ProviderFailure"/>. Parse failure and Message-ID mismatch become
-        /// <see cref="ArticleWorkOutcome.InvalidArticle"/>. A retrieved body that cannot be transferred or is not an
+        /// <see cref="ArticleWorkOutcome.ProviderFailure"/>. Parse failure, Message-ID mismatch, and an article that
+        /// <see cref="NntpDeliveryFraming"/> cannot send as a multiline block become
+        /// <see cref="ArticleWorkOutcome.InvalidArticle"/> before retention is called. A retrieved body that cannot be transferred or is not an
         /// owned contiguous buffer becomes <see cref="ArticleWorkOutcome.RetentionRejected"/>.
         /// Success routing fields are null unless retention made the article available.
         /// <see cref="ArticleWorkHandlerResult.Article"/> is always null. The production success path does not allocate
@@ -276,6 +277,18 @@ namespace VectorNNTP.BackFiller.ArticleWork
                     return new ArticleWorkHandlerResult(
                         ArticleWorkOutcome.InvalidArticle,
                         "MessageIdMismatch");
+                }
+
+                if (!NntpDeliveryFraming.IsFrameable(record.ArtData.Span))
+                {
+                    LogArticleProcessed(
+                        item,
+                        OutcomeValidationFailed,
+                        "NotFrameable",
+                        retrieval.CommandStartedTimestamp);
+                    return new ArticleWorkHandlerResult(
+                        ArticleWorkOutcome.InvalidArticle,
+                        "NotFrameable");
                 }
 
                 LogArticleProcessed(item, OutcomeFound, string.Empty, retrieval.CommandStartedTimestamp);

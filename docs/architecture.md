@@ -30,7 +30,7 @@ Article Work shutdown uses `BackFillerShutdownOptions`:
 |---|---|---|
 | Success | Basic.Ack | Yes |
 | ArticleNotFound | Basic.Ack | Yes |
-| InvalidArticle | Basic.Ack | Yes |
+| InvalidArticle | Basic.Ack | Yes. Includes an article `NntpDeliveryFraming` cannot send. That rejection happens before retention, so the article is not stored. |
 | InvalidRequest | Basic.Ack | Yes when both `CorrelationId` and `ReplyTo` are present. Otherwise ACK without publication |
 | ProviderFailure | Basic.Nack, requeue true | No |
 | Cancelled | Basic.Nack, requeue true | No |

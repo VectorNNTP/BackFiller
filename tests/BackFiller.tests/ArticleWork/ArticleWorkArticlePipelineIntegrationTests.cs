@@ -198,6 +198,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         [Fact]
+        public async Task Interior_bare_lf_is_invalid_article_and_is_not_retained_or_reported_as_success()
+        {
+            await AssertInvalidArticleAsync(ArticleWorkTestArticles.Valid(body: "plain\nmid.dot\r\n"), "NotFrameable");
+        }
+
+        [Fact]
         public async Task Canonical_retained_article_rewrites_date_and_path_and_keeps_body()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync();
@@ -214,7 +220,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("unchanged-body", text, StringComparison.Ordinal);
         }
 
-        private static async Task AssertInvalidArticleAsync(byte[] destuffed)
+        private static async Task AssertInvalidArticleAsync(byte[] destuffed, string? error = null)
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync();
             harness.EnqueueArticle(destuffed);
@@ -225,12 +231,17 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkOutcome.InvalidArticle, outcome);
             Assert.Null(harness.Handler.LastRetentionKind);
             Assert.Equal(0, harness.Retention.RetainedCount);
+            Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             var settlement = Assert.Single(channel.Settlements);
             Assert.True(settlement.Acknowledge);
             Assert.False(settlement.Requeue);
             var publication = Assert.Single(harness.PublishChannel.Publications);
             using var document = JsonDocument.Parse(publication.Body);
             Assert.Equal("InvalidArticle", document.RootElement.GetProperty("outcome").GetString());
+            if (error is not null)
+            {
+                Assert.Equal(error, document.RootElement.GetProperty("error").GetString());
+            }
         }
 
         private static void AssertCanonicalRetainedArticle(byte[]? retained)
