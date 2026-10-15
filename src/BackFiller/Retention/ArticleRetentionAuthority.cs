@@ -994,8 +994,10 @@ namespace VectorNNTP.BackFiller.Retention
         /// <remarks>
         /// These types exist on <c>net10.0</c>. <c>ThreadAbortException</c> does not.
         /// <see cref="StackOverflowException"/> is rarely catchable; when the runtime does deliver it, it is not logged and dropped.
+        /// <see cref="ArticleRetentionSweepService"/> uses this predicate so a fatal failure from
+        /// <see cref="SweepExpired"/> is not logged and dropped by the hosted sweep.
         /// </remarks>
-        private static bool IsProcessFatal(Exception exception) =>
+        internal static bool IsProcessFatal(Exception exception) =>
             exception is OutOfMemoryException
                 or StackOverflowException
                 or AccessViolationException

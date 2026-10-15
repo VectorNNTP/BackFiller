@@ -33,6 +33,21 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
+        public async Task Process_fatal_sweep_failure_leaves_the_hosted_loop()
+        {
+            var authority = new FatalSweepAuthority();
+            var sweep = new ArticleRetentionSweepService(authority, NullLogger<ArticleRetentionSweepService>.Instance);
+
+            await sweep.StartAsync(CancellationToken.None);
+            var execute = sweep.ExecuteTask;
+            Assert.NotNull(execute);
+            var thrown = await Assert.ThrowsAsync<OutOfMemoryException>(() => execute!);
+
+            Assert.Equal("sweep exhausted", thrown.Message);
+            Assert.Equal(1, authority.SweepCount);
+        }
+
+        [Fact]
         public async Task Sweep_interval_is_the_configured_retention_interval()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -129,6 +144,43 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             }
 
             public void BeginShutdown() => ShutdownStarted = true;
+        }
+
+        private sealed class FatalSweepAuthority : IArticleRetentionAuthority
+        {
+            public int SweepCount { get; private set; }
+
+            public TimeSpan SweepInterval => TimeSpan.FromHours(1);
+
+            public long RetainedPayloadBytes => 0;
+
+            public int RetainedCount => 0;
+
+            public ArticleRetentionResult RetainCanonical(
+                string messageId,
+                Guid requestId,
+                VectorNNTP.BackFiller.Articles.ArticleRecord record,
+                VectorNNTP.BackFiller.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
+                string? endpointFqdn = null) =>
+                new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
+
+            public VatpOpenResult TryOpenTransfer(
+                Guid requestId,
+                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
+                Func<int, bool>? tryReserveOutboundBytes = null) =>
+                VatpOpenResult.Rejected();
+
+            public bool TryCancelPendingRequest(Guid requestId) => false;
+
+            public long SweepExpired()
+            {
+                SweepCount++;
+                throw new OutOfMemoryException("sweep exhausted");
+            }
+
+            public void BeginShutdown()
+            {
+            }
         }
     }
 }
