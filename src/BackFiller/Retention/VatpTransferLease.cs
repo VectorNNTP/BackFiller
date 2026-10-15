@@ -60,9 +60,14 @@ namespace VectorNNTP.BackFiller.Retention
     }
 
     /// <summary>
-    /// Lease over a CanonicalV1 <see cref="ArticleRecord"/> for one VATP transfer.
-    /// Dispose releases the retention reader lease; it does not delete the Message-ID entry.
+    /// Lease over one retained article for a VATP transfer that has already started.
     /// </summary>
+    /// <remarks>
+    /// The authority drops its own <see cref="ArticleRecord"/> at the TTL deadline and then calls
+    /// <see cref="Revoke"/>. Revoke clears this lease's article reference so the lease cannot be used
+    /// to read further bytes. A frame already sliced from the article is a separate reference and is
+    /// not cleared here. <see cref="Dispose"/> drops the reader count and any remaining local reference.
+    /// </remarks>
     internal sealed class VatpTransferLease : IDisposable
     {
         /// <summary>
@@ -71,16 +76,28 @@ namespace VectorNNTP.BackFiller.Retention
         /// </summary>
         private readonly Action? _release;
 
-        /// <summary>0 until the first <see cref="Dispose"/>; 1 afterward.</summary>
+        /// <summary>Serializes revoke, dispose, and the revocation observer.</summary>
+        private readonly Lock _revokeGate = new();
+
+        /// <summary>Article bytes for this transfer. Cleared by <see cref="Revoke"/> and <see cref="Dispose"/>.</summary>
+        private ArticleRecord? _record;
+
+        /// <summary>Session callback invoked once when <see cref="Revoke"/> wins. Not invoked after dispose.</summary>
+        private Action? _observer;
+
+        /// <summary>1 after the first successful <see cref="Revoke"/>.</summary>
+        private int _revoked;
+
+        /// <summary>1 after the first <see cref="Dispose"/>.</summary>
         private int _disposed;
 
         /// <summary>Binds a retained record to the authority callback that drops its reader lease.</summary>
-        /// <param name="record">CanonicalV1 record. ArtData stays owned by retention; this lease does not copy it.</param>
+        /// <param name="record">Canonical record. This lease holds its own reference and does not copy the array.</param>
         /// <param name="selectedDateHeaderName">Date-family header name required for VATP META.</param>
         /// <param name="identity">Message-ID and ArticleId of the retained entry.</param>
         /// <param name="release">
-        /// Called once from the first <see cref="Dispose"/>. The authority uses it to drop the reader
-        /// and, when the entry was already logically removed and no readers remain, to release ArtData.
+        /// Called once from the first <see cref="Dispose"/>. The authority uses it to drop the reader.
+        /// It does not extend the TTL and does not reattach ArtData after expiry.
         /// </param>
         internal VatpTransferLease(
             ArticleRecord record,
@@ -88,32 +105,113 @@ namespace VectorNNTP.BackFiller.Retention
             ArticleIdentity identity,
             Action release)
         {
-            Record = record;
+            _record = record;
             SelectedDateHeaderName = selectedDateHeaderName;
             Identity = identity;
             _release = release;
         }
 
-        /// <summary>Gets the retained CanonicalV1 record (ArtData owned by retention until release).</summary>
-        internal ArticleRecord Record { get; }
-
-        /// <summary>Gets the Date-family header name required for VATP META.</summary>
+        /// <summary>Date-family header name required for VATP META. Not cleared on revoke.</summary>
         internal NntpArticleHeaderName SelectedDateHeaderName { get; }
 
-        /// <summary>Gets the Message-ID / ArticleId identity.</summary>
+        /// <summary>Message-ID / ArticleId identity. Not cleared on revoke.</summary>
         internal ArticleIdentity Identity { get; }
 
-        /// <summary>Releases the retention reader lease once. Does not delete the Message-ID entry.</summary>
+        /// <summary><see langword="true"/> after <see cref="Revoke"/> has dropped this lease's article reference.</summary>
+        internal bool IsRevoked => Volatile.Read(ref _revoked) == 1;
+
+        /// <summary><see langword="true"/> while this lease still references article bytes.</summary>
+        internal bool HoldsArticle
+        {
+            get
+            {
+                lock (_revokeGate)
+                {
+                    return _record is not null;
+                }
+            }
+        }
+
+        /// <summary>Gets the leased record.</summary>
+        /// <exception cref="InvalidOperationException">The lease was revoked or disposed and no longer holds article bytes.</exception>
+        internal ArticleRecord Record
+        {
+            get
+            {
+                lock (_revokeGate)
+                {
+                    if (_record is not { } record)
+                    {
+                        throw new InvalidOperationException("VATP transfer lease no longer holds article bytes.");
+                    }
+
+                    return record;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Registers the session callback that drops session-owned article aliases.
+        /// </summary>
+        /// <param name="observer">
+        /// Invoked immediately when this lease is already revoked. Must not take the retention gate.
+        /// A later <see cref="Revoke"/> invokes it once, unless <see cref="Dispose"/> has already run.
+        /// </param>
+        internal void SetRevocationObserver(Action observer)
+        {
+            ArgumentNullException.ThrowIfNull(observer);
+            bool invoke;
+            lock (_revokeGate)
+            {
+                _observer = observer;
+                invoke = _revoked == 1 && _disposed == 0;
+            }
+
+            if (invoke)
+            {
+                observer();
+            }
+        }
+
+        /// <summary>
+        /// Drops this lease's article reference and notifies the session observer once.
+        /// </summary>
+        /// <remarks>
+        /// Does not take the retention gate. A second call does nothing. Does not zero the backing array.
+        /// </remarks>
+        internal void Revoke()
+        {
+            Action? observer;
+            lock (_revokeGate)
+            {
+                if (Interlocked.Exchange(ref _revoked, 1) == 1)
+                {
+                    return;
+                }
+
+                _record = null;
+                observer = _disposed == 0 ? _observer : null;
+            }
+
+            observer?.Invoke();
+        }
+
+        /// <summary>Releases the reader lease once and drops any remaining article reference.</summary>
         /// <remarks>
         /// The first call invokes <see cref="_release"/>. Later calls return without invoking it.
-        /// When the authority supplied that callback, physical ArtData release happens only if the
-        /// entry was already logically removed and this dispose drops the last reader.
+        /// Does not by itself delete a Message-ID entry that has not expired.
         /// </remarks>
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1)
             {
                 return;
+            }
+
+            lock (_revokeGate)
+            {
+                _record = null;
+                _observer = null;
             }
 
             _release?.Invoke();

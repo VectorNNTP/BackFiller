@@ -354,5 +354,252 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await replacement.DisposeAsync();
             await connections.DisposeAsync();
         }
+
+        [Fact]
+        public async Task Two_nacks_on_one_channel_do_not_enter_together()
+        {
+            var channel = GatedChannel();
+            var first = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var second = new ArticleWorkSettlementLease(channel, 8, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            var firstSettle = first.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var secondSettle = second.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1 || channel.MaxBrokerOpsInFlight >= 2,
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+            Assert.Equal(1, ArticleWorkSettlementLease.SettlementWaiters(channel));
+            Assert.False(secondSettle.IsCompleted);
+            channel.NackGate!.TrySetResult();
+
+            Assert.True(await firstSettle);
+            Assert.True(await secondSettle);
+            Assert.Equal(2, channel.Settlements.Count);
+            Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+            Assert.True(first.IsSettled);
+            Assert.True(second.IsSettled);
+        }
+
+        [Fact]
+        public async Task Basic_cancel_does_not_enter_while_a_nack_holds_the_channel()
+        {
+            var channel = GatedChannel();
+            var holder = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+            var holding = holder.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var cancel = ArticleWorkSettlementLease.RunExclusiveAsync(
+                channel,
+                () => channel.BasicCancelAsync("ctag", CancellationToken.None));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1 || channel.CancelCount > 0,
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(0, channel.CancelCount);
+            Assert.Equal(1, ArticleWorkSettlementLease.SettlementWaiters(channel));
+            channel.NackGate!.TrySetResult();
+            Assert.True(await holding);
+            await cancel.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(1, channel.CancelCount);
+        }
+
+        [Fact]
+        public async Task Ack_and_nack_on_one_channel_do_not_enter_together()
+        {
+            var channel = GatedChannel();
+            channel.AckStarted = NewSource();
+            channel.AckGate = NewSource();
+            var ackLease = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var nackLease = new ArticleWorkSettlementLease(channel, 8, channel.Generation);
+            var ack = new ArticleWorkDisposition(Acknowledge: true, Requeue: false, PublishResponse: false);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            var ackSettle = ackLease.TrySettleAsync(ack, channelStillCurrent: true, CancellationToken.None);
+            await channel.AckStarted!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var nackSettle = nackLease.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            try
+            {
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1 || channel.MaxBrokerOpsInFlight >= 2,
+                    TimeSpan.FromSeconds(2));
+
+                Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+                Assert.False(nackSettle.IsCompleted);
+                Assert.False(channel.NackEntered!.Task.IsCompleted);
+            }
+            finally
+            {
+                channel.AckGate.TrySetResult();
+                channel.NackGate!.TrySetResult();
+            }
+
+            Assert.True(await ackSettle);
+            Assert.True(await nackSettle);
+            Assert.Equal(2, channel.Settlements.Count);
+            Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+        }
+
+        [Fact]
+        public async Task Cancelled_wait_does_not_claim_the_lease_and_a_later_call_settles_once()
+        {
+            var channel = GatedChannel();
+            var holder = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var waiting = new ArticleWorkSettlementLease(channel, 8, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+            using var cancelled = new CancellationTokenSource();
+            await cancelled.CancelAsync();
+
+            var holding = holder.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var blocked = waiting.TrySettleAsync(nack, channelStillCurrent: true, cancelled.Token);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1,
+                TimeSpan.FromSeconds(2));
+            Assert.False(waiting.IsSettled);
+            channel.NackGate!.TrySetResult();
+
+            Assert.True(await holding);
+            Assert.False(await blocked);
+            Assert.False(waiting.IsSettled);
+            Assert.True(await waiting.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None));
+            Assert.Equal(2, channel.Settlements.Count);
+            Assert.Equal(new ulong[] { 7, 8 }, channel.Settlements.Select(static settlement => settlement.DeliveryTag));
+        }
+
+        [Fact]
+        public async Task Broker_failure_claims_the_lease_once_and_the_waiter_still_settles()
+        {
+            var channel = GatedChannel();
+            var failed = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var waiting = new ArticleWorkSettlementLease(channel, 8, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            var failing = failed.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var blocked = waiting.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1,
+                TimeSpan.FromSeconds(2));
+            channel.NackException = new InvalidOperationException("broker nack failed");
+            channel.NackGate!.TrySetResult();
+
+            Assert.False(await failing);
+            Assert.True(failed.IsSettled);
+            Assert.False(await failed.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None));
+            Assert.True(await blocked);
+            Assert.Equal(8UL, Assert.Single(channel.Settlements).DeliveryTag);
+        }
+
+        [Fact]
+        public async Task Closed_channel_does_not_claim_a_waiting_lease()
+        {
+            var channel = GatedChannel();
+            var holder = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var waiting = new ArticleWorkSettlementLease(channel, 8, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            var holding = holder.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var blocked = waiting.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 1,
+                TimeSpan.FromSeconds(2));
+            channel.IsOpen = false;
+            channel.NackGate!.TrySetResult();
+
+            Assert.True(await holding);
+            Assert.False(await blocked);
+            Assert.False(waiting.IsSettled);
+            Assert.False(await waiting.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None));
+            Assert.Equal(7UL, Assert.Single(channel.Settlements).DeliveryTag);
+        }
+
+        [Fact]
+        public async Task Replacement_channel_uses_an_independent_gate()
+        {
+            var original = GatedChannel();
+            var replacement = new FakeBackFillerRabbitMqChannel(original.Generation + 1)
+            {
+                NackEntered = NewSource(),
+                NackGate = NewSource(),
+            };
+            var oldLease = new ArticleWorkSettlementLease(original, 7, original.Generation);
+            var newLease = new ArticleWorkSettlementLease(replacement, 8, replacement.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            var oldSettle = oldLease.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            var newSettle = newLease.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await original.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await replacement.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(1, original.MaxBrokerOpsInFlight);
+            Assert.Equal(1, replacement.MaxBrokerOpsInFlight);
+            original.NackGate!.TrySetResult();
+            replacement.NackGate!.TrySetResult();
+            Assert.True(await oldSettle);
+            Assert.True(await newSettle);
+        }
+
+        [Fact]
+        public async Task Dispose_does_not_enter_while_a_nack_holds_the_channel()
+        {
+            var channel = GatedChannel();
+            var holder = new ArticleWorkSettlementLease(channel, 7, channel.Generation);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+            var holding = holder.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None);
+            await channel.NackEntered!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var firstDispose = channel.DisposeAsync();
+            var secondDispose = channel.DisposeAsync();
+            try
+            {
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => ArticleWorkSettlementLease.SettlementWaiters(channel) >= 2 || channel.DisposeCount > 0,
+                    TimeSpan.FromSeconds(2));
+
+                Assert.Equal(0, channel.DisposeCount);
+                Assert.Equal(2, ArticleWorkSettlementLease.SettlementWaiters(channel));
+                Assert.True(channel.IsOpen);
+                Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+            }
+            finally
+            {
+                channel.NackGate!.TrySetResult();
+            }
+
+            Assert.True(await holding);
+            await firstDispose;
+            await secondDispose;
+            Assert.Equal(2, channel.DisposeCount);
+            Assert.False(channel.IsOpen);
+            Assert.Equal(1, channel.MaxBrokerOpsInFlight);
+            Assert.Equal(7UL, Assert.Single(channel.Settlements).DeliveryTag);
+        }
+
+        [Fact]
+        public async Task Stale_generation_check_does_not_settle_the_current_channel()
+        {
+            var channel = new FakeBackFillerRabbitMqChannel(2);
+            var lease = new ArticleWorkSettlementLease(channel, 7, generation: 1);
+            var nack = new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false);
+
+            Assert.False(await lease.TrySettleAsync(nack, channelStillCurrent: true, CancellationToken.None));
+            Assert.False(lease.IsSettled);
+            Assert.Empty(channel.Settlements);
+        }
+
+        private static FakeBackFillerRabbitMqChannel GatedChannel() =>
+            new(1)
+            {
+                NackEntered = NewSource(),
+                NackGate = NewSource(),
+            };
+
+        private static TaskCompletionSource NewSource() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

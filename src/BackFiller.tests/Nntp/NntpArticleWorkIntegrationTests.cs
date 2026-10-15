@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
@@ -20,7 +21,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var server = new ScriptedNntpServer();
             server.Respond(_ => ValidArticleResponse);
             factory.Enqueue(server);
-            var (handler, publisher, pipeline) = CreatePipeline(factory);
+            var (handler, publisher, pipeline, retention) = CreatePipeline(factory);
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             var outcome = await pipeline.ProcessAsync(
@@ -33,8 +34,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(ArticleWorkOutcome.Success, outcome);
             Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, handler.LastKind);
             Assert.Equal(ArticleRetentionKind.Retained, handler.LastRetentionKind);
-            Assert.NotNull(handler.LastPayload);
-            Assert.Contains("body"u8, handler.LastPayload);
+            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
+            using var opened = retention.TryOpenTransfer(Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId), articleId);
+            Assert.Equal(VatpOpenKind.Opened, opened.Kind);
+            Assert.Contains("body"u8, opened.Lease!.Record.ArtData.Span);
             Assert.Equal("backfiller.test", handler.LastFqdn);
             Assert.Equal(1190, handler.LastVatpPort);
             Assert.Empty(publisher.Published);
@@ -59,7 +62,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 RabbitMqServiceTests.CreateFastRuntime(),
                 NullLogger<ArticleWorkResponsePublisher>.Instance);
             await publisher.StartAsync(CancellationToken.None);
-            var (handler, _, _) = CreatePipeline(factory);
+            var (handler, _, _, retention) = CreatePipeline(factory);
             var pipeline = new ArticleWorkDeliveryPipeline(handler, publisher, 1024);
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
@@ -82,7 +85,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.False(document.RootElement.TryGetProperty("uri", out _));
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalRequestId, document.RootElement.GetProperty("requestId").GetString());
             Assert.True(Assert.Single(channel.Settlements).Acknowledge);
-            Assert.NotNull(handler.LastPayload);
+            Assert.True(retention.RetainedPayloadBytes > 0);
+            Assert.Equal(1, retention.RetainedCount);
             await publisher.DisposeAsync();
             await connections.DisposeAsync();
         }
@@ -94,7 +98,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var server = new ScriptedNntpServer();
             server.Respond(static _ => "430 No such article\r\n");
             factory.Enqueue(server);
-            var (_, publisher, pipeline) = CreatePipeline(factory);
+            var (_, publisher, pipeline, _) = CreatePipeline(factory);
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             var outcome = await pipeline.ProcessAsync(
@@ -152,7 +156,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         {
             var factory = new ScriptedNntpTransportFactory();
             factory.Enqueue(new ScriptedNntpServer());
-            var (_, publisher, pipeline) = CreatePipeline(factory);
+            var (_, publisher, pipeline, _) = CreatePipeline(factory);
             var channel = new FakeBackFillerRabbitMqChannel(1);
             using var cts = new CancellationTokenSource();
             cts.Cancel();
@@ -176,7 +180,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var server = new ScriptedNntpServer();
             server.Respond(_ => ValidArticleResponse);
             factory.Enqueue(server);
-            var (handler, publisher, pipeline) = CreatePipeline(factory);
+            var (handler, publisher, pipeline, _) = CreatePipeline(factory);
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             var outcome = await pipeline.ProcessAsync(
@@ -264,7 +268,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(Assert.Single(channel.Settlements).Requeue);
         }
 
-        private static (ProviderArticleWorkHandler Handler, RecordingArticleWorkResponsePublisher Publisher, ArticleWorkDeliveryPipeline Pipeline)
+        private static (ProviderArticleWorkHandler Handler, RecordingArticleWorkResponsePublisher Publisher, ArticleWorkDeliveryPipeline Pipeline, ArticleRetentionAuthority Retention)
             CreatePipeline(ScriptedNntpTransportFactory factory, string? user = null, string? password = null)
         {
             var catalog = new StaticBackFillerProviderCatalog(
@@ -282,11 +286,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 },
                 TimeSpan.FromSeconds(2),
                 NullLogger<NntpProviderRegistry>.Instance);
+            var retention = CreateRetention(maxBytes: 1024 * 1024);
             var handler = new ProviderArticleWorkHandler(
                 new NntpArticleRetriever(registry),
-                CreateRetention(maxBytes: 1024 * 1024));
+                retention);
             var publisher = new RecordingArticleWorkResponsePublisher();
-            return (handler, publisher, new ArticleWorkDeliveryPipeline(handler, publisher, 1024));
+            return (handler, publisher, new ArticleWorkDeliveryPipeline(handler, publisher, 1024), retention);
         }
 
         internal static ArticleRetentionAuthority CreateRetention(int maxBytes) =>

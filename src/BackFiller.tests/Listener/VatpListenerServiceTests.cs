@@ -406,6 +406,86 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
+        public async Task Expiry_during_transfer_drops_authority_bytes_and_fails_the_stream()
+        {
+            var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
+            await using var context = await VatpListenerContext.StartAsync(
+                time: time,
+                ttl: TimeSpan.FromSeconds(30),
+                maxBytes: 8 * 1024 * 1024);
+            var beyondInitialWindow = ArticleTransferLimits.Default.InitialStreamWindowBytes + (64 * 1024);
+            var prepared = RetainArticle(
+                context.Authority,
+                "<expire-mid@example.test>",
+                BuildLargeBody(beyondInitialWindow));
+            var retainedBytes = context.Authority.RetainedPayloadBytes;
+            Assert.True(prepared.Record.ArtSize > ArticleTransferLimits.Default.InitialStreamWindowBytes);
+
+            var client = await ConnectAsync(context);
+            await ExchangeHelloAsync(client.Stream);
+            await SendOpenAsync(client.Stream, 1, prepared.RequestId, prepared.Record.ArtId);
+            var meta = await ReadVatpFrameAsync(client.Stream);
+            Assert.Equal(VatpFrameType.Meta, meta.Header.Type);
+
+            time.Advance(TimeSpan.FromSeconds(30));
+            Assert.Equal(retainedBytes, context.Authority.SweepExpired());
+            Assert.Equal(0, context.Authority.RetainedPayloadBytes);
+            Assert.Equal(0, context.Authority.RetainedCount);
+            using (var rejected = context.Authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
+            {
+                Assert.Equal(VatpOpenKind.Rejected, rejected.Kind);
+            }
+
+            var sawFail = false;
+            long dataBytes = 0;
+            using var readLimit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            for (var i = 0; i < 512 && !sawFail; i++)
+            {
+                var frame = await ReadVatpFrameAsync(client.Stream, readLimit.Token);
+                if (frame.Header.Type == VatpFrameType.Fail)
+                {
+                    sawFail = true;
+                    Assert.Equal(VatpErrorCode.OpenRejected, ReadFailCode(frame));
+                }
+                else if (frame.Header.Type == VatpFrameType.Data)
+                {
+                    dataBytes += frame.Payload.Length;
+                    Assert.False(frame.Header.HasFin);
+                }
+            }
+
+            Assert.True(sawFail);
+            Assert.True(dataBytes < prepared.Record.ArtSize);
+            await client.DisposeAsync();
+            await WaitForIdleAsync(context);
+            Assert.Equal(0, context.Authority.RetainedPayloadBytes);
+        }
+
+        [Fact]
+        public async Task Expiry_then_disconnect_releases_the_session_without_restoring_authority_bytes()
+        {
+            var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
+            await using var context = await VatpListenerContext.StartAsync(
+                time: time,
+                ttl: TimeSpan.FromSeconds(30),
+                maxBytes: 8 * 1024 * 1024);
+            var prepared = RetainArticle(context.Authority, "<expire-drop@example.test>", BuildLargeBody(64 * 1024));
+            var client = await ConnectAsync(context);
+            await ExchangeHelloAsync(client.Stream);
+            await SendOpenAsync(client.Stream, 1, prepared.RequestId, prepared.Record.ArtId);
+            _ = await ReadVatpFrameAsync(client.Stream);
+
+            time.Advance(TimeSpan.FromSeconds(30));
+            Assert.True(context.Authority.SweepExpired() > 0);
+            Assert.Equal(0, context.Authority.RetainedPayloadBytes);
+            await client.DisposeAsync();
+            await WaitForIdleAsync(context);
+            Assert.Equal(0, context.Authority.RetainedCount);
+            Assert.Equal(0, context.Authority.RetainedPayloadBytes);
+            Assert.Equal(0, context.Authority.SweepExpired());
+        }
+
+        [Fact]
         public async Task Failure_malformed_frame_after_hello_closes_connection()
         {
             await using var context = await VatpListenerContext.StartAsync();

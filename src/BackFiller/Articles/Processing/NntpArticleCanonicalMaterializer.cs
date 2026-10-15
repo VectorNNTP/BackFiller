@@ -181,7 +181,10 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// The caller returns it to this same pool after every consumer has finished.
         /// When null, the result owns a new exact-size array.
         /// </param>
-        /// <returns>A result that owns one exact-size canonical buffer on success, or a rented buffer, or a failure classification.</returns>
+        /// <returns>
+        /// A result that owns one exact-size canonical buffer on success, or a rented buffer, or a failure classification.
+        /// The buffer is the retained wire image: rewritten headers and a body whose lines that begin with <c>.</c> have one extra leading dot.
+        /// </returns>
         internal static NntpArticleCanonicalMaterializeResult Materialize(
             in NntpArticleParseResult parseResult,
             ArticlePathMode pathMode,
@@ -277,14 +280,31 @@ namespace VectorNNTP.BackFiller.Articles.Processing
                 return NntpArticleCanonicalMaterializeResult.Rejected(boundaryFailure);
             }
 
+            var bodyStart = parseResult.HeaderBytes.Length;
+            if ((uint)bodyStart > (uint)source.Length)
+            {
+                return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.WriteMismatch);
+            }
+
+            var extraDots = ArticleBodyWireStuffer.CountExtraDots(source[bodyStart..]);
+            int finalLength;
+            try
+            {
+                finalLength = checked(destinationLength + extraDots);
+            }
+            catch (OverflowException)
+            {
+                return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.ArticleTooLarge);
+            }
+
             byte[] destination = rentFrom is null
-                ? GC.AllocateUninitializedArray<byte>(destinationLength)
-                : rentFrom.Rent(destinationLength);
+                ? GC.AllocateUninitializedArray<byte>(finalLength)
+                : rentFrom.Rent(finalLength);
             try
             {
                 var written = 0;
                 var consumed = 0;
-                var dest = destination.AsSpan(0, destinationLength);
+                var dest = destination.AsSpan(0, finalLength);
 
                 if (pathEdit is HeaderEdit resolvedPathEdit && resolvedPathEdit.StartOffset < dateEdit.StartOffset)
                 {
@@ -318,9 +338,30 @@ namespace VectorNNTP.BackFiller.Articles.Processing
                     return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.WriteMismatch);
                 }
 
-                source[consumed..].CopyTo(dest[written..]);
-                written += source.Length - consumed;
-                if (written != destinationLength)
+                if (consumed > bodyStart)
+                {
+                    ReturnRented(rentFrom, destination);
+                    return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.WriteMismatch);
+                }
+
+                var headerTail = bodyStart - consumed;
+                if (headerTail > 0)
+                {
+                    source.Slice(consumed, headerTail).CopyTo(dest[written..]);
+                    written += headerTail;
+                }
+
+                if (extraDots == 0)
+                {
+                    source[bodyStart..].CopyTo(dest[written..]);
+                    written += source.Length - bodyStart;
+                }
+                else
+                {
+                    written += ArticleBodyWireStuffer.WriteStuffed(source[bodyStart..], dest[written..]);
+                }
+
+                if (written != finalLength)
                 {
                     ReturnRented(rentFrom, destination);
                     return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.WriteMismatch);
@@ -328,7 +369,7 @@ namespace VectorNNTP.BackFiller.Articles.Processing
 
                 return rentFrom is null
                     ? NntpArticleCanonicalMaterializeResult.Accepted(destination)
-                    : NntpArticleCanonicalMaterializeResult.Accepted(destination, destinationLength);
+                    : NntpArticleCanonicalMaterializeResult.Accepted(destination, finalLength);
             }
             catch
             {

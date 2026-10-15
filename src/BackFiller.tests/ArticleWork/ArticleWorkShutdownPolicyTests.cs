@@ -145,6 +145,58 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         [Fact]
+        public async Task Cancelled_queued_settlement_does_not_overlap_the_active_delivery_nack()
+        {
+            var handler = new ControllableArticleWorkHandler
+            {
+                Outcome = ArticleWorkOutcome.Success,
+                Fqdn = ArticleWorkTestDeliveries.CanonicalFqdn,
+                VatpPort = ArticleWorkTestDeliveries.CanonicalVatpPort,
+                Started = NewSource(),
+                Gate = NewSource(),
+            };
+            await using var context = await ShutdownContext.StartAsync(handler, drainQueued: false, finishActive: false, prefetch: 2);
+            var first = context.Deliver(7);
+            await handler.Started!.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            var second = context.Deliver(8);
+            await WaitQueuedActiveAsync(context.Session, queued: 1, active: 1);
+
+            context.Channel.NackEntered = NewSource();
+            context.Channel.NackGate = NewSource();
+            var retire = context.Session.RetireAsync();
+            try
+            {
+                await context.Channel.NackEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => ArticleWorkSettlementLease.SettlementWaiters(context.Channel) >= 1 || context.Channel.MaxNackInFlight >= 2,
+                    TimeSpan.FromSeconds(2));
+                Assert.Equal(1, context.Channel.MaxNackInFlight);
+                Assert.Equal(1, context.Channel.MaxBrokerOpsInFlight);
+                Assert.Equal(1, ArticleWorkSettlementLease.SettlementWaiters(context.Channel));
+                Assert.False(second.IsCompleted);
+            }
+            finally
+            {
+                context.Channel.NackGate.TrySetResult();
+            }
+
+            await first.WaitAsync(TimeSpan.FromSeconds(2));
+            await second.WaitAsync(TimeSpan.FromSeconds(2));
+            await retire.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(1, handler.HandleCount);
+            Assert.Equal(1, context.Channel.MaxNackInFlight);
+            Assert.Equal(2, context.Channel.Settlements.Count);
+            Assert.All(context.Channel.Settlements, static settlement =>
+            {
+                Assert.False(settlement.Acknowledge);
+                Assert.True(settlement.Requeue);
+            });
+            Assert.Empty(context.Publisher.Published);
+            Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
+        }
+
+        [Fact]
         public async Task Grace_expiry_cancels_finish_true_work_and_does_not_block_shutdown()
         {
             var handler = new ControllableArticleWorkHandler

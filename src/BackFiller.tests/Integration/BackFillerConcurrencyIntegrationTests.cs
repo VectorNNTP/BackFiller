@@ -235,7 +235,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
         }
 
         [Fact]
-        public async Task Sweep_while_vatp_transfer_lease_is_held_does_not_drop_in_flight_bytes()
+        public async Task Sweep_while_vatp_transfer_lease_is_held_drops_authority_bytes_and_revokes_the_lease()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync(retentionTtl: TimeSpan.FromSeconds(1));
             var prepared = RetentionTestArticles.RetainPrepared(
@@ -248,16 +248,18 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 Assert.NotNull(open.Lease);
 
                 harness.Time.Advance(TimeSpan.FromSeconds(1));
-                _ = harness.Retention.SweepExpired();
-                Assert.Equal(prepared.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
-                Assert.True(open.Lease.Record.ArtData.Span.SequenceEqual(prepared.ArtData));
+                Assert.Equal(prepared.Record.ArtSize, harness.Retention.SweepExpired());
+                Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
+                Assert.Equal(0, harness.Retention.RetainedCount);
+                Assert.True(open.Lease.IsRevoked);
+                Assert.False(open.Lease.HoldsArticle);
 
-                // RequestId was consumed; a new OPEN for the same RequestId must fail while the entry is logically removed.
                 using (var second = harness.Retention.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId))
                 {
                     Assert.Equal(VatpOpenKind.Rejected, second.Kind);
                 }
             }
+
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(0, harness.Retention.RetainedCount);
         }

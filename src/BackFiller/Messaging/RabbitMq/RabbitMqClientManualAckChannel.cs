@@ -1,5 +1,6 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using VectorNNTP.BackFiller.ArticleWork;
 
 namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
@@ -37,7 +38,11 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         public long Generation { get; }
 
         /// <inheritdoc />
-        public bool IsOpen => _channel.IsOpen;
+        /// <remarks>
+        /// False after <see cref="DisposeAsync"/> has marked this wrapper, even if the client channel has not finished closing.
+        /// Settlement checks this inside the channel gate, so it does not start a broker RPC once disposal has entered.
+        /// </remarks>
+        public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _channel.IsOpen;
 
         /// <inheritdoc />
         public Task ExchangeDeclareAsync(
@@ -148,19 +153,32 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// The disposed flag is published under <see cref="ArticleWorkSettlementLease"/>'s channel gate, after any
+        /// ACK, NACK, or Basic.Cancel already inside that gate has returned. The client close runs only after the gate
+        /// is released. Client close waits for the consumer callback, so holding the gate across close would deadlock
+        /// a callback that still needs the gate to finish settlement. A second call does not close the client channel again.
+        /// </remarks>
         public async ValueTask DisposeAsync()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            var close = false;
+            await ArticleWorkSettlementLease.RunExclusiveAsync(this, () =>
             {
-                return;
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    _consumer?.ReceivedAsync -= OnReceivedAsync;
+                    _consumer = null;
+                    _onDelivery = null;
+                    close = true;
+                }
+
+                return Task.CompletedTask;
+            }).ConfigureAwait(false);
+
+            if (close)
+            {
+                await RabbitMqChannelShutdown.CloseIfOpenThenDisposeAsync(_channel).ConfigureAwait(false);
             }
-
-            _consumer?.ReceivedAsync -= OnReceivedAsync;
-            _consumer = null;
-
-            _onDelivery = null;
-
-            await RabbitMqChannelShutdown.CloseIfOpenThenDisposeAsync(_channel).ConfigureAwait(false);
         }
 
         /// <summary>

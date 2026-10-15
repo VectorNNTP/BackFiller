@@ -14,9 +14,13 @@ namespace VectorNNTP.BackFiller.Retention
     /// Index, counter, and admission mutations run under <see cref="_gate"/>.
     /// <see cref="SweepInterval"/> is fixed at construction.
     /// ArtData is referenced, not copied. An outstanding VATP reader does not pin FIFO reclaim;
-    /// only <see cref="RetainedEntry.OpenableRequestIdCount"/> does. Physical release waits until
-    /// that reader count is zero. One OPEN or cancel unpins the entry only when no openable
-    /// RequestId remains. TTL removal and <see cref="DisposeAsync"/> drop every RequestId on the entry.
+    /// only <see cref="RetainedEntry.OpenableRequestIdCount"/> does. TTL expiry and
+    /// <see cref="DisposeAsync"/> drop the authority's ArtData reference and the retained-byte
+    /// count immediately, then revoke active leases. A lease may still hold bytes only until it
+    /// is revoked or disposed; it does not extend <see cref="RetainedEntry.ExpiresUtc"/> or the
+    /// accounting. FIFO physical release of an unexpired entry still waits until its reader count
+    /// is zero. One OPEN or cancel unpins the entry only when no openable RequestId remains.
+    /// TTL removal and <see cref="DisposeAsync"/> drop every RequestId on the entry.
     /// <see cref="BeginShutdown"/> rejects new <see cref="RetainCanonical"/> calls and leaves existing
     /// entries openable.
     /// </remarks>
@@ -220,7 +224,10 @@ namespace VectorNNTP.BackFiller.Retention
         /// <summary>
         /// Gets the number of entries not yet physically disposed, read under <see cref="_gate"/>.
         /// </summary>
-        /// <remarks>Logical removal does not decrement the count while a reader still holds ArtData.</remarks>
+        /// <remarks>
+        /// TTL expiry and disposal decrement this count when the authority drops ArtData, even if a
+        /// transfer lease still exists. FIFO removal of an unexpired entry waits until that lease is disposed.
+        /// </remarks>
         public int RetainedCount
         {
             get
@@ -324,92 +331,99 @@ namespace VectorNNTP.BackFiller.Retention
 
             var identity = ArticleIdentity.From(messageId, record.ArtId);
             var now = _time.GetUtcNow();
-
-            lock (_gate)
+            var revokedLeases = new List<VatpTransferLease>();
+            try
             {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                if (_admissionClosed)
+                lock (_gate)
                 {
-                    return RejectLocked(ArticleRetentionKind.ShuttingDown, identity, artData.Length, 0);
-                }
-
-                if (_byRequestId.TryGetValue(requestId, out var requestOwner)
-                    && !string.Equals(requestOwner.Identity.MessageId, messageId, StringComparison.Ordinal))
-                {
-                    return RejectLocked(ArticleRetentionKind.ArticleIdCollision, identity, artData.Length, 0);
-                }
-
-                if (_byMessageId.TryGetValue(messageId, out var existing))
-                {
-                    if (IsExpiredLocked(existing, now))
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                    if (_admissionClosed)
                     {
-                        RemoveExpiredLocked(existing);
+                        return RejectLocked(ArticleRetentionKind.ShuttingDown, identity, artData.Length, 0);
                     }
-                    else
-                    {
-                        // First-wins ArtData: keep the retained ArticleRecord; add RequestId as another
-                        // openable capability. Never revoke an existing RequestId to admit a newer one.
-                        if (!AttachRequestIdLocked(existing, requestId))
-                        {
-                            return RejectLocked(
-                                ArticleRetentionKind.OpenableRequestIdLimitExceeded,
-                                existing.Identity,
-                                artData.Length,
-                                0);
-                        }
 
-                        return new ArticleRetentionResult(
-                            ArticleRetentionKind.AlreadyPresent,
-                            existing.Identity,
-                            existing.Fqdn,
-                            existing.VatpPort,
-                            _retainedBytes,
-                            0);
-                    }
-                }
-
-                if (_messageIdByArticleId.TryGetValue(identity.ArticleIdHex, out var colliding)
-                    && !string.Equals(colliding, messageId, StringComparison.Ordinal))
-                {
-                    if (_byMessageId.TryGetValue(colliding, out var collidingEntry) && IsExpiredLocked(collidingEntry, now))
-                    {
-                        RemoveExpiredLocked(collidingEntry);
-                    }
-                    else
+                    if (_byRequestId.TryGetValue(requestId, out var requestOwner)
+                        && !string.Equals(requestOwner.Identity.MessageId, messageId, StringComparison.Ordinal))
                     {
                         return RejectLocked(ArticleRetentionKind.ArticleIdCollision, identity, artData.Length, 0);
                     }
-                }
 
-                var released = ReclaimForAdmissionLocked(artData.Length, now);
-                if (_retainedBytes + artData.Length > _maximumBytes)
-                {
-                    return RejectLocked(ArticleRetentionKind.CapacityUnavailable, identity, artData.Length, released);
-                }
+                    if (_byMessageId.TryGetValue(messageId, out var existing))
+                    {
+                        if (IsExpiredLocked(existing, now))
+                        {
+                            RemoveExpiredLocked(existing, revokedLeases);
+                        }
+                        else
+                        {
+                            // First-wins ArtData: keep the retained ArticleRecord; add RequestId as another
+                            // openable capability. Never revoke an existing RequestId to admit a newer one.
+                            if (!AttachRequestIdLocked(existing, requestId))
+                            {
+                                return RejectLocked(
+                                    ArticleRetentionKind.OpenableRequestIdLimitExceeded,
+                                    existing.Identity,
+                                    artData.Length,
+                                    0);
+                            }
 
-                var entry = new RetainedEntry(
-                    identity,
-                    admittedFqdn,
-                    _bindPort,
-                    record,
-                    selectedDateHeaderName,
-                    now,
-                    now + _ttl,
-                    Interlocked.Increment(ref _nextGeneration));
-                entry.Node = _insertionOrder.AddLast(entry);
-                _byMessageId[messageId] = entry;
-                _messageIdByArticleId[identity.ArticleIdHex] = messageId;
-                AttachRequestIdLocked(entry, requestId);
-                AddBytesLocked(artData.Length);
-                _physicalCount++;
-                ArticleRetentionLogMessages.Retained(_logger, identity.ArticleIdHex, artData.Length, _retainedBytes);
-                return new ArticleRetentionResult(
-                    ArticleRetentionKind.Retained,
-                    identity,
-                    entry.Fqdn,
-                    entry.VatpPort,
-                    _retainedBytes,
-                    released);
+                            return new ArticleRetentionResult(
+                                ArticleRetentionKind.AlreadyPresent,
+                                existing.Identity,
+                                existing.Fqdn,
+                                existing.VatpPort,
+                                _retainedBytes,
+                                0);
+                        }
+                    }
+
+                    if (_messageIdByArticleId.TryGetValue(identity.ArticleIdHex, out var colliding)
+                        && !string.Equals(colliding, messageId, StringComparison.Ordinal))
+                    {
+                        if (_byMessageId.TryGetValue(colliding, out var collidingEntry) && IsExpiredLocked(collidingEntry, now))
+                        {
+                            RemoveExpiredLocked(collidingEntry, revokedLeases);
+                        }
+                        else
+                        {
+                            return RejectLocked(ArticleRetentionKind.ArticleIdCollision, identity, artData.Length, 0);
+                        }
+                    }
+
+                    var released = ReclaimForAdmissionLocked(artData.Length, now, revokedLeases);
+                    if (_retainedBytes + artData.Length > _maximumBytes)
+                    {
+                        return RejectLocked(ArticleRetentionKind.CapacityUnavailable, identity, artData.Length, released);
+                    }
+
+                    var entry = new RetainedEntry(
+                        identity,
+                        admittedFqdn,
+                        _bindPort,
+                        record,
+                        selectedDateHeaderName,
+                        now,
+                        now + _ttl,
+                        Interlocked.Increment(ref _nextGeneration));
+                    entry.Node = _insertionOrder.AddLast(entry);
+                    _byMessageId[messageId] = entry;
+                    _messageIdByArticleId[identity.ArticleIdHex] = messageId;
+                    AttachRequestIdLocked(entry, requestId);
+                    AddBytesLocked(artData.Length);
+                    _physicalCount++;
+                    ArticleRetentionLogMessages.Retained(_logger, identity.ArticleIdHex, artData.Length, _retainedBytes);
+                    return new ArticleRetentionResult(
+                        ArticleRetentionKind.Retained,
+                        identity,
+                        entry.Fqdn,
+                        entry.VatpPort,
+                        _retainedBytes,
+                        released);
+                }
+            }
+            finally
+            {
+                RevokeOutsideLock(revokedLeases);
             }
         }
 
@@ -450,52 +464,61 @@ namespace VectorNNTP.BackFiller.Retention
             }
 #pragma warning restore CA1512 // Use ArgumentOutOfRangeException throw helper
 
-            lock (_gate)
+            var revokedLeases = new List<VatpTransferLease>();
+            try
             {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                if (!_byRequestId.TryGetValue(requestId, out var entry))
+                lock (_gate)
                 {
-                    return VatpOpenResult.Rejected();
-                }
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                    if (!_byRequestId.TryGetValue(requestId, out var entry))
+                    {
+                        return VatpOpenResult.Rejected();
+                    }
 
-                if (IsExpiredLocked(entry, _time.GetUtcNow()))
-                {
-                    RemoveExpiredLocked(entry);
-                    return VatpOpenResult.Rejected();
-                }
+                    if (IsExpiredLocked(entry, _time.GetUtcNow()))
+                    {
+                        RemoveExpiredLocked(entry, revokedLeases);
+                        return VatpOpenResult.Rejected();
+                    }
 
-                if (entry.Record is not { } record
-                    || entry.SelectedDateHeaderName is not { } selectedDate)
-                {
-                    return VatpOpenResult.Rejected();
-                }
+                    if (entry.Record is not { } record
+                        || entry.SelectedDateHeaderName is not { } selectedDate)
+                    {
+                        return VatpOpenResult.Rejected();
+                    }
 
-                if (record.ArtId != expectedArticleId)
-                {
-                    // Wrong ArticleId must not consume RequestId.
-                    return VatpOpenResult.Rejected();
-                }
+                    if (record.ArtId != expectedArticleId)
+                    {
+                        // Wrong ArticleId must not consume RequestId.
+                        return VatpOpenResult.Rejected();
+                    }
 
-                // Acquire the transfer reader lease before reservation so a failed reservation can
-                // roll back without consuming RequestId. Only this RequestId is detached after both succeed.
-                if (!entry.TryAcquire())
-                {
-                    return VatpOpenResult.Rejected();
-                }
+                    // Acquire the transfer reader lease before reservation so a failed reservation can
+                    // roll back without consuming RequestId. Only this RequestId is detached after both succeed.
+                    if (!entry.TryAcquire())
+                    {
+                        return VatpOpenResult.Rejected();
+                    }
 
-                if (tryReserveOutboundBytes is not null && !tryReserveOutboundBytes(record.ArtSize))
-                {
-                    _ = entry.TryRelease();
-                    return VatpOpenResult.Rejected();
-                }
+                    if (tryReserveOutboundBytes is not null && !tryReserveOutboundBytes(record.ArtSize))
+                    {
+                        _ = entry.TryRelease();
+                        return VatpOpenResult.Rejected();
+                    }
 
-                _ = DetachRequestIdLocked(entry, requestId);
-                var lease = new VatpTransferLease(
-                    record,
-                    selectedDate,
-                    entry.Identity,
-                    () => ReleaseLease(entry));
-                return VatpOpenResult.Opened(lease);
+                    _ = DetachRequestIdLocked(entry, requestId);
+                    var lease = new VatpTransferLease(
+                        record,
+                        selectedDate,
+                        entry.Identity,
+                        () => ReleaseLease(entry));
+                    entry.AddLease(lease);
+                    return VatpOpenResult.Opened(lease);
+                }
+            }
+            finally
+            {
+                RevokeOutsideLock(revokedLeases);
             }
         }
 
@@ -536,8 +559,8 @@ namespace VectorNNTP.BackFiller.Retention
 
         /// <summary>Reclaims TTL-expired entries in insertion order.</summary>
         /// <returns>
-        /// Payload bytes physically disposed by this pass. Zero when the authority is disposed or when
-        /// expiry only logically removes entries that still have readers.
+        /// Payload bytes the authority released on this pass. Zero when the authority is disposed or nothing expired.
+        /// An active transfer does not keep those bytes in the retained total.
         /// </returns>
         /// <remarks>
         /// Does not throw <see cref="ObjectDisposedException"/>. Does not close admission.
@@ -548,20 +571,28 @@ namespace VectorNNTP.BackFiller.Retention
         /// </remarks>
         public long SweepExpired()
         {
-            lock (_gate)
+            var revokedLeases = new List<VatpTransferLease>();
+            try
             {
-                if (_disposed)
+                lock (_gate)
                 {
-                    return 0;
-                }
+                    if (_disposed)
+                    {
+                        return 0;
+                    }
 
-                var released = ExpireEligibleLocked(_time.GetUtcNow());
-                if (released > 0)
-                {
-                    ArticleRetentionLogMessages.Swept(_logger, released, _retainedBytes);
-                }
+                    var released = ExpireEligibleLocked(_time.GetUtcNow(), revokedLeases);
+                    if (released > 0)
+                    {
+                        ArticleRetentionLogMessages.Swept(_logger, released, _retainedBytes);
+                    }
 
-                return released;
+                    return released;
+                }
+            }
+            finally
+            {
+                RevokeOutsideLock(revokedLeases);
             }
         }
 
@@ -583,31 +614,40 @@ namespace VectorNNTP.BackFiller.Retention
         /// </summary>
         /// <returns>A completed task. The cleanup runs synchronously under <see cref="_gate"/>.</returns>
         /// <remarks>
-        /// Idempotent. A second call does not throw. Entries with a VATP reader stay physically alive
-        /// until <see cref="ReleaseLease"/> drops the last reader; their bytes remain in
-        /// <see cref="_retainedBytes"/> until then. Abandoned leases are not waited for.
+        /// Idempotent. A second call does not throw. Every authority-owned ArtData reference is dropped
+        /// and removed from the retained-byte total before this method returns. Active leases are revoked
+        /// after the lock is released. Abandoned session aliases are not waited for.
         /// After this method, locked <see cref="RetainCanonical"/>, <see cref="TryOpenTransfer"/>, and
         /// <see cref="TryCancelPendingRequest"/> calls throw <see cref="ObjectDisposedException"/>,
         /// and <see cref="SweepExpired"/> returns zero.
         /// </remarks>
         public ValueTask DisposeAsync()
         {
-            lock (_gate)
+            var revokedLeases = new List<VatpTransferLease>();
+            try
             {
-                if (_disposed)
+                lock (_gate)
                 {
-                    return ValueTask.CompletedTask;
-                }
+                    if (_disposed)
+                    {
+                        return ValueTask.CompletedTask;
+                    }
 
-                _disposed = true;
-                _admissionClosed = true;
-                foreach (var entry in _byMessageId.Values.ToArray())
-                {
-                    UnindexLocked(entry);
-                    DisposePhysicallyLocked(entry);
-                }
+                    _disposed = true;
+                    _admissionClosed = true;
+                    foreach (var entry in _byMessageId.Values.ToArray())
+                    {
+                        UnindexLocked(entry);
+                        _ = DetachAuthorityPayloadLocked(entry);
+                        revokedLeases.AddRange(entry.TakeLeases());
+                    }
 
-                _insertionOrder.Clear();
+                    _insertionOrder.Clear();
+                }
+            }
+            finally
+            {
+                RevokeOutsideLock(revokedLeases);
             }
 
             return ValueTask.CompletedTask;
@@ -645,6 +685,7 @@ namespace VectorNNTP.BackFiller.Retention
         /// </summary>
         /// <param name="requiredBytes">ArtData length of the entry about to be admitted.</param>
         /// <param name="now">Admission clock reading used for TTL expiry.</param>
+        /// <param name="revokedLeases">Leases from entries expired during this admission. Not revoked under the lock.</param>
         /// <returns>
         /// Bytes physically disposed by TTL expiry and by FIFO reclaim. An unpinned entry that still
         /// has a reader is unindexed but contributes nothing until that reader releases it.
@@ -654,9 +695,9 @@ namespace VectorNNTP.BackFiller.Retention
         /// <paramref name="requiredBytes"/> or no unpinned FIFO candidate remains. An outstanding
         /// reader is not a pin. <see cref="BeginShutdown"/> is not a reclaim path.
         /// </remarks>
-        private long ReclaimForAdmissionLocked(int requiredBytes, DateTimeOffset now)
+        private long ReclaimForAdmissionLocked(int requiredBytes, DateTimeOffset now, List<VatpTransferLease> revokedLeases)
         {
-            var released = ExpireEligibleLocked(now);
+            var released = ExpireEligibleLocked(now, revokedLeases);
             while (_retainedBytes + requiredBytes > _maximumBytes)
             {
                 var candidate = FindOldestFifoReclaimableLocked();
@@ -701,16 +742,16 @@ namespace VectorNNTP.BackFiller.Retention
         /// <see cref="RetainedEntry.ExpiresUtc"/> still in the future.
         /// </summary>
         /// <param name="now">Clock reading compared with <see cref="RetainedEntry.ExpiresUtc"/>.</param>
+        /// <param name="revokedLeases">Receives leases whose article references must be dropped after the lock.</param>
         /// <returns>
-        /// Bytes physically disposed. A logically removed entry that still has a reader adds zero
-        /// for this call.
+        /// Bytes the authority detached. An active transfer does not delay that subtraction.
         /// </returns>
         /// <remarks>
         /// The early stop is valid when <see cref="_time"/> does not move backward between admissions.
         /// <see cref="RetainedEntry.ExpiresUtc"/> is the admission timestamp plus the same <see cref="_ttl"/>,
         /// so a later node then expires later. A backward clock step can leave a later expired node unvisited.
         /// </remarks>
-        private long ExpireEligibleLocked(DateTimeOffset now)
+        private long ExpireEligibleLocked(DateTimeOffset now, List<VatpTransferLease> revokedLeases)
         {
             var released = 0L;
             var node = _insertionOrder.First;
@@ -723,7 +764,7 @@ namespace VectorNNTP.BackFiller.Retention
                     break;
                 }
 
-                if (RemoveExpiredLocked(entry))
+                if (RemoveExpiredLocked(entry, revokedLeases))
                 {
                     released += entry.WasPhysicallyDisposedThisRemoval ? entry.PayloadBytes : 0;
                 }
@@ -736,15 +777,17 @@ namespace VectorNNTP.BackFiller.Retention
 
         /// <summary>Unindexes <paramref name="entry"/> and attempts physical disposal.</summary>
         /// <param name="entry">Expired entry. May already be logically removed.</param>
+        /// <param name="revokedLeases">Receives this entry's leases. Cleared from the entry.</param>
         /// <returns>
         /// Always <see langword="true"/> after the attempt. Byte credit is
         /// <see cref="RetainedEntry.WasPhysicallyDisposedThisRemoval"/>, not this boolean.
         /// </returns>
-        private bool RemoveExpiredLocked(RetainedEntry entry)
+        private bool RemoveExpiredLocked(RetainedEntry entry, List<VatpTransferLease> revokedLeases)
         {
             UnindexLocked(entry);
-            var disposed = DisposePhysicallyLocked(entry);
-            entry.WasPhysicallyDisposedThisRemoval = disposed;
+            var detached = DetachAuthorityPayloadLocked(entry);
+            entry.WasPhysicallyDisposedThisRemoval = detached;
+            revokedLeases.AddRange(entry.TakeLeases());
             return true;
         }
 
@@ -877,7 +920,25 @@ namespace VectorNNTP.BackFiller.Retention
         /// </returns>
         private bool DisposePhysicallyLocked(RetainedEntry entry)
         {
-            if (!entry.TryDisposePhysically())
+            if (entry.ReaderCount > 0)
+            {
+                return false;
+            }
+
+            return DetachAuthorityPayloadLocked(entry);
+        }
+
+        /// <summary>
+        /// Drops the authority's ArtData reference and subtracts its bytes once, even when a transfer reader remains.
+        /// </summary>
+        /// <param name="entry">Entry whose authority-owned record should be released.</param>
+        /// <returns>
+        /// <see langword="false"/> when this entry was already detached.
+        /// <see langword="true"/> after <see cref="_retainedBytes"/> and <see cref="_physicalCount"/> are reduced.
+        /// </returns>
+        private bool DetachAuthorityPayloadLocked(RetainedEntry entry)
+        {
+            if (!entry.TryDetachAuthorityPayload())
             {
                 return false;
             }
@@ -885,6 +946,25 @@ namespace VectorNNTP.BackFiller.Retention
             SubtractBytesLocked(entry.PayloadBytes);
             _physicalCount = Math.Max(0, _physicalCount - 1);
             return true;
+        }
+
+        /// <summary>
+        /// Revokes leases collected under <see cref="_gate"/>. Each callback runs outside that lock.
+        /// </summary>
+        /// <param name="leases">Leases whose article references must be dropped. A failure on one does not skip the rest.</param>
+        private void RevokeOutsideLock(List<VatpTransferLease> leases)
+        {
+            foreach (var lease in leases)
+            {
+                try
+                {
+                    lease.Revoke();
+                }
+                catch (Exception ex)
+                {
+                    ArticleRetentionLogMessages.LeaseRevokeFailed(_logger, ex);
+                }
+            }
         }
 
         /// <summary>Adds <paramref name="bytes"/> to <see cref="_retainedBytes"/>. Called under <see cref="_gate"/>.</summary>
@@ -934,8 +1014,8 @@ namespace VectorNNTP.BackFiller.Retention
         private sealed class RetainedEntry
         {
             /// <summary>
-            /// CanonicalV1 record whose ArtData is the retained buffer. <see langword="null"/> after
-            /// <see cref="TryDisposePhysically"/> succeeds.
+            /// Canonical record whose ArtData is the authority-owned buffer. <see langword="null"/> after
+            /// <see cref="TryDetachAuthorityPayload"/> succeeds. A transfer lease may still hold its own reference.
             /// </summary>
             private ArticleRecord? _record;
 
@@ -951,10 +1031,13 @@ namespace VectorNNTP.BackFiller.Retention
             private readonly HashSet<Guid> _openableRequestIds = [];
 
             /// <summary>
-            /// Outstanding <see cref="VatpTransferLease"/> readers. Physical disposal fails while this
-            /// is positive. Changed only under <see cref="_gate"/>.
+            /// Outstanding <see cref="VatpTransferLease"/> readers. FIFO physical release waits while this
+            /// is positive. TTL expiry does not. Changed only under <see cref="_gate"/>.
             /// </summary>
             private int _readers;
+
+            /// <summary>Leases that must be revoked when this entry expires or the authority is disposed.</summary>
+            private readonly List<VatpTransferLease> _leases = [];
 
             /// <summary>
             /// 0 until the first successful <see cref="TryMarkLogicallyRemoved"/>; 1 afterward.
@@ -963,7 +1046,7 @@ namespace VectorNNTP.BackFiller.Retention
             private int _logicallyRemoved;
 
             /// <summary>
-            /// 0 until <see cref="TryDisposePhysically"/> clears the record; 1 afterward.
+            /// 0 until <see cref="TryDetachAuthorityPayload"/> clears the record; 1 afterward.
             /// A second physical disposal fails.
             /// </summary>
             private int _physicallyDisposed;
@@ -1033,6 +1116,27 @@ namespace VectorNNTP.BackFiller.Retention
 
             /// <summary>Openable RequestIds still attached. Greater than zero pins the entry against FIFO reclaim.</summary>
             internal int OpenableRequestIdCount => _openableRequestIds.Count;
+
+            /// <summary>Transfer leases that still count as readers. FIFO detach waits for zero. TTL does not.</summary>
+            internal int ReaderCount => _readers;
+
+            /// <summary>Remembers <paramref name="lease"/> so expiry can revoke it.</summary>
+            /// <param name="lease">Lease created by a successful OPEN of this entry.</param>
+            internal void AddLease(VatpTransferLease lease) => _leases.Add(lease);
+
+            /// <summary>Copies and clears the lease list. A second call returns an empty array.</summary>
+            /// <returns>The leases that were attached. Empty when none remain.</returns>
+            internal VatpTransferLease[] TakeLeases()
+            {
+                if (_leases.Count == 0)
+                {
+                    return [];
+                }
+
+                var leases = _leases.ToArray();
+                _leases.Clear();
+                return leases;
+            }
 
             /// <summary>Retained record, or <see langword="null"/> after physical disposal.</summary>
             internal ArticleRecord? Record => _record;
@@ -1131,19 +1235,14 @@ namespace VectorNNTP.BackFiller.Retention
                 Interlocked.CompareExchange(ref _logicallyRemoved, 1, 0) == 0;
 
             /// <summary>
-            /// Clears <see cref="_record"/> and <see cref="_selectedDateHeaderName"/> when no reader remains.
+            /// Clears <see cref="_record"/> and <see cref="_selectedDateHeaderName"/> once.
             /// </summary>
             /// <returns>
-            /// <see langword="false"/> when a reader is outstanding or this entry was already physically disposed.
-            /// Does not subtract <see cref="PayloadBytes"/>; <see cref="DisposePhysicallyLocked"/> does that.
+            /// <see langword="false"/> when this entry was already detached.
+            /// Does not consult <see cref="_readers"/> and does not subtract <see cref="PayloadBytes"/>.
             /// </returns>
-            internal bool TryDisposePhysically()
+            internal bool TryDetachAuthorityPayload()
             {
-                if (_physicallyDisposed == 1 || _readers > 0)
-                {
-                    return false;
-                }
-
                 if (Interlocked.CompareExchange(ref _physicallyDisposed, 1, 0) != 0)
                 {
                     return false;

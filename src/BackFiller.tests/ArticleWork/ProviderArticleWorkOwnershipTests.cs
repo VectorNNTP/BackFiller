@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Configuration;
@@ -24,13 +25,17 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var retriever = new OwnedBufferRetriever(source, overwriteAfterCallback: true);
             var handler = new ProviderArticleWorkHandler(retriever, retention, parser);
 
-            var result = await handler.HandleAsync(Item(ArticleWorkTestDeliveries.CanonicalMessageId), CancellationToken.None);
+            var requestId = Guid.NewGuid();
+            var result = await handler.HandleAsync(Item(ArticleWorkTestDeliveries.CanonicalMessageId, requestId), CancellationToken.None);
 
             Assert.Equal(ArticleWorkOutcome.Success, result.Outcome);
             Assert.Null(result.Article);
-            Assert.NotNull(handler.LastPayload);
-            Assert.NotSame(source, handler.LastPayload);
-            Assert.Equal(expectedBytes, handler.LastPayload);
+            using var opened = retention.TryOpenTransfer(requestId, result.ArticleId!.Value);
+            Assert.Equal(VatpOpenKind.Opened, opened.Kind);
+            Assert.True(MemoryMarshal.TryGetArray(opened.Lease!.Record.ArtData, out var retained));
+            Assert.NotNull(retained.Array);
+            Assert.NotSame(source, retained.Array);
+            Assert.Equal(expectedBytes, retained.Array);
             Assert.All(source, static value => Assert.Equal(0xFF, value));
             Assert.Equal(ArticleRetentionKind.Retained, handler.LastRetentionKind);
             Assert.Equal("backfiller.test", handler.LastFqdn);
@@ -51,7 +56,6 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
 
             Assert.Equal(ArticleWorkOutcome.InvalidArticle, result.Outcome);
             Assert.Equal("MessageIdMismatch", result.Error);
-            Assert.Null(handler.LastPayload);
             Assert.All(source, static value => Assert.Equal(0xFF, value));
             Assert.Equal(0, retention.RetainedCount);
         }
@@ -93,11 +97,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 TimeProvider.System,
                 NullLogger<ArticleRetentionAuthority>.Instance);
 
-        private static ArticleWorkItem Item(string messageId)
+        private static ArticleWorkItem Item(string messageId, Guid? requestId = null)
         {
             var channel = new FakeBackFillerRabbitMqChannel(1);
             return new ArticleWorkItem(
-                new ArticleWorkRequest(1, Guid.NewGuid(), messageId, "audit"),
+                new ArticleWorkRequest(1, requestId ?? Guid.NewGuid(), messageId, "audit"),
                 "corr",
                 "reply",
                 new ArticleWorkSettlementLease(channel, 1, 1));

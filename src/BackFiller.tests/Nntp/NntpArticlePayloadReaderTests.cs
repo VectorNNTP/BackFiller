@@ -12,10 +12,55 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         [Fact]
-        public async Task SingleDotAtLineStart_IsStored()
+        public async Task SingleDotAtLineStart_DropsTheFramingDot()
         {
             var payload = await ReadAsync(".foo\r\n.\r\n"u8.ToArray());
+            Assert.Equal("foo\r\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task DoubleDot_BecomesOneDot()
+        {
+            var payload = await ReadAsync("..foo\r\n.\r\n"u8.ToArray());
             Assert.Equal(".foo\r\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task TripleDot_BecomesTwoDots()
+        {
+            var payload = await ReadAsync("...bar\r\n.\r\n"u8.ToArray());
+            Assert.Equal("..bar\r\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task StuffedSingleDotDataLine_BecomesOneDot_AndOmitsTerminator()
+        {
+            var payload = await ReadAsync("..\r\n.\r\n"u8.ToArray());
+            Assert.Equal(".\r\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task LfOnlySingleDotLine_DropsTheFramingDot()
+        {
+            var payload = await ReadAsync(".foo\n.\n"u8.ToArray());
+            Assert.Equal("foo\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task EmptyBodyLine_IsPreservedBesideStuffedDots()
+        {
+            var payload = await ReadAsync("\r\n.x\r\n\n.\r\n"u8.ToArray());
+            Assert.Equal("\r\nx\r\n\n"u8.ToArray(), payload);
+        }
+
+        [Fact]
+        public async Task SplitLeadingDotsAndTerminator_MatchContiguousRead()
+        {
+            var wire = ".a\r\n..b\r\n...c\r\n.\r\n"u8.ToArray();
+            var expected = "a\r\n.b\r\n..c\r\n"u8.ToArray();
+            Assert.Equal(expected, await ReadAsync(wire));
+            Assert.Equal(expected, await ReadAsync(wire, chunk: 1));
+            Assert.Equal(expected, await ReadAsync(wire, chunk: 2));
         }
 
         [Fact]
@@ -193,7 +238,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var contiguous = await ReadAsync(wire);
             var split = await ReadAsync(wire, chunk: 1);
             Assert.Equal(contiguous, split);
-            Assert.Equal(".x\r\n.y\r\na.b\r\n"u8.ToArray(), split);
+            Assert.Equal(".x\r\ny\r\na.b\r\n"u8.ToArray(), split);
         }
 
         [Fact]

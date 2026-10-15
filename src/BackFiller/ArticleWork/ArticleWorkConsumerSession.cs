@@ -517,7 +517,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
         {
             try
             {
-                await channel.BasicCancelAsync(consumerTag, CancellationToken.None).ConfigureAwait(false);
+                await ArticleWorkSettlementLease.RunExclusiveAsync(
+                    channel,
+                    () => channel.BasicCancelAsync(consumerTag, CancellationToken.None)).ConfigureAwait(false);
                 return true;
             }
             // codeql[cs/catch-of-all-exceptions] A session failure must be observed here so the consumer loop stays owned.

@@ -69,6 +69,21 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         [Fact]
+        public async Task Repeated_dispose_does_not_dispose_the_channel_again()
+        {
+            await using var context = await ConsumerContext.StartSessionAsync();
+            var channel = Assert.IsType<FakeBackFillerRabbitMqChannel>(context.Session.Channel);
+
+            await context.Session.DisposeAsync();
+            await context.Session.DisposeAsync();
+
+            Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
+            Assert.Equal(1, channel.DisposeCount);
+            Assert.Equal(1, channel.CancelCount);
+            Assert.False(channel.IsOpen);
+        }
+
+        [Fact]
         public async Task Shutdown_drains_admitted_work_on_the_original_channel()
         {
             var handler = new ControllableArticleWorkHandler

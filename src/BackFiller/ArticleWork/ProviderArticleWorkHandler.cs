@@ -20,6 +20,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// <remarks>
     /// Does not publish the RPC response or settle the delivery.
     /// The <c>Last*</c> properties are test observations written by <see cref="HandleAsync"/> with no synchronization.
+    /// They do not store article bytes. Retained articles live only in <see cref="IArticleRetentionAuthority"/>.
     /// </remarks>
     internal sealed class ProviderArticleWorkHandler : IArticleWorkHandler
     {
@@ -123,12 +124,6 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <summary>Gets the last retrieval classification (tests).</summary>
         internal ArticleRetrievalKind? LastKind { get; private set; }
 
-        /// <summary>Gets the last canonical retained ArtData (tests). The same buffer is transferred into retention.</summary>
-        internal byte[]? LastPayload { get; private set; }
-
-        /// <summary>Gets the last retained CanonicalV1 record (tests).</summary>
-        internal ArticleRecord? LastRecord { get; private set; }
-
         /// <summary>Gets the last retention classification (tests).</summary>
         internal ArticleRetentionKind? LastRetentionKind { get; private set; }
 
@@ -178,8 +173,6 @@ namespace VectorNNTP.BackFiller.ArticleWork
             LastRetentionKind = null;
             LastFqdn = null;
             LastVatpPort = null;
-            LastPayload = null;
-            LastRecord = null;
             if (cancellationToken.IsCancellationRequested)
             {
                 LastKind = ArticleRetrievalKind.Cancelled;
@@ -300,8 +293,6 @@ namespace VectorNNTP.BackFiller.ArticleWork
                         "Canonical ArtData is not an owned contiguous buffer.");
                 }
 
-                LastPayload = segment.Array;
-                LastRecord = record;
                 var retained = _retention.RetainCanonical(
                     item.Request.MessageId,
                     item.Request.RequestId,

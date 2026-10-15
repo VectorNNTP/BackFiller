@@ -19,6 +19,20 @@ namespace VectorNNTP.BackFiller.Tests.Retention
         }
 
         [Fact]
+        public async Task Sweep_continues_after_a_failed_pass()
+        {
+            var authority = new ThrowingThenSucceedingAuthority();
+            var sweep = new ArticleRetentionSweepService(authority, NullLogger<ArticleRetentionSweepService>.Instance);
+            using var cts = new CancellationTokenSource();
+            await sweep.StartAsync(cts.Token);
+            await authority.Recovered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await sweep.StopAsync(CancellationToken.None);
+            Assert.True(authority.Failures >= 1);
+            Assert.True(authority.SweepCount >= 2);
+            Assert.True(authority.ShutdownStarted);
+        }
+
+        [Fact]
         public async Task Sweep_interval_is_the_configured_retention_interval()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -63,6 +77,54 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             {
                 SweepCount++;
                 Swept.TrySetResult();
+                return 0;
+            }
+
+            public void BeginShutdown() => ShutdownStarted = true;
+        }
+
+        private sealed class ThrowingThenSucceedingAuthority : IArticleRetentionAuthority
+        {
+            public TaskCompletionSource Recovered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public int SweepCount { get; private set; }
+
+            public int Failures { get; private set; }
+
+            public bool ShutdownStarted { get; private set; }
+
+            public TimeSpan SweepInterval => TimeSpan.Zero;
+
+            public long RetainedPayloadBytes => 0;
+
+            public int RetainedCount => 0;
+
+            public ArticleRetentionResult RetainCanonical(
+                string messageId,
+                Guid requestId,
+                VectorNNTP.BackFiller.Articles.ArticleRecord record,
+                VectorNNTP.BackFiller.Articles.Parsing.NntpArticleHeaderName selectedDateHeaderName,
+                string? endpointFqdn = null) =>
+                new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
+
+            public VatpOpenResult TryOpenTransfer(
+                Guid requestId,
+                VectorNNTP.BackFiller.Articles.ArticleId expectedArticleId,
+                Func<int, bool>? tryReserveOutboundBytes = null) =>
+                VatpOpenResult.Rejected();
+
+            public bool TryCancelPendingRequest(Guid requestId) => false;
+
+            public long SweepExpired()
+            {
+                SweepCount++;
+                if (SweepCount == 1)
+                {
+                    Failures++;
+                    throw new InvalidOperationException("sweep failed");
+                }
+
+                Recovered.TrySetResult();
                 return 0;
             }
 

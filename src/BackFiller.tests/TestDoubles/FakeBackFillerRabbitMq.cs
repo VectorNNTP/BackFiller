@@ -1,3 +1,4 @@
+using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
@@ -271,6 +272,16 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         public Exception? NackException { get; set; }
 
+        public TaskCompletionSource? NackEntered { get; set; }
+
+        public TaskCompletionSource? NackGate { get; set; }
+
+        private int _nackInFlight;
+
+        private int _maxNackInFlight;
+
+        public int MaxNackInFlight => Volatile.Read(ref _maxNackInFlight);
+
         public TaskCompletionSource? AckStarted { get; set; }
 
         public TaskCompletionSource? AckGate { get; set; }
@@ -379,18 +390,26 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 throw new InvalidOperationException("RabbitMQ channel is not open for ACK.");
             }
 
-            AckStarted?.TrySetResult();
-            if (AckGate is not null)
+            EnterBrokerOp();
+            try
             {
-                await AckGate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
+                AckStarted?.TrySetResult();
+                if (AckGate is not null)
+                {
+                    await AckGate.Task.ConfigureAwait(false);
+                }
 
-            if (AckException is not null)
+                if (AckException is not null)
+                {
+                    throw AckException;
+                }
+
+                Settlements.Add(new FakeRabbitMqSettlement(deliveryTag, Acknowledge: true, Requeue: false));
+            }
+            finally
             {
-                throw AckException;
+                ExitBrokerOp();
             }
-
-            Settlements.Add(new FakeRabbitMqSettlement(deliveryTag, Acknowledge: true, Requeue: false));
         }
 
         public Task BasicNackAsync(ulong deliveryTag, bool requeue, CancellationToken cancellationToken)
@@ -404,12 +423,67 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
             if (NackException is not null)
             {
-                throw NackException;
+                var error = NackException;
+                NackException = null;
+                throw error;
             }
 
-            Settlements.Add(new FakeRabbitMqSettlement(deliveryTag, Acknowledge: false, requeue));
-            return Task.CompletedTask;
+            if (NackGate is null)
+            {
+                Settlements.Add(new FakeRabbitMqSettlement(deliveryTag, Acknowledge: false, requeue));
+                return Task.CompletedTask;
+            }
+
+            return NackAfterGateAsync(deliveryTag, requeue);
         }
+
+        private async Task NackAfterGateAsync(ulong deliveryTag, bool requeue)
+        {
+            var inFlight = Interlocked.Increment(ref _nackInFlight);
+            int observed;
+            while ((observed = Volatile.Read(ref _maxNackInFlight)) < inFlight
+                && Interlocked.CompareExchange(ref _maxNackInFlight, inFlight, observed) != observed)
+            {
+            }
+
+            EnterBrokerOp();
+            try
+            {
+                NackEntered?.TrySetResult();
+                await NackGate!.Task.ConfigureAwait(false);
+                if (NackException is not null)
+                {
+                    var error = NackException;
+                    NackException = null;
+                    throw error;
+                }
+
+                Settlements.Add(new FakeRabbitMqSettlement(deliveryTag, Acknowledge: false, requeue));
+            }
+            finally
+            {
+                ExitBrokerOp();
+                Interlocked.Decrement(ref _nackInFlight);
+            }
+        }
+
+        private int _brokerOps;
+
+        private int _maxBrokerOps;
+
+        public int MaxBrokerOpsInFlight => Volatile.Read(ref _maxBrokerOps);
+
+        private void EnterBrokerOp()
+        {
+            var now = Interlocked.Increment(ref _brokerOps);
+            int observed;
+            while ((observed = Volatile.Read(ref _maxBrokerOps)) < now
+                && Interlocked.CompareExchange(ref _maxBrokerOps, now, observed) != observed)
+            {
+            }
+        }
+
+        private void ExitBrokerOp() => Interlocked.Decrement(ref _brokerOps);
 
         public Task DeliverAsync(RabbitMqManualAckDelivery delivery)
         {
@@ -421,11 +495,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             return _onDelivery(delivery);
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
-            DisposeCount++;
-            IsOpen = false;
-            return ValueTask.CompletedTask;
+            await ArticleWorkSettlementLease.RunExclusiveAsync(this, () =>
+            {
+                DisposeCount++;
+                IsOpen = false;
+                return Task.CompletedTask;
+            }).ConfigureAwait(false);
         }
     }
 

@@ -3,6 +3,7 @@ using VectorNNTP.BackFiller.ArticleWork;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Retention;
 using VectorNNTP.BackFiller.Tests.Fixtures;
+using VectorNNTP.BackFiller.Articles;
 using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
@@ -27,7 +28,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var publication = Assert.Single(harness.PublishChannel.Publications);
             using var document = JsonDocument.Parse(publication.Body);
             Assert.Equal("Success", document.RootElement.GetProperty("outcome").GetString());
-            AssertCanonicalRetainedArticle(harness.Handler.LastPayload);
+            AssertCanonicalRetainedArticle(ReadRetainedArticle(harness));
         }
 
         [Fact]
@@ -42,8 +43,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkOutcome.Success, outcome);
             Assert.Equal(ArticleRetentionKind.Retained, harness.Handler.LastRetentionKind);
             Assert.True(Assert.Single(channel.Settlements).Acknowledge);
-            var retained = harness.Handler.LastPayload;
-            Assert.NotNull(retained);
+            var retained = ReadRetainedArticle(harness);
             Assert.Contains("=ybegin "u8, retained);
             Assert.Contains("=yend "u8, retained);
         }
@@ -205,8 +205,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(channel));
-            var retained = harness.Handler.LastPayload;
-            Assert.NotNull(retained);
+            var retained = ReadRetainedArticle(harness);
             var text = Encoding.ASCII.GetString(retained);
             Assert.Contains($"Date: {ArticleWorkTestArticles.CanonicalUtcDate}\r\n", text, StringComparison.Ordinal);
             Assert.Contains($"Path: news.usenet.ninja!{LocalFqdn}!news.example.org!feed2", text, StringComparison.Ordinal);
@@ -255,7 +254,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(channel));
-            var text = Encoding.ASCII.GetString(harness.Handler.LastPayload!);
+            var text = Encoding.ASCII.GetString(ReadRetainedArticle(harness));
             Assert.Contains($"Path: {LocalFqdn}!news.usenet.ninja!foo", text, StringComparison.Ordinal);
             Assert.Equal(1, CountOccurrences(text, "news.usenet.ninja"));
         }
@@ -268,9 +267,22 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(channel));
-            var text = Encoding.ASCII.GetString(harness.Handler.LastPayload!);
+            var text = Encoding.ASCII.GetString(ReadRetainedArticle(harness));
             Assert.Contains($"Path: {LocalFqdn}!foo!news.usenet.ninja!bar", text, StringComparison.Ordinal);
             Assert.Equal(1, CountOccurrences(text, "news.usenet.ninja"));
+        }
+
+        private static byte[] ReadRetainedArticle(BackFillerPipelineHarness harness)
+        {
+            var publication = Assert.Single(harness.PublishChannel.Publications);
+            using var document = JsonDocument.Parse(publication.Body);
+            var articleIdHex = document.RootElement.GetProperty("articleId").GetString();
+            Assert.True(ArticleId.TryParseLowerHex(articleIdHex, out var articleId));
+            using var open = harness.Retention.TryOpenTransfer(
+                Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
+                articleId);
+            Assert.Equal(VatpOpenKind.Opened, open.Kind);
+            return open.Lease!.Record.ArtData.ToArray();
         }
 
         private static int CountOccurrences(string source, string value)

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -218,6 +219,66 @@ namespace VectorNNTP.BackFiller.Tests.Listener
         }
 
         [Fact]
+        public async Task WriterIoFailure_during_transfer_drops_session_article_and_does_not_restore_expired_bytes()
+        {
+            var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
+            await using var harness = await SessionHarness.CreateAsync(time: time, ttl: TimeSpan.FromSeconds(30));
+            var transferred = RetentionTestArticles.RetainPrepared(
+                harness.Authority,
+                "<writer-io@example.test>",
+                body: BuildBody((int)ArticleTransferLimits.Default.DefaultMaxFramePayload + (32 * 1024)));
+            time.Advance(TimeSpan.FromSeconds(10));
+            var survivor = RetentionTestArticles.RetainPrepared(
+                harness.Authority,
+                "<writer-io-survivor@example.test>",
+                body: "survivor-body\r\n");
+            var survivorBytes = survivor.Record.ArtSize;
+            Assert.Equal(transferred.Record.ArtSize + survivorBytes, harness.Authority.RetainedPayloadBytes);
+            Assert.True(transferred.Record.ArtSize > ArticleTransferLimits.Default.DefaultMaxFramePayload);
+
+            harness.Transport.AllowSuccessfulWritesThenBlock(4);
+            var runTask = harness.Session.RunAsync(CancellationToken.None);
+            harness.Transport.EnqueueInbound(EncodeHello());
+            await WaitAsync(() => harness.Transport.WriteCalls >= 2);
+            harness.Transport.EnqueueInbound(EncodeOpen(1, transferred.RequestId, transferred.Record.ArtId));
+            await WaitAsync(() => harness.Session.ActiveStreamCount == 1 && harness.Transport.WriteCalls >= 5);
+
+            time.Advance(TimeSpan.FromSeconds(20));
+            Assert.Equal(transferred.Record.ArtSize, harness.Authority.SweepExpired());
+            Assert.Equal(survivorBytes, harness.Authority.RetainedPayloadBytes);
+            Assert.Equal(1, harness.Authority.RetainedCount);
+
+            harness.Transport.FailWrites(new IOException("forced writer transport failure"));
+            var error = await Assert.ThrowsAsync<IOException>(() => AssertCompletesAsync(runTask));
+            Assert.Equal("forced writer transport failure", error.Message);
+
+            Assert.Equal(0, harness.Session.ActiveStreamCount);
+            Assert.Equal(0, harness.Session.ReservedFoundPayloadBytes);
+            Assert.Equal(survivorBytes, harness.Authority.RetainedPayloadBytes);
+            Assert.Equal(1, harness.Authority.RetainedCount);
+            using (var expiredOpen = harness.Authority.TryOpenTransfer(transferred.RequestId, transferred.Record.ArtId))
+            {
+                Assert.Equal(VatpOpenKind.Rejected, expiredOpen.Kind);
+            }
+
+            using (var survivorOpen = harness.Authority.TryOpenTransfer(survivor.RequestId, survivor.Record.ArtId))
+            {
+                Assert.Equal(VatpOpenKind.Opened, survivorOpen.Kind);
+                Assert.True(survivorOpen.Lease!.HoldsArticle);
+            }
+
+            Assert.Equal(survivorBytes, harness.Authority.RetainedPayloadBytes);
+            AssertSessionDoesNotReferenceArticle(harness.Session, transferred.Record.ArtData);
+
+            await harness.Session.DisposeAsync();
+            await harness.Session.DisposeAsync();
+            Assert.Equal(0, harness.Session.ActiveStreamCount);
+            Assert.Equal(0, harness.Session.ReservedFoundPayloadBytes);
+            Assert.Equal(survivorBytes, harness.Authority.RetainedPayloadBytes);
+            AssertSessionDoesNotReferenceArticle(harness.Session, transferred.Record.ArtData);
+        }
+
+        [Fact]
         public async Task ReaderFailure_StopsWriter()
         {
             await using var harness = await SessionHarness.CreateAsync();
@@ -304,6 +365,76 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await AssertCompletesAsync(runTask);
             Assert.Equal(0, harness.Session.ActiveStreamCount);
             Assert.Equal(0, harness.Session.ReservedFoundPayloadBytes);
+        }
+
+        private static void AssertSessionDoesNotReferenceArticle(VatpListenerSession session, ReadOnlyMemory<byte> artData)
+        {
+            Assert.True(MemoryMarshal.TryGetArray(artData, out var segment));
+            Assert.NotNull(segment.Array);
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var streams = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+                typeof(VatpListenerSession).GetField("_streams", flags)!.GetValue(session));
+            Assert.Empty(streams);
+
+            var outbound = typeof(VatpListenerSession).GetField("_outbound", flags)!.GetValue(session);
+            Assert.NotNull(outbound);
+            var reader = outbound.GetType().GetProperty("Reader", flags)!.GetValue(outbound);
+            Assert.NotNull(reader);
+            object?[] args = [null];
+            var pending = (bool)reader.GetType().GetMethod("TryRead")!.Invoke(reader, args)!;
+            Assert.False(pending);
+
+            var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+            Assert.False(GraphReferencesArray(session, segment.Array!, visited, depth: 0));
+        }
+
+        private static bool GraphReferencesArray(object node, byte[] article, HashSet<object> visited, int depth)
+        {
+            if (node is null || depth > 6 || !visited.Add(node))
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(node, article))
+            {
+                return true;
+            }
+
+            if (node is string or byte[])
+            {
+                return false;
+            }
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            foreach (var field in node.GetType().GetFields(flags))
+            {
+                if (field.FieldType.IsPrimitive || field.FieldType.IsEnum)
+                {
+                    continue;
+                }
+
+                object? value;
+                try
+                {
+                    value = field.GetValue(node);
+                }
+                catch (TargetException)
+                {
+                    continue;
+                }
+
+                if (value is null)
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(value, article) || GraphReferencesArray(value, article, visited, depth + 1))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string BuildBody(int minimumBytes)
@@ -536,9 +667,15 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             public ArticleRetentionAuthority Authority { get; }
 
-            public static Task<SessionHarness> CreateAsync(ILogger? logger = null)
+            public static Task<SessionHarness> CreateAsync(
+                ILogger? logger = null,
+                TimeProvider? time = null,
+                TimeSpan? ttl = null)
             {
-                var authority = ArticleRetentionAuthorityTests.Create(TimeProvider.System, 16 * 1024 * 1024);
+                var authority = ArticleRetentionAuthorityTests.Create(
+                    time ?? TimeProvider.System,
+                    16 * 1024 * 1024,
+                    ttl);
                 var listener = new BackFillerListenerRuntimeOptions(
                     TlsHandshakeTimeout: TimeSpan.FromSeconds(5),
                     IoProgressTimeout: TimeSpan.FromSeconds(5),

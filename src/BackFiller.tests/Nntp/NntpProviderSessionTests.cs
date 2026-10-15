@@ -504,11 +504,11 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         [Fact]
-        public async Task Legitimate_leading_dot_that_is_not_stuffed_is_preserved()
+        public async Task Single_leading_dot_on_a_body_line_is_unstuffed()
         {
             var factory = new ScriptedNntpTransportFactory();
             var server = new ScriptedNntpServer();
-            server.Respond(static _ => "220 follows\r\nFrom: a@b\r\n\r\n.hidden\r\nbody\r\n.\r\n");
+            server.Respond(static _ => "220 follows\r\nFrom: a@b\r\n\r\n.hidden\r\n..kept\r\nbody\r\n.\r\n");
             factory.Enqueue(server);
             var session = CreateSession();
             Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
@@ -516,7 +516,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             using var result = await session.DownloadArticleAsync("<a@b>", CancellationToken.None);
             Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, result.Kind);
             var text = Encoding.ASCII.GetString(result.Article!.Memory.Span);
-            Assert.Contains(".hidden", text, StringComparison.Ordinal);
+            Assert.Equal("From: a@b\r\n\r\nhidden\r\n.kept\r\nbody\r\n", text);
             await session.DisposeAsync();
         }
 

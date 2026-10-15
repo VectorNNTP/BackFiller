@@ -48,7 +48,8 @@ namespace VectorNNTP.BackFiller.Retention
         /// <remarks>
         /// <see cref="OperationCanceledException"/> from the delay is ignored when
         /// <paramref name="stoppingToken"/> is already canceled. An exception from
-        /// <see cref="SweepOnce"/> is logged and rethrown, which faults this hosted service.
+        /// <see cref="SweepOnce"/> is logged and the loop continues, so one failed pass does not
+        /// stop later sweeps.
         /// </remarks>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -88,7 +89,8 @@ namespace VectorNNTP.BackFiller.Retention
         /// <remarks>
         /// Sets <see cref="_sweeping"/> for the call and clears it in a finally block, including when
         /// <see cref="IArticleRetentionAuthority.SweepExpired"/> throws. The caught exception is logged
-        /// with <see cref="ArticleRetentionSweepLogMessages.SweepFailed"/> and then rethrown.
+        /// with <see cref="ArticleRetentionSweepLogMessages.SweepFailed"/> and is not rethrown, so the
+        /// hosted loop can sweep again after the interval.
         /// </remarks>
         private void SweepOnce()
         {
@@ -104,7 +106,6 @@ namespace VectorNNTP.BackFiller.Retention
             catch (Exception ex)
             {
                 ArticleRetentionSweepLogMessages.SweepFailed(_logger, ex);
-                throw;
             }
             finally
             {
@@ -118,7 +119,7 @@ namespace VectorNNTP.BackFiller.Retention
     {
         /// <summary>
         /// Writes event 5503 when <see cref="ArticleRetentionSweepService"/> catches a failure from
-        /// <see cref="IArticleRetentionAuthority.SweepExpired"/>. The service rethrows that failure after this event.
+        /// <see cref="IArticleRetentionAuthority.SweepExpired"/>. The service logs the failure and continues its loop.
         /// </summary>
         /// <param name="logger">Logger that receives the error.</param>
         /// <param name="exception">The sweep failure. Logged by this method; not thrown by this method.</param>

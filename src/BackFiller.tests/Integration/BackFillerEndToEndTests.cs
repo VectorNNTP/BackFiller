@@ -39,24 +39,19 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             var settlement = Assert.Single(channel.Settlements);
             Assert.True(settlement.Acknowledge);
             Assert.Equal(7UL, settlement.DeliveryTag);
-            var destuffed = harness.Handler.LastPayload;
-            Assert.NotNull(destuffed);
-            Assert.Contains("body"u8, destuffed);
-            Assert.Equal(destuffed.Length, harness.Retention.RetainedPayloadBytes);
-
             var articleIdHex = document.RootElement.GetProperty("articleId").GetString();
             Assert.Equal(ArticleId.HexLength, articleIdHex!.Length);
             Assert.Equal("backfiller.test", harness.Handler.LastFqdn);
             Assert.Equal(1190, harness.Handler.LastVatpPort);
-            Assert.Equal(articleIdHex, document.RootElement.GetProperty("articleId").GetString());
             Assert.True(ArticleId.TryParseLowerHex(articleIdHex, out var articleId));
-            Assert.Equal(harness.Handler.LastRecord!.Value.ArtId, articleId);
             using var open = harness.Retention.TryOpenTransfer(
                 Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
                 articleId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(destuffed));
-            Assert.Equal(destuffed.Length, harness.Retention.RetainedPayloadBytes);
+            var retained = open.Lease!.Record.ArtData.ToArray();
+            Assert.Contains("body"u8, retained);
+            Assert.Equal(open.Lease.Record.ArtId, articleId);
+            Assert.Equal(retained.Length, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
 
@@ -128,25 +123,22 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             var channel = new FakeBackFillerRabbitMqChannel(1);
 
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(channel, deliveryTag: 7));
-            var destuffedFirst = harness.Handler.LastPayload;
-            var firstRecord = harness.Handler.LastRecord;
-            Assert.NotNull(destuffedFirst);
-            Assert.NotNull(firstRecord);
-            Assert.Contains("first-body"u8, destuffedFirst);
+            var firstLength = harness.Retention.RetainedPayloadBytes;
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(channel, deliveryTag: 8));
             Assert.Equal(ArticleRetentionKind.AlreadyPresent, harness.Handler.LastRetentionKind);
-            Assert.Equal(destuffedFirst.Length, harness.Retention.RetainedPayloadBytes);
+            Assert.Equal(firstLength, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(1, harness.Retention.RetainedCount);
             Assert.Equal(2, channel.Settlements.Count);
             Assert.All(channel.Settlements, static settlement => Assert.True(settlement.Acknowledge));
 
+            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
             using var open = harness.Retention.TryOpenTransfer(
                 Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId),
-                firstRecord.Value.ArtId);
+                articleId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(destuffedFirst));
+            Assert.Contains("first-body"u8, open.Lease!.Record.ArtData.Span);
             Assert.DoesNotContain("second-body"u8, open.Lease.Record.ArtData.Span);
-            Assert.Equal(destuffedFirst.Length, harness.Retention.RetainedPayloadBytes);
+            Assert.Equal(firstLength, harness.Retention.RetainedPayloadBytes);
         }
 
         [Fact]
@@ -242,10 +234,10 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                     pressure.MessageId, pressure.RequestId, pressure.Record, pressure.SelectedDateHeaderName).Kind);
 
             var requestId = Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId);
-            var articleId = harness.Handler.LastRecord!.Value.ArtId;
+            var articleId = ArticleId.FromMessageId(Encoding.ASCII.GetBytes(ArticleWorkTestDeliveries.CanonicalMessageId));
             using var open = harness.Retention.TryOpenTransfer(requestId, articleId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
-            Assert.True(open.Lease!.Record.ArtData.Span.SequenceEqual(harness.Handler.LastPayload!));
+            Assert.Contains("body"u8, open.Lease!.Record.ArtData.Span);
             Assert.Equal(successBytes + pressure.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
         }
 

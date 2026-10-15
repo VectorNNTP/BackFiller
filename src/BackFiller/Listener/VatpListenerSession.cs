@@ -78,6 +78,9 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>One after the first <see cref="RequestSessionTermination"/>. Makes that transition idempotent.</summary>
         private int _terminating;
 
+        /// <summary>1 when a retention TTL revocation asked the writer to drop session-owned article aliases.</summary>
+        private int _revokedStreamsPending;
+
         /// <summary>Gets the number of active send streams (test observation).</summary>
         /// <remarks>Taken under <see cref="_streamGate"/>. The table drops a stream when that stream becomes terminal.</remarks>
         internal int ActiveStreamCount
@@ -191,6 +194,7 @@ namespace VectorNNTP.BackFiller.Listener
                 Exception? cleanupError = null;
                 try
                 {
+                    ReleaseQueuedOutboundFrames();
                     DisposeAllStreams();
                 }
                 // codeql[cs/catch-of-all-exceptions] Writer cleanup must run, and a cleanup failure must not replace the original writer exception.
@@ -539,7 +543,26 @@ namespace VectorNNTP.BackFiller.Listener
             }
 
             var lease = openResult.Lease;
+            if (lease.IsRevoked || !lease.HoldsArticle)
+            {
+                lease.Dispose();
+                await QueueFailAsync(streamId, VatpErrorCode.OpenRejected, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+
             var record = lease.Record;
+            lease.SetRevocationObserver(() =>
+            {
+                Volatile.Write(ref _revokedStreamsPending, 1);
+                SignalDataSchedule();
+            });
+            if (lease.IsRevoked)
+            {
+                lease.Dispose();
+                await QueueFailAsync(streamId, VatpErrorCode.OpenRejected, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+
             var meta = ArticleCanonicalTransferMeta.FromRecord(in record, lease.SelectedDateHeaderName);
             var artSize = record.ArtSize;
 
@@ -553,11 +576,26 @@ namespace VectorNNTP.BackFiller.Listener
                 new ArticleTransferWindow(_limits.InitialStreamWindowBytes, _limits.MaxStreamCreditBytes),
                 reservedBytes: artSize);
 
+            List<VatpFrameEncoder.EncodedFrame> revokedFails = [];
             lock (_streamGate)
             {
                 // Stream-table capacity was checked before OPEN commit; a concurrent OPEN on the same
                 // connection cannot steal this streamId without racing the single-threaded read loop.
                 _streams[streamId] = stream;
+                if (lease.IsRevoked)
+                {
+                    revokedFails = ReleaseRevokedStreamsLocked();
+                }
+            }
+
+            if (revokedFails.Count > 0)
+            {
+                foreach (var fail in revokedFails)
+                {
+                    await QueueFrameAsync(fail, cancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
             }
 
             VatpListenerLogMessages.OpenAccepted(_logger, streamId, open.RequestId);
@@ -691,6 +729,7 @@ namespace VectorNNTP.BackFiller.Listener
                         HandlePostWrite(item.Frame!.Value);
                     }
 
+                    await DrainRevokedStreamsAsync(cancellationToken).ConfigureAwait(false);
                     while (TryTakeDataFrame(out var dataFrame, out var completedStreamId))
                     {
                         await WriteEncodedFrameAsync(dataFrame, cancellationToken).ConfigureAwait(false);
@@ -704,6 +743,7 @@ namespace VectorNNTP.BackFiller.Listener
                     waitToRead = _outbound.Reader.WaitToReadAsync(cancellationToken);
                 }
 
+                await DrainRevokedStreamsAsync(cancellationToken).ConfigureAwait(false);
                 while (TryTakeDataFrame(out var trailing, out var trailingCompleted))
                 {
                     await WriteEncodedFrameAsync(trailing, cancellationToken).ConfigureAwait(false);
@@ -784,6 +824,12 @@ namespace VectorNNTP.BackFiller.Listener
                         continue;
                     }
 
+                    if (stream.Lease.IsRevoked)
+                    {
+                        encoded = FailRevokedStreamLocked(stream);
+                        return true;
+                    }
+
                     var remaining = stream.ArtSize - stream.SentBytes;
                     if (remaining <= 0)
                     {
@@ -832,6 +878,64 @@ namespace VectorNNTP.BackFiller.Listener
             return false;
         }
 
+        /// <summary>
+        /// Drops every revoked stream and returns one FAIL per stream. Caller does not hold <see cref="_streamGate"/>.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels writing a FAIL frame.</param>
+        /// <returns>A task that completes after those FAIL frames are queued to the transport writer.</returns>
+        private async Task DrainRevokedStreamsAsync(CancellationToken cancellationToken)
+        {
+            if (Volatile.Read(ref _revokedStreamsPending) == 0)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _revokedStreamsPending, 0);
+            List<VatpFrameEncoder.EncodedFrame> fails;
+            lock (_streamGate)
+            {
+                fails = ReleaseRevokedStreamsLocked();
+            }
+
+            foreach (var fail in fails)
+            {
+                await WriteEncodedFrameAsync(fail, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Removes revoked streams and builds their FAIL frames. Caller holds <see cref="_streamGate"/>.
+        /// </summary>
+        /// <returns>FAIL frames for streams removed by this call. Article bytes are cleared before the frame is built.</returns>
+        private List<VatpFrameEncoder.EncodedFrame> ReleaseRevokedStreamsLocked()
+        {
+            var fails = new List<VatpFrameEncoder.EncodedFrame>();
+            foreach (var stream in _streams.Values.ToArray())
+            {
+                if (stream.IsTerminal || !stream.Lease.IsRevoked)
+                {
+                    continue;
+                }
+
+                fails.Add(FailRevokedStreamLocked(stream));
+            }
+
+            return fails;
+        }
+
+        /// <summary>
+        /// Removes <paramref name="stream"/>, clears its article alias, and returns a FAIL frame.
+        /// Caller holds <see cref="_streamGate"/>.
+        /// </summary>
+        /// <param name="stream">Revoked stream still present in the table.</param>
+        /// <returns>A FAIL frame that does not reference the article buffer.</returns>
+        private VatpFrameEncoder.EncodedFrame FailRevokedStreamLocked(SendStream stream)
+        {
+            var streamId = stream.StreamId;
+            RemoveStreamLocked(stream, cancelled: false);
+            return VatpFrameEncoder.EncodeFail(streamId, VatpErrorCode.OpenRejected);
+        }
+
         /// <summary>Completes a fully sent stream. Caller holds <see cref="_streamGate"/>.</summary>
         /// <param name="stream">Stream whose bytes have been handed to the encoder.</param>
         /// <remarks>
@@ -844,6 +948,7 @@ namespace VectorNNTP.BackFiller.Listener
             stream.Phase = SendStreamPhase.Completed;
             VatpListenerLogMessages.TransferCompleted(_logger, stream.StreamId);
             ReleaseFoundBytes(stream.ReservedBytes);
+            stream.ClearPayload();
             stream.Lease.Dispose();
             _streams.Remove(stream.StreamId);
         }
@@ -879,6 +984,7 @@ namespace VectorNNTP.BackFiller.Listener
             _readyRing.Remove(stream.StreamId);
             stream.Phase = cancelled ? SendStreamPhase.Cancelled : SendStreamPhase.Failed;
             ReleaseFoundBytes(stream.ReservedBytes);
+            stream.ClearPayload();
             stream.Lease.Dispose();
         }
 
@@ -899,6 +1005,18 @@ namespace VectorNNTP.BackFiller.Listener
             }
         }
 
+        /// <summary>
+        /// Drops outbound frames the writer will never send. Called only after that writer task has finished,
+        /// so this is the channel's only reader. Encoded DATA slices alias the article buffer; leaving them
+        /// queued would keep that buffer reachable from the session after the transfer has failed.
+        /// </summary>
+        private void ReleaseQueuedOutboundFrames()
+        {
+            while (_outbound.Reader.TryRead(out _))
+            {
+            }
+        }
+
         /// <summary>Releases every stream still in the table. Does not log transfer completion, cancel, or failure.</summary>
         /// <remarks>
         /// The table and ready ring are cleared under <see cref="_streamGate"/> before leases are disposed outside the lock.
@@ -915,6 +1033,7 @@ namespace VectorNNTP.BackFiller.Listener
 
             foreach (var stream in streams)
             {
+                stream.ClearPayload();
                 ReleaseFoundBytes(stream.ReservedBytes);
                 stream.Lease.Dispose();
             }
@@ -1066,7 +1185,7 @@ namespace VectorNNTP.BackFiller.Listener
             /// <param name="streamId">Non-zero VATP stream id from OPEN.</param>
             /// <param name="lease">Retention lease. Disposed when the stream is completed, removed, or the session drops it.</param>
             /// <param name="metaPayload">Encoded META payload queued separately by the OPEN handler.</param>
-            /// <param name="artData">Article bytes sliced into DATA frames. Not copied here.</param>
+            /// <param name="artData">Article bytes sliced into DATA frames. Not copied here. Cleared when the stream ends or the lease is revoked.</param>
             /// <param name="artSize">Article size in bytes. Also the reservation size.</param>
             /// <param name="sendWindow">Initial window. Stored in <see cref="SendWindow"/>.</param>
             /// <param name="reservedBytes">Found-byte reservation to release exactly once. OPEN passes <paramref name="artSize"/>.</param>
@@ -1098,7 +1217,10 @@ namespace VectorNNTP.BackFiller.Listener
             internal byte[] MetaPayload { get; }
 
             /// <summary>Article bytes. DATA frames slice this memory; they do not copy it.</summary>
-            internal ReadOnlyMemory<byte> ArtData { get; }
+            internal ReadOnlyMemory<byte> ArtData { get; private set; }
+
+            /// <summary>Drops this stream's alias of the article buffer. Does not zero the array.</summary>
+            internal void ClearPayload() => ArtData = default;
 
             /// <summary>Total article size. The send cursor stops when <see cref="SentBytes"/> reaches this value.</summary>
             internal int ArtSize { get; }
