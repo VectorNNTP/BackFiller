@@ -124,7 +124,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
 
             framed[written++] = (byte)'.';
             framed[written++] = (byte)'\r';
-            framed[written++] = (byte)'\n';
+            framed[written] = (byte)'\n';
             return framed;
         }
 

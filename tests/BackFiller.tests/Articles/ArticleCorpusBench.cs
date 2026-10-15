@@ -37,6 +37,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 Process(parser, File.ReadAllBytes(files[i]), out _, out _, out _, out _, out _, out _);
             }
 
+            // Labeled measurement boundary. The corpus report records gcCollectBeforeMeasuredPass=true.
+            // Removing it would change the published allocation baseline, so the calls stay in this diagnostic fact.
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
@@ -234,6 +236,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 canonicalBytes = materialized.CanonicalLength;
                 return CorpusOutcome.Valid;
             }
+            // codeql[cs/catch-of-all-exceptions] One article must be recorded as invalid so the corpus pass continues.
             catch (Exception ex)
             {
                 reason = ex.GetType().Name + ": " + ex.Message;

@@ -79,35 +79,39 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// <summary>Counts lines in <paramref name="body"/> whose first content byte is <c>.</c>.</summary>
         /// <param name="body">Logical body, already past the header/body separator.</param>
         /// <returns>The number of stuffing dots a stuffed write of <paramref name="body"/> inserts.</returns>
+        /// <exception cref="OverflowException">The dot count does not fit in an <see cref="int"/>.</exception>
         internal static int CountExtraDots(ReadOnlySpan<byte> body)
         {
-            var extra = 0;
-            var index = 0;
-            while (index < body.Length)
+            checked
             {
-                if (body[index] != (byte)'.')
+                var extra = 0;
+                var index = 0;
+                while (index < body.Length)
                 {
-                    SkipPlainLines(body, ref index);
-                    continue;
-                }
-
-                if (IsDotCrlf(body, index))
-                {
-                    do
+                    if (body[index] != (byte)'.')
                     {
-                        extra++;
-                        index += 3;
+                        SkipPlainLines(body, ref index);
+                        continue;
                     }
-                    while (IsDotCrlf(body, index));
 
-                    continue;
+                    if (IsDotCrlf(body, index))
+                    {
+                        do
+                        {
+                            extra++;
+                            index += 3;
+                        }
+                        while (IsDotCrlf(body, index));
+
+                        continue;
+                    }
+
+                    extra++;
+                    SkipThroughLineFeed(body, ref index);
                 }
 
-                extra++;
-                SkipThroughLineFeed(body, ref index);
+                return extra;
             }
-
-            return extra;
         }
 
         /// <summary>

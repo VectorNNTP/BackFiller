@@ -82,7 +82,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             var buffer = new byte[logical.Length * 2 + 8];
             var written = 0;
             var index = 0;
-            while (index <= logical.Length)
+            while (index < logical.Length)
             {
                 var end = index;
                 while (end < logical.Length && logical[end] != (byte)'\n')
@@ -118,6 +118,18 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             buffer[written++] = (byte)'\r';
             buffer[written++] = (byte)'\n';
             return buffer.AsSpan(0, written).ToArray();
+        }
+
+        [Fact]
+        public void Stuffed_multiline_framing_covers_empty_final_and_dot_leading_lines()
+        {
+            Assert.Equal(".\r\n"u8.ToArray(), FrameStuffedMultiline([]));
+            Assert.Equal("plain.\r\n"u8.ToArray(), FrameStuffedMultiline("plain"u8.ToArray()));
+            Assert.Equal("a\r\n.\r\n"u8.ToArray(), FrameStuffedMultiline("a\r\n"u8.ToArray()));
+            Assert.Equal("a\n.\r\n"u8.ToArray(), FrameStuffedMultiline("a\n"u8.ToArray()));
+            Assert.Equal("..\r\n.\r\n"u8.ToArray(), FrameStuffedMultiline(".\r\n"u8.ToArray()));
+            Assert.Equal("...\r\n"u8.ToArray(), FrameStuffedMultiline("."u8.ToArray()));
+            Assert.Equal("a\r\nb\n..\r\n.\r\n"u8.ToArray(), FrameStuffedMultiline("a\r\nb\n.\r\n"u8.ToArray()));
         }
 
         private static async Task<byte[]> ReadPayloadAsync(byte[] response)

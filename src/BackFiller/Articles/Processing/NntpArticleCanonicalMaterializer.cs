@@ -25,7 +25,10 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// <summary>The header/body separator could not be resolved for Path insertion.</summary>
         InvalidHeaderSeparator = 5,
 
-        /// <summary>Canonical output would exceed the article-size boundary supplied for this operation.</summary>
+        /// <summary>
+        /// The pre-stuff canonical projection, or the stuffed wire image that becomes ArtData, would exceed
+        /// the article-size boundary supplied for this operation.
+        /// </summary>
         ArticleTooLarge = 6,
 
         /// <summary>Canonical Date rewrite would exceed <see cref="ArticleResourceLimits.MaxArticleLineBytes"/>.</summary>
@@ -173,7 +176,11 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// </summary>
         /// <param name="parseResult">Accepted parse result.</param>
         /// <param name="pathMode">Normalize revalidates Path. Traverse prepends the parser's application FQDN.</param>
-        /// <param name="maxArticleBytes">Article-size boundary for this operation.</param>
+        /// <param name="maxArticleBytes">
+        /// Article-size boundary for this operation. It bounds two different lengths:
+        /// the canonical projection after Date and Path edits and before body dot-stuffing,
+        /// and the stuffed wire length that becomes <see cref="NntpArticleCanonicalMaterializeResult.CanonicalLength"/> and VATP ArtSize.
+        /// </param>
         /// <param name="organizationalTrackerHost">Path tracker component captured with <paramref name="maxArticleBytes"/>.</param>
         /// <param name="rentFrom">
         /// When set, the canonical bytes are written into a buffer from this pool.
@@ -185,6 +192,19 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// A result that owns one exact-size canonical buffer on success, or a rented buffer, or a failure classification.
         /// The buffer is the retained wire image: rewritten headers and a body whose lines that begin with <c>.</c> have one extra leading dot.
         /// </returns>
+        /// <remarks>
+        /// <para>
+        /// <c>destinationLength</c> is the pre-stuff projection: source length plus the Date and Path length delta.
+        /// <c>finalLength</c> is that projection plus one byte per body line whose first content byte is <c>.</c>.
+        /// Headers, including a header line that begins with <c>.</c>, are not stuffed. The NNTP terminator <c>.CRLF</c> is not appended.
+        /// </para>
+        /// <para>
+        /// Both lengths are computed with checked arithmetic. Either length above <paramref name="maxArticleBytes"/>,
+        /// or an overflow while adding them, returns <see cref="NntpArticleCanonicalFailureCode.ArticleTooLarge"/>
+        /// before <c>GC.AllocateUninitializedArray</c> or <see cref="ArrayPool{T}.Rent(int)"/>.
+        /// Accepted articles are still written once into that single buffer.
+        /// </para>
+        /// </remarks>
         internal static NntpArticleCanonicalMaterializeResult Materialize(
             in NntpArticleParseResult parseResult,
             ArticlePathMode pathMode,
@@ -286,13 +306,20 @@ namespace VectorNNTP.BackFiller.Articles.Processing
                 return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.WriteMismatch);
             }
 
-            var extraDots = ArticleBodyWireStuffer.CountExtraDots(source[bodyStart..]);
+            int extraDots;
             int finalLength;
             try
             {
+                extraDots = ArticleBodyWireStuffer.CountExtraDots(source[bodyStart..]);
                 finalLength = checked(destinationLength + extraDots);
             }
             catch (OverflowException)
+            {
+                return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.ArticleTooLarge);
+            }
+
+            // finalLength is the stuffed ArtData size. Reject it before the buffer exists.
+            if (finalLength > maxArticleBytes)
             {
                 return NntpArticleCanonicalMaterializeResult.Rejected(NntpArticleCanonicalFailureCode.ArticleTooLarge);
             }
@@ -533,7 +560,10 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// <param name="dateEdit">Selected date value replacement.</param>
         /// <param name="pathEdit">Existing Path value replacement, or <see langword="null"/> when Path will be inserted.</param>
         /// <param name="pathInsert">Inserted Path line, or <see langword="null"/> when an existing Path is rewritten.</param>
-        /// <param name="destinationLength">Projected canonical length, already checked for overflow by the caller.</param>
+        /// <param name="destinationLength">
+        /// Pre-stuff canonical length after Date and Path edits, already checked for overflow by the caller.
+        /// Body stuffing dots are not included; the caller checks that stuffed length separately before allocation.
+        /// </param>
         /// <param name="maxArticleBytes">Article-size boundary for this operation.</param>
         /// <returns>
         /// <see cref="NntpArticleCanonicalFailureCode.ArticleTooLarge"/>,
@@ -593,16 +623,9 @@ namespace VectorNNTP.BackFiller.Articles.Processing
                 }
             }
 
-            if (pathInsert is HeaderInsert resolvedPathInsert)
-            {
-                var insertedPathLineContentLength = resolvedPathInsert.InsertedLength - resolvedPathInsert.LineTerminatorLength;
-                if (insertedPathLineContentLength > ArticleResourceLimits.MaxArticleLineBytes)
-                {
-                    return NntpArticleCanonicalFailureCode.PathInsertionLineTooLong;
-                }
-            }
-
-            return NntpArticleCanonicalFailureCode.None;
+            if (pathInsert is not HeaderInsert resolvedPathInsert) return NntpArticleCanonicalFailureCode.None;
+            var insertedPathLineContentLength = resolvedPathInsert.InsertedLength - resolvedPathInsert.LineTerminatorLength;
+            return insertedPathLineContentLength > ArticleResourceLimits.MaxArticleLineBytes ? NntpArticleCanonicalFailureCode.PathInsertionLineTooLong : NntpArticleCanonicalFailureCode.None;
         }
 
         /// <summary>

@@ -33,16 +33,59 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 (SystemdRuntime.WatchdogUsecVariable, null),
                 (SystemdRuntime.WatchdogPidVariable, null));
 
-            var fake = RecordingSystemdRuntimeFactory.LinuxConsole();
-            Assert.False(fake.IsWatchdogConfigured);
-            Assert.Null(fake.WatchdogTimeout);
+            var runtime = new SystemdRuntime([], NullLogger<SystemdRuntime>.Instance);
+            Assert.False(runtime.IsWatchdogConfigured);
+            Assert.Null(runtime.WatchdogTimeout);
+
+            var parsed = SystemdRuntime.TryParseWatchdogTimeout(
+                null,
+                null,
+                Environment.ProcessId,
+                NullLogger.Instance,
+                out var reason);
+            Assert.Null(parsed);
+            Assert.Equal("WATCHDOG_USEC not set", reason);
+        }
+
+        [Theory]
+        [InlineData("not-a-number")]
+        [InlineData("0")]
+        [InlineData("-1")]
+        public void InvalidWatchdogUsec_IsIgnored_OnLinuxPath(string usec)
+        {
+            using var scope = new EnvironmentVariableScope(
+                (SystemdRuntime.WatchdogUsecVariable, usec),
+                (SystemdRuntime.WatchdogPidVariable, null));
+
+            var runtime = new SystemdRuntime([], NullLogger<SystemdRuntime>.Instance);
+            Assert.False(runtime.IsWatchdogConfigured);
+            Assert.Null(runtime.WatchdogTimeout);
+
+            var logs = new CollectingLogger<SystemdRuntime>();
+            var parsed = SystemdRuntime.TryParseWatchdogTimeout(
+                usec,
+                null,
+                Environment.ProcessId,
+                logs,
+                out var reason);
+            Assert.Null(parsed);
+            Assert.Equal("WATCHDOG_USEC missing or invalid", reason);
+            Assert.Contains(
+                logs.Messages,
+                message => message.Contains("WATCHDOG_USEC is not a positive integer", StringComparison.Ordinal));
         }
 
         [Fact]
-        public void InvalidWatchdogUsec_IsIgnored_OnLinuxPath()
+        public void ValidWatchdogUsec_IsAccepted_ByTheLinuxParser()
         {
-            var fake = RecordingSystemdRuntimeFactory.LinuxUnderSystemd(watchdog: null);
-            Assert.False(fake.IsWatchdogConfigured);
+            var parsed = SystemdRuntime.TryParseWatchdogTimeout(
+                "5000000",
+                null,
+                Environment.ProcessId,
+                NullLogger.Instance,
+                out var reason);
+            Assert.Equal(TimeSpan.FromSeconds(5), parsed);
+            Assert.Equal("WATCHDOG_USEC accepted", reason);
         }
 
         [Fact]

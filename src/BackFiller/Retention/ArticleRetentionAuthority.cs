@@ -960,6 +960,7 @@ namespace VectorNNTP.BackFiller.Retention
                 {
                     lease.Revoke();
                 }
+                // codeql[cs/catch-of-all-exceptions] A lease observer may throw any exception, and one failure must not skip the remaining leases.
                 catch (Exception ex)
                 {
                     ArticleRetentionLogMessages.LeaseRevokeFailed(_logger, ex);

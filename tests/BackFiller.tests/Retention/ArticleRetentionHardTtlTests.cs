@@ -72,7 +72,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(
                 ArticleRetentionKind.AlreadyPresent,
                 authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName).Kind);
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
             var lease = open.Lease!;
             var payloadBytes = prepared.Record.ArtSize;
@@ -104,7 +104,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<lookup@example.test>");
             var sibling = Guid.NewGuid();
             authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
 
             time.Advance(TimeSpan.FromSeconds(10));
@@ -124,7 +124,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var time = new ManualTimeProvider(Start);
             await using var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<pinned@example.test>");
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
             time.Advance(TimeSpan.FromSeconds(10));
             Assert.True(authority.SweepExpired() > 0);
@@ -188,7 +188,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var first = RetentionTestArticles.RetainPrepared(authority, "<acct-a@example.test>", "a\r\n");
             time.Advance(TimeSpan.FromSeconds(10));
             var second = RetentionTestArticles.RetainPrepared(authority, "<acct-b@example.test>", "longer-body-bytes\r\n");
-            var open = authority.TryOpenTransfer(first.RequestId, first.Record.ArtId);
+            using var open = authority.TryOpenTransfer(first.RequestId, first.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, open.Kind);
             Assert.Equal(first.Record.ArtSize + second.Record.ArtSize, authority.RetainedPayloadBytes);
 
@@ -211,7 +211,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var time = new ManualTimeProvider(Start);
             var authority = ArticleRetentionAuthorityTests.Create(time, maxBytes: 1024 * 1024, ttl: TimeSpan.FromSeconds(10));
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<idem@example.test>");
-            var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var open = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
             var observed = 0;
             open.Lease!.SetRevocationObserver(() => observed++);
             time.Advance(TimeSpan.FromSeconds(10));
@@ -246,8 +246,8 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var prepared = RetentionTestArticles.RetainPrepared(authority, "<observers@example.test>");
             var sibling = Guid.NewGuid();
             authority.RetainCanonical(prepared.MessageId, sibling, prepared.Record, prepared.SelectedDateHeaderName);
-            var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
-            var second = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
+            using var first = authority.TryOpenTransfer(prepared.RequestId, prepared.Record.ArtId);
+            using var second = authority.TryOpenTransfer(sibling, prepared.Record.ArtId);
             Assert.Equal(VatpOpenKind.Opened, first.Kind);
             Assert.Equal(VatpOpenKind.Opened, second.Kind);
             first.Lease!.SetRevocationObserver(static () => throw new InvalidOperationException("observer failed"));

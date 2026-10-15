@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VectorNNTP.BackFiller.Configuration;
@@ -100,23 +101,29 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         {
             var notify = new FakeSystemdNotifyBridge();
             var health = new FakeApplicationHealth { IsHealthyForWatchdog = false };
+            var skipped = new WatchdogEventLogger("Skipping systemd watchdog keep-alive");
             using var service = CreateWatchdog(
                 notify,
                 runtime: RecordingSystemdRuntimeFactory.LinuxUnderSystemd(TimeSpan.FromMilliseconds(80)),
                 health: health,
-                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5);
+                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5,
+                logger: skipped);
+            try
+            {
+                await service.StartAsync(CancellationToken.None);
+                Assert.True(service.IsActive);
 
-            await service.StartAsync(CancellationToken.None);
-            Assert.True(service.IsActive);
+                await skipped.Seen.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(0, notify.WatchdogCount);
 
-            await health.UnhealthyRead.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(0, notify.WatchdogCount);
-
-            health.IsHealthyForWatchdog = true;
-            await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.True(notify.WatchdogCount >= 1);
-
-            await service.StopAsync(CancellationToken.None);
+                health.IsHealthyForWatchdog = true;
+                await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(notify.WatchdogCount >= 1);
+            }
+            finally
+            {
+                await service.StopAsync(CancellationToken.None);
+            }
         }
 
         [Fact]
@@ -129,25 +136,32 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
             var notify = new FakeSystemdNotifyBridge();
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var skipped = new WatchdogEventLogger("Skipping systemd watchdog keep-alive");
             notify.AfterWatchdogRecorded = () => release.Task.GetAwaiter().GetResult();
             using var watchdog = CreateWatchdog(
                 notify,
                 runtime: RecordingSystemdRuntimeFactory.LinuxUnderSystemd(TimeSpan.FromMilliseconds(80)),
                 health: observed,
-                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5);
+                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5,
+                logger: skipped);
+            try
+            {
+                await watchdog.StartAsync(CancellationToken.None);
+                await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-            await watchdog.StartAsync(CancellationToken.None);
-            await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
-            health.MarkUnexpectedTermination();
-            Assert.False(health.IsHealthyForWatchdog);
-            var count = notify.WatchdogCount;
-            observed.ExpectNextRead();
-            release.TrySetResult();
-            await observed.ReadReturned.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(count, notify.WatchdogCount);
-
-            await watchdog.StopAsync(CancellationToken.None);
+                health.MarkUnexpectedTermination();
+                Assert.False(health.IsHealthyForWatchdog);
+                var count = notify.WatchdogCount;
+                skipped.Arm();
+                release.TrySetResult();
+                await skipped.Seen.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(count, notify.WatchdogCount);
+            }
+            finally
+            {
+                release.TrySetResult();
+                await watchdog.StopAsync(CancellationToken.None);
+            }
         }
 
         [Fact]
@@ -165,16 +179,23 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 health: health,
                 hostLifetime: lifetime,
                 configure: o => o.Systemd.WatchdogIntervalFraction = 0.5);
+            try
+            {
+                await service.StartAsync(CancellationToken.None);
+                await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-            await service.StartAsync(CancellationToken.None);
-            await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
-            var count = notify.WatchdogCount;
-            lifetime.SignalStopping();
-            release.TrySetResult();
-            await service.StopAsync(CancellationToken.None);
-            Assert.Equal(count, notify.WatchdogCount);
-            Assert.False(service.IsActive);
+                var count = notify.WatchdogCount;
+                lifetime.SignalStopping();
+                release.TrySetResult();
+                await service.StopAsync(CancellationToken.None);
+                Assert.Equal(count, notify.WatchdogCount);
+                Assert.False(service.IsActive);
+            }
+            finally
+            {
+                release.TrySetResult();
+                await service.StopAsync(CancellationToken.None);
+            }
         }
 
         [Theory]
@@ -199,9 +220,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             await service.StartAsync(CancellationToken.None);
             Assert.True(service.IsActive);
 
-            await notify.WatchdogAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await notify.SecondWatchdogAttempt.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.False(lifetime.StopRequested);
             Assert.True(service.IsActive);
+            Assert.True(notify.WatchdogAttemptCount >= 2);
 
             await service.StopAsync(CancellationToken.None);
             Assert.False(service.IsActive);
@@ -212,7 +234,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             ISystemdRuntime runtime,
             IApplicationHealth health,
             IHostApplicationLifetime? hostLifetime = null,
-            Action<BackFillerOptions>? configure = null)
+            Action<BackFillerOptions>? configure = null,
+            ILogger<SystemdWatchdogService>? logger = null)
         {
             var options = BackFillerTestOptions.CreateValid();
             configure?.Invoke(options);
@@ -223,7 +246,49 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 health,
                 hostLifetime ?? new TestHostApplicationLifetime(),
                 Options.Create(options),
-                NullLogger<SystemdWatchdogService>.Instance);
+                logger ?? NullLogger<SystemdWatchdogService>.Instance);
+        }
+
+        private sealed class WatchdogEventLogger : ILogger<SystemdWatchdogService>
+        {
+            private readonly string _fragment;
+            private TaskCompletionSource _seen = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public WatchdogEventLogger(string fragment) => _fragment = fragment;
+
+            public Task Seen => Volatile.Read(ref _seen).Task;
+
+            public void Arm() =>
+                Volatile.Write(ref _seen, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => NullScope.Instance;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                ArgumentNullException.ThrowIfNull(formatter);
+                var message = formatter(state, exception);
+                if (message.Contains(_fragment, StringComparison.Ordinal))
+                {
+                    Volatile.Read(ref _seen).TrySetResult();
+                }
+            }
+
+            private sealed class NullScope : IDisposable
+            {
+                public static NullScope Instance { get; } = new();
+
+                public void Dispose()
+                {
+                }
+            }
         }
     }
 }

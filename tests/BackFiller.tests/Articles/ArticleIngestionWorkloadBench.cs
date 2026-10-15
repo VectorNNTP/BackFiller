@@ -64,6 +64,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             MeasureConcurrent(parser, Article("d750", Repeat(".\r\n"u8, 750 * 1024), includePath: true), "750KiB-dot", 64);
 
             Console.WriteLine("layers: factory=TryCreate only; pipeline=NntpStreamReader consume callback plus TryCreate; retention=authority admission of an already built record. Live provider and RabbitMQ are not measured. Percentiles are order statistics of the printed sample count, not confidence intervals. p99 with fewer than 100 samples is a single tail observation.");
+            // Collection boundary before the repeated runs. Their generation counters are deltas from this heap.
+            // The printed rates stay mebibytes per second; this does not change the corpus-bench baseline.
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
@@ -122,7 +124,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             var elapsed = samples.Sum();
             Array.Sort(samples);
             var ms = elapsed * 1000.0 / Stopwatch.Frequency;
-            var mib = logical.Length * iterations / (1024.0 * 1024.0);
+            var mib = LogicalMebibytes(logical.Length, iterations);
             Console.WriteLine(
                 $"{name} factory logical={logical.Length} wire={wire} n={iterations} articles/s={iterations / (ms / 1000.0):F0} MiB/s={mib / (ms / 1000.0):F1} alloc/article={allocated / iterations} p50us={TicksToUs(samples[PercentileIndex(iterations, 50)]):F0} p95us={TicksToUs(samples[PercentileIndex(iterations, 95)]):F0} p99us={TicksToUs(samples[PercentileIndex(iterations, 99)]):F0} gen0={GC.CollectionCount(0) - g0} gen1={GC.CollectionCount(1) - g1} gen2={GC.CollectionCount(2) - g2} managedPeak={managedPeak}");
         }
@@ -181,7 +183,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             var elapsed = samples.Sum();
             Array.Sort(samples);
             var ms = elapsed * 1000.0 / Stopwatch.Frequency;
-            var mib = logical.Length * iterations / (1024.0 * 1024.0);
+            var mib = LogicalMebibytes(logical.Length, iterations);
             var workingSet = Process.GetCurrentProcess().WorkingSet64;
             Console.WriteLine(
                 $"{name} pipeline logical={logical.Length} n={iterations} articles/s={iterations / (ms / 1000.0):F0} MiB/s={mib / (ms / 1000.0):F1} alloc/article={allocated / iterations} coldAlloc={coldAlloc} offThreadCallbacks={offThread} p50us={TicksToUs(samples[PercentileIndex(iterations, 50)]):F0} p95us={TicksToUs(samples[PercentileIndex(iterations, 95)]):F0} p99us={TicksToUs(samples[PercentileIndex(iterations, 99)]):F0} gen0={GC.CollectionCount(0) - g0} gen1={GC.CollectionCount(1) - g1} gen2={GC.CollectionCount(2) - g2} workingSet={workingSet}");
@@ -520,6 +522,26 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             buffer[written++] = (byte)'\r';
             buffer[written++] = (byte)'\n';
             return buffer.AsSpan(0, written).ToArray();
+        }
+
+        /// <summary>
+        /// Converts a logical length and iteration count to mebibytes.
+        /// Both factors are converted before multiplication so the product is not computed in <see cref="int"/>.
+        /// </summary>
+        /// <param name="logicalLength">Logical article length in bytes.</param>
+        /// <param name="iterations">Number of measured iterations.</param>
+        /// <returns>The product in mebibytes. Bench sizes fit exactly; the full <see cref="int"/> domain is a printed rate, not an exact byte count.</returns>
+        private static double LogicalMebibytes(int logicalLength, int iterations)
+            => (double)logicalLength * iterations / (1024d * 1024d);
+
+        [Fact]
+        public void Logical_mebibytes_multiply_before_the_unit_conversion()
+        {
+            Assert.Equal(3d, LogicalMebibytes(1024 * 1024, 3));
+            Assert.True(unchecked(int.MaxValue * 2) < 0);
+            var widened = LogicalMebibytes(int.MaxValue, 2);
+            Assert.Equal((double)int.MaxValue * 2d / (1024d * 1024d), widened);
+            Assert.True(widened > 0d);
         }
 
         private sealed class CyclingStream(byte[] frame) : Stream

@@ -444,6 +444,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             while ((observed = Volatile.Read(ref _maxNackInFlight)) < inFlight
                 && Interlocked.CompareExchange(ref _maxNackInFlight, inFlight, observed) != observed)
             {
+                // Compare-exchange lost the race. Retry until this count is installed or a higher count is visible.
             }
 
             EnterBrokerOp();
@@ -480,6 +481,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             while ((observed = Volatile.Read(ref _maxBrokerOps)) < now
                 && Interlocked.CompareExchange(ref _maxBrokerOps, now, observed) != observed)
             {
+                // Compare-exchange lost the race. Retry until this count is installed or a higher count is visible.
             }
         }
 

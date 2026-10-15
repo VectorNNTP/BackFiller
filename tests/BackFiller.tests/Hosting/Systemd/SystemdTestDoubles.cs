@@ -40,6 +40,15 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
         public TaskCompletionSource WatchdogAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        private int _watchdogAttempts;
+
+        private readonly TaskCompletionSource _secondWatchdogAttempt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int WatchdogAttemptCount => Volatile.Read(ref _watchdogAttempts);
+
+        /// <summary>Completes when <see cref="NotifyWatchdog"/> is entered for the second time, before that call records or throws.</summary>
+        public Task SecondWatchdogAttempt => _secondWatchdogAttempt.Task;
+
         /// <summary>
         /// Runs on the watchdog thread after a successful notify is recorded and before
         /// <see cref="NotifyWatchdog"/> returns. The loop cannot start another tick until it returns.
@@ -78,7 +87,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
         public void NotifyWatchdog()
         {
+            var attempt = Interlocked.Increment(ref _watchdogAttempts);
             WatchdogAttempted.TrySetResult();
+            if (attempt >= 2)
+            {
+                _secondWatchdogAttempt.TrySetResult();
+            }
+
             Record("WATCHDOG=1", ref _watchdogCount);
             WatchdogSent.TrySetResult();
             AfterWatchdogRecorded?.Invoke();

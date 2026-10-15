@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir is not null)
             {
-                if (File.Exists(Path.Combine(dir.FullName, "BackFiller.slnx")))
+                if (File.Exists(Path.Join(dir.FullName, "BackFiller.slnx")))
                 {
                     return dir.FullName;
                 }

@@ -103,6 +103,7 @@ namespace VectorNNTP.BackFiller.Retention
             {
                 _ = _authority.SweepExpired();
             }
+            // codeql[cs/catch-of-all-exceptions] A sweep failure is logged and must not stop later sweeps.
             catch (Exception ex)
             {
                 ArticleRetentionSweepLogMessages.SweepFailed(_logger, ex);
@@ -114,7 +115,7 @@ namespace VectorNNTP.BackFiller.Retention
         }
     }
 
-    /// <summary>Sweep failure log. Unexpected exceptions are not swallowed.</summary>
+    /// <summary>Sweep failure log. A failed pass is logged and the sweep loop continues.</summary>
     internal static partial class ArticleRetentionSweepLogMessages
     {
         /// <summary>

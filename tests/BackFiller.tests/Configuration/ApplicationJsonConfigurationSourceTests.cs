@@ -115,7 +115,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             try
             {
                 File.WriteAllText(
-                    Path.Combine(directory.FullName, ApplicationJsonConfiguration.PrimaryJsonFileName()),
+                    Path.Join(directory.FullName, ApplicationJsonConfiguration.PrimaryJsonFileName()),
                     "{");
                 var builder = new ConfigurationBuilder();
                 builder.SetBasePath(directory.FullName);
@@ -169,14 +169,6 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
         }
 
         private static IEnumerable<FileConfigurationSource> FileSources(IConfigurationBuilder configuration)
-        {
-            foreach (var source in configuration.Sources)
-            {
-                if (source is FileConfigurationSource file)
-                {
-                    yield return file;
-                }
-            }
-        }
+            => configuration.Sources.OfType<FileConfigurationSource>();
     }
 }

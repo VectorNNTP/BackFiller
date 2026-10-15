@@ -1022,6 +1022,7 @@ namespace VectorNNTP.BackFiller.Listener
         {
             while (_outbound.Reader.TryRead(out _))
             {
+                // TryRead already removed the frame. Discard it so the article buffer is not kept queued.
             }
         }
 
