@@ -194,45 +194,49 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             await using var client = await ConnectAsync(context);
             using var floodCts = new CancellationTokenSource();
-            var flood = Task.Run(async () =>
-            {
-                var command = "NOPE\r\n"u8.ToArray();
-                while (!floodCts.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await client.Stream.WriteAsync(command, floodCts.Token);
-                    }
-                    catch (OperationCanceledException) when (floodCts.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    catch (IOException)
-                    {
-                        return;
-                    }
-                }
-            });
+            var flood = StartRejectedCommandFlood(client, floodCts);
 
-            await ArticleWorkTestDeliveries.WaitUntilAsync(
-                () => context.Service.ActiveConnections == 0,
-                TimeSpan.FromSeconds(15));
-            await floodCts.CancelAsync();
             try
             {
-                await flood;
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => context.Service.ActiveConnections == 0,
+                    TimeSpan.FromSeconds(15));
             }
-            catch (IOException ex)
+            finally
             {
-                output.WriteLine(
-                    "Ignoring expected IOException while awaiting the flood task during cancellation or shutdown: {0}",
-                    ex.Message);
+                await ObserveFloodAsync(floodCts, flood);
             }
 
+            Assert.True(flood.IsCompleted);
             Assert.Equal(0, context.Service.ActiveConnections);
             await using var second = await ConnectAsync(context);
             await ReadGreetingAsync(second.Stream);
             Assert.Equal(1, context.Service.ActiveConnections);
+        }
+
+        [Fact]
+        public async Task Writer_wait_timeout_observes_the_flood_task_before_disposal()
+        {
+            await using var context = await ListenerContext.StartAsync();
+            await using var client = await ConnectAsync(context);
+            using var floodCts = new CancellationTokenSource();
+            var flood = StartRejectedCommandFlood(client, floodCts);
+            OperationCanceledException? timedOut = null;
+            try
+            {
+                await ArticleWorkTestDeliveries.WaitUntilAsync(static () => false, TimeSpan.FromMilliseconds(40));
+            }
+            catch (OperationCanceledException ex)
+            {
+                timedOut = ex;
+            }
+            finally
+            {
+                await ObserveFloodAsync(floodCts, flood);
+            }
+
+            Assert.NotNull(timedOut);
+            Assert.True(flood.IsCompleted);
         }
 
         [Fact]
@@ -437,6 +441,48 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             var greeting = new byte[expected.Length];
             await stream.ReadExactlyAsync(greeting);
             Assert.Equal(expected, greeting);
+        }
+
+        private static Task StartRejectedCommandFlood(TlsClient client, CancellationTokenSource floodCts) =>
+            Task.Run(async () =>
+            {
+                var command = "NOPE\r\n"u8.ToArray();
+                while (!floodCts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await client.Stream.WriteAsync(command, floodCts.Token);
+                    }
+                    catch (OperationCanceledException) when (floodCts.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        return;
+                    }
+                }
+            });
+
+        private async Task ObserveFloodAsync(CancellationTokenSource floodCts, Task flood)
+        {
+            try
+            {
+                await floodCts.CancelAsync();
+            }
+            finally
+            {
+                try
+                {
+                    await flood;
+                }
+                catch (IOException ex)
+                {
+                    output.WriteLine(
+                        "Ignoring expected IOException while awaiting the flood task during cancellation or shutdown: {0}",
+                        ex.Message);
+                }
+            }
         }
 
         private static Task<TlsClient> ConnectAsync(
