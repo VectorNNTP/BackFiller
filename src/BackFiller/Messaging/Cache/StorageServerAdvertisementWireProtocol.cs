@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// </summary>
     /// <remarks>
     /// Property names are <c>version</c>, <c>serverId</c>, <c>fqdn</c>, <c>totalBytes</c>,
-    /// <c>usedBytes</c>, <c>availableBytes</c>, and <c>timestamp</c> (UTC ISO-8601 round-trip).
+    /// <c>usedBytes</c>, <c>availableBytes</c>, and <c>timestamp</c> (ISO-8601 round-trip format <c>O</c>, stored as UTC).
     /// Optional <c>listenerPort</c> (<c>1</c>–<c>65535</c>) is written when present. Unknown
     /// properties are ignored. A missing <c>listenerPort</c> parses as no placement port.
     /// AMQP <c>Expiration</c>, <c>AppId</c>, and <c>MessageId</c> are never JSON fields.
@@ -266,12 +266,15 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             return true;
         }
 
-        /// <summary>Reads <paramref name="name"/> as a round-trip ISO-8601 timestamp and converts it to UTC.</summary>
+        /// <summary>Reads <paramref name="name"/> as an exact round-trip (<c>O</c>) ISO-8601 timestamp and converts it to UTC.</summary>
         /// <param name="root">Advertisement object.</param>
         /// <param name="name">Required property name, normally <c>timestamp</c>.</param>
         /// <param name="value">UTC timestamp on success; otherwise the default.</param>
         /// <param name="reason">Empty on success; otherwise a missing, non-string, or unparseable timestamp error.</param>
-        /// <returns><see langword="true"/> when invariant round-trip parsing succeeds.</returns>
+        /// <returns>
+        /// <see langword="true"/> when <see cref="DateTimeOffset.TryParseExact(string?, string?, IFormatProvider?, DateTimeStyles, out DateTimeOffset)"/>
+        /// accepts <paramref name="name"/> with format <c>O</c>, <see cref="CultureInfo.InvariantCulture"/>, and <see cref="DateTimeStyles.RoundtripKind"/>.
+        /// </returns>
         private static bool TryReadTimestamp(
             JsonElement root,
             string name,
@@ -294,12 +297,14 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
 
             var text = property.GetString();
             if (string.IsNullOrWhiteSpace(text)
-                || !DateTimeOffset.TryParse(
+                || !DateTimeOffset.TryParseExact(
                     text,
+                    "O",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind,
                     out value))
             {
+                value = default;
                 reason = $"Advertisement '{name}' was not a valid ISO-8601 timestamp.";
                 return false;
             }
