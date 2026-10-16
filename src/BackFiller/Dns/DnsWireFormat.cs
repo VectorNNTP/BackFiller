@@ -35,6 +35,12 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Validates a DNS name and computes wire QNAME length in a single label split.
         /// </summary>
+        /// <param name="name">Presentation-form dotted name without a trailing root dot.</param>
+        /// <param name="labelRanges">Buffer of label ranges. The last slot must remain unused for the overflow check.</param>
+        /// <param name="labelCount">Number of labels written to <paramref name="labelRanges"/>.</param>
+        /// <param name="qnameLength">Wire QNAME length including the trailing root label byte.</param>
+        /// <param name="error">Failure text when validation fails; otherwise null.</param>
+        /// <returns><see langword="false"/> when the name is empty, has too many labels, or violates RFC 1035 limits.</returns>
         internal static bool TryGetWireNameLayout(
             ReadOnlySpan<char> name,
             Span<Range> labelRanges,
@@ -94,6 +100,9 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Validates a DNS name for wire-format encoding.
         /// </summary>
+        /// <param name="name">Presentation-form dotted name.</param>
+        /// <param name="error">Failure text when validation fails; otherwise null.</param>
+        /// <returns><see langword="true"/> when the name can be encoded as a QNAME.</returns>
         internal static bool TryValidateDnsName(string name, out string? error)
             => TryValidateDnsName(name.AsSpan(), out error);
 
@@ -109,6 +118,8 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Computes the wire-format QNAME length for a dotted DNS name, including the trailing root label.
         /// </summary>
+        /// <param name="name">Presentation-form dotted name.</param>
+        /// <returns>Total wire bytes required for the QNAME.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is invalid.</exception>
         internal static int ComputeWireNameLength(string name)
         {
@@ -125,6 +136,9 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Encodes a dotted DNS name into QNAME wire format.
         /// </summary>
+        /// <param name="name">Presentation-form dotted name.</param>
+        /// <param name="destination">Buffer that must hold at least the computed QNAME length.</param>
+        /// <returns>Number of bytes written to <paramref name="destination"/>.</returns>
         /// <exception cref="ArgumentException">Thrown when the name is invalid or <paramref name="destination"/> is too short.</exception>
         internal static int EncodeDnsName(string name, Span<byte> destination)
         {
@@ -142,6 +156,11 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Encodes a pre-split dotted DNS name into QNAME wire format without re-splitting labels.
         /// </summary>
+        /// <param name="name">Full presentation-form name.</param>
+        /// <param name="labelRanges">Label ranges produced by <see cref="TryGetWireNameLayout"/>.</param>
+        /// <param name="labelCount">Number of labels in <paramref name="labelRanges"/>.</param>
+        /// <param name="destination">Buffer that must hold at least the computed QNAME length.</param>
+        /// <returns>Number of bytes written to <paramref name="destination"/>.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="destination"/> is too short.</exception>
         internal static int EncodeDnsName(
             ReadOnlySpan<char> name,

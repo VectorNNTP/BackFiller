@@ -59,7 +59,7 @@ namespace VectorNNTP.BackFiller.Acme
 
                     var material = new CertificateMaterial(
                         PfxBytes: pfxBytes.ToArray(),
-                        Domains: domains.OrderBy(static d => d, StringComparer.Ordinal).ToArray(),
+                        Domains: [.. domains.OrderBy(static d => d, StringComparer.Ordinal)],
                         NotBefore: leaf.NotBefore.ToUniversalTime(),
                         NotAfter: leaf.NotAfter.ToUniversalTime());
 

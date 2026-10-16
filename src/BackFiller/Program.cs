@@ -4,8 +4,23 @@ using VectorNNTP.BackFiller.Hosting;
 using VectorNNTP.BackFiller.Logging;
 using VectorNNTP.BackFiller.Configuration;
 
+/// <summary>Process entry point. Builds the Generic Host from the entry-assembly directory and runs it.</summary>
 internal class Program
 {
+    /// <summary>
+    /// Starts the host, or runs startup smoke when that environment variable is set, and returns the process exit code.
+    /// </summary>
+    /// <param name="args">
+    /// Command-line arguments. Logging flags are read here; the same array is passed to the Generic Host builder.
+    /// </param>
+    /// <returns>
+    /// Zero when the host stops cleanly or startup smoke completes. <see cref="BackFillerProcessBoundary.FailureExitCode"/>
+    /// when the host throws, or when logger shutdown fails after a clean run.
+    /// </returns>
+    /// <remarks>
+    /// Content root is <see cref="AppContext.BaseDirectory"/>. A host exception is logged and does not escape.
+    /// Startup smoke builds and disposes the host without calling <c>RunAsync</c>.
+    /// </remarks>
     private static async Task<int> Main(string[] args)
     {
         var loggingCommandLine = BackFillerLoggingCommandLine.FromArguments(args);

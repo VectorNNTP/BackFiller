@@ -4,8 +4,16 @@ using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
+    /// <summary>
+    /// BackFiller ACME on-disk layout matches shared FQDN path conventions.
+    /// </summary>
+
     public sealed class BackFillerAcmeFilesystemParityTests
     {
+        /// <summary>
+        /// Contract: BackFiller certificate identity uses common fqdn paths.
+        /// </summary>
+
         [Fact]
         public void BackFiller_certificate_identity_uses_common_fqdn_paths()
         {
@@ -45,6 +53,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 AcmePaths.CurrentGenerationPointerPath(certs, fqdn),
                 StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: BackFiller uses shared acme account environment variable.
+        /// </summary>
 
         [Fact]
         public void BackFiller_uses_shared_acme_account_environment_variable()

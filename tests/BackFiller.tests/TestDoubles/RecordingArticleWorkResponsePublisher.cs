@@ -7,6 +7,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
     /// </summary>
     internal sealed class RecordingArticleWorkResponsePublisher : IArticleWorkResponsePublisher
     {
+        /// <summary>Publish intents in admission order. Mutations are locked with <see cref="Published"/>.</summary>
         private readonly List<ArticleWorkResponseIntent> _published = [];
 
         /// <summary>Gets recorded publish intents in admission order.</summary>

@@ -9,7 +9,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// <summary>HMAC key bytes. Returned by <see cref="GetHmacKey"/> without copying.</summary>
         private readonly byte[] _hmacKey;
 
-        /// <summary>Initializes a new instance with a base64url-encoded HMAC key.</summary>
+        /// <summary>Stores EAB credentials decoded from a base64url HMAC key.</summary>
         /// <param name="keyId">CA key identifier stored as <see cref="KeyId"/>.</param>
         /// <param name="hmacKey">Base64url HMAC key. Invalid base64url throws <see cref="ArgumentException"/>.</param>
         private ExternalAccountBinding(string keyId, string hmacKey)
@@ -21,7 +21,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             _hmacKey = DecodeKey(hmacKey);
         }
 
-        /// <summary>Initializes a new instance with a raw HMAC key.</summary>
+        /// <summary>Stores EAB credentials from raw HMAC key bytes (a defensive copy is kept).</summary>
         /// <param name="keyId">CA key identifier stored as <see cref="KeyId"/>.</param>
         /// <param name="hmacKey">Raw HMAC key. A copy is stored.</param>
         private ExternalAccountBinding(string keyId, byte[] hmacKey)
@@ -33,7 +33,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             _hmacKey = (byte[])hmacKey.Clone();
         }
 
-        /// <summary>Gets the key identifier issued by the certificate authority.</summary>
+        /// <summary>External account key identifier sent as JWS <c>externalAccountBinding.kid</c>.</summary>
         internal string KeyId { get; }
 
         /// <summary>Returns the HMAC key bytes for JWS signing.</summary>

@@ -11,8 +11,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
+    /// <summary>
+    /// Acme certificate application service lifecycle with test doubles.
+    /// </summary>
+
     public sealed class AcmeCertificateApplicationServiceTests
     {
+        /// <summary>
+        /// Contract: Adapter implements application service and forwards identity.
+        /// </summary>
+
         [Fact]
         public void Adapter_implements_application_service_and_forwards_identity()
         {
@@ -21,6 +29,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Equal("AcmeCertificate", harness.Adapter.Name);
             Assert.Null(harness.Adapter.Execution);
         }
+
+        /// <summary>
+        /// Contract: StartAsync without readiness fails fast and does not journal.
+        /// </summary>
 
         [Fact]
         public async Task StartAsync_without_readiness_fails_fast_and_does_not_journal()
@@ -34,6 +46,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.False(harness.Readiness.IsReady);
             Assert.Null(harness.Adapter.Execution);
         }
+
+        /// <summary>
+        /// Contract: StartAsync with existing certificate journals ready and keeps renewal execution.
+        /// </summary>
 
         [Fact]
         public async Task StartAsync_with_existing_certificate_journals_ready_and_keeps_renewal_execution()
@@ -58,6 +74,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.True(harness.Adapter.Execution?.IsCompleted);
         }
 
+        /// <summary>
+        /// Contract: StopAsync and DisposeAsync delegate to the common service.
+        /// </summary>
+
         [Fact]
         public async Task StopAsync_and_DisposeAsync_delegate_to_the_common_service()
         {
@@ -71,6 +91,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
             await harness.Adapter.DisposeAsync();
         }
+
+        /// <summary>
+        /// Contract: Certificate manager evaluate throws after dispose.
+        /// </summary>
 
         [Fact]
         public void Certificate_manager_evaluate_throws_after_dispose()
@@ -98,6 +122,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Throws<ObjectDisposedException>(() => manager.EvaluateExisting());
         }
 
+        /// <summary>
+        /// Builds an adapter harness with TLS bind port zero, a no-op publisher, and a factory that must not run issuance.
+        /// </summary>
+
         private static AdapterHarness CreateTlsDisabledHarness()
         {
             var options = BackFillerTestOptions.CreateValidAcme();
@@ -116,6 +144,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 readiness,
                 journal);
         }
+
+        /// <summary>
+        /// Builds an adapter harness with a long-lived self-signed certificate on disk, an injected manager, and a publisher that marks readiness.
+        /// </summary>
 
         private static AdapterHarness CreateReusableCertificateHarness()
         {
@@ -156,6 +188,12 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             return new AdapterHarness(adapter, inner, readiness, journal, dir);
         }
 
+        /// <summary>
+        /// Creates exportable PFX material with ordered lowercase SAN names and the given validity window.
+        /// </summary>
+        /// <param name="dnsNames">DNS identifiers; the first name becomes the certificate subject CN.</param>
+        /// <param name="password">PFX encryption password.</param>
+        /// <param name="notAfter">Certificate not-after instant (UTC).</param>
         private static CertificateMaterial CreateMaterial(
             IReadOnlyList<string> dnsNames,
             string password,
@@ -184,10 +222,18 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 notAfter);
         }
 
+        /// <summary>Builds AcmeCertificateApplicationService with injectable issuer/publisher fakes for adapter tests.</summary>
         private sealed class AdapterHarness : IDisposable
         {
+            /// <summary>Optional temp ACME directory disposed with the harness.</summary>
             private readonly TempAcmeDir? _dir;
 
+            /// <summary>Retains adapter test services and optional filesystem state.</summary>
+            /// <param name="adapter">Application service under test.</param>
+            /// <param name="inner">Inner certificate service.</param>
+            /// <param name="readiness">Readiness gate observed by tests.</param>
+            /// <param name="journal">Startup journal for stage assertions.</param>
+            /// <param name="dir">Optional temp directory cleaned up on dispose.</param>
             public AdapterHarness(
                 AcmeCertificateApplicationService adapter,
                 AcmeCertificateService inner,
@@ -202,24 +248,54 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 _dir = dir;
             }
 
+            /// <summary>
+            /// Application-service adapter under test.
+            /// </summary>
+
             public AcmeCertificateApplicationService Adapter { get; }
+
+            /// <summary>
+            /// Inner certificate service wired into the adapter.
+            /// </summary>
 
             public AcmeCertificateService Inner { get; }
 
+            /// <summary>
+            /// Shared readiness gate observed by lifecycle assertions.
+            /// </summary>
+
             public IAcmeCertificateReadiness Readiness { get; }
 
+            /// <summary>
+            /// Startup journal recording stages emitted during start.
+            /// </summary>
+
             public IBackFillerStartupJournal Journal { get; }
+
+            /// <summary>
+            /// Disposes the optional temp ACME directory when present.
+            /// </summary>
 
             public void Dispose() => _dir?.Dispose();
         }
 
+        /// <summary>Creates and deletes a temporary ACME state directory for filesystem-sensitive tests.</summary>
         private sealed class TempAcmeDir : IDisposable
         {
+            /// <summary>
+            /// Unique directory path under the process temp folder.
+            /// </summary>
+
             public string Path { get; } = System.IO.Path.Join(
                 System.IO.Path.GetTempPath(),
                 "vectornntp-bf-acme-" + Guid.NewGuid().ToString("N"));
 
+            /// <summary>Creates the directory at <see cref="Path"/>.</summary>
             public TempAcmeDir() => Directory.CreateDirectory(Path);
+
+            /// <summary>
+            /// Recursively deletes the temp directory; IO failures are ignored.
+            /// </summary>
 
             public void Dispose()
             {
@@ -237,8 +313,11 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             }
         }
 
+        /// <summary>AcmeComponentFactory placeholder that must not be invoked in the exercised code paths.</summary>
         private sealed class UnusedAcmeFactory : AcmeComponentFactory
         {
+            /// <summary>Base factory that must not be invoked on exercised paths.</summary>
+            /// <param name="options">Bound ACME options for the unused base.</param>
             public UnusedAcmeFactory(AcmeCloudflareOptions options)
                 : base(
                     Options.Create(options),
@@ -249,10 +328,15 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             }
         }
 
+        /// <summary>AcmeComponentFactory that returns test-controlled issuer and publisher instances.</summary>
         private sealed class InjectedManagerFactory : AcmeComponentFactory
         {
+            /// <summary>Manager returned from <see cref="GetOrCreateManager"/>.</summary>
             private readonly CertificateManager _manager;
 
+            /// <summary>Factory that always supplies the injected certificate manager.</summary>
+            /// <param name="manager">Prebuilt manager for issuer tests.</param>
+            /// <param name="options">ACME options passed to the base factory.</param>
             public InjectedManagerFactory(CertificateManager manager, IOptions<AcmeCloudflareOptions> options)
                 : base(
                     options,
@@ -263,11 +347,20 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 _manager = manager;
             }
 
+            /// <summary>Returns the injected manager without creating production components.</summary>
             internal override CertificateManager? GetOrCreateManager() => _manager;
         }
 
+        /// <summary>Cloudflare client double that throws if any API method is called unexpectedly.</summary>
         private sealed class UnusedCloudflareClient : ICloudflareDnsClient
         {
+            /// <summary>
+            /// Always fails because Cloudflare must not be contacted in adapter harness tests.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="fqdn">Record name filter (unused).</param>
+            /// <param name="type">DNS record type (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListRecordsAsync(
                 string zoneId,
                 string fqdn,
@@ -275,18 +368,37 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Cloudflare should not be used in this test.");
 
+            /// <summary>
+            /// Always fails because Cloudflare must not be contacted in adapter harness tests.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="fqdn">Record name filter (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListAllRecordsForNameAsync(
                 string zoneId,
                 string fqdn,
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Cloudflare should not be used in this test.");
 
+            /// <summary>
+            /// Always fails because Cloudflare must not be contacted in adapter harness tests.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="request">Record payload (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<CloudflareDnsRecord> CreateRecordAsync(
                 string zoneId,
                 CloudflareDnsRecordWriteRequest request,
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Cloudflare should not be used in this test.");
 
+            /// <summary>
+            /// Always fails because Cloudflare must not be contacted in adapter harness tests.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="recordId">Existing record identifier (unused).</param>
+            /// <param name="request">Updated record payload (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<CloudflareDnsRecord> UpdateRecordAsync(
                 string zoneId,
                 string recordId,
@@ -294,37 +406,69 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Cloudflare should not be used in this test.");
 
+            /// <summary>
+            /// Always fails because Cloudflare must not be contacted in adapter harness tests.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="recordId">Record to delete (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task DeleteRecordAsync(string zoneId, string recordId, CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Cloudflare should not be used in this test.");
         }
 
+        /// <summary>HttpClientFactory that throws if CreateClient is invoked.</summary>
         private sealed class UnusedHttpClientFactory : IHttpClientFactory
         {
+            /// <summary>
+            /// Satisfies the base factory constructor; returns a disposable client that must not perform ACME HTTP in these tests.
+            /// </summary>
+            /// <param name="name">Named client key (ignored).</param>
             public HttpClient CreateClient(string name) => new();
         }
 
+        /// <summary>ICertificateIssuer that always throws to simulate issuance failure.</summary>
         private sealed class ThrowingIssuer : ICertificateIssuer
         {
+            /// <summary>
+            /// Always fails to ensure issuance does not run when a reusable certificate is already present.
+            /// </summary>
+            /// <param name="domains">Requested DNS names (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<CertificateMaterial> IssueAsync(IReadOnlyList<string> domains, CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Issuance should not run when a usable certificate exists.");
         }
 
+        /// <summary>Publisher double that completes without writing certificate material.</summary>
         private sealed class NoOpPublisher : IAcmeCertificatePublisher
         {
+            /// <summary>
+            /// Ignores PFX bytes; does not write certificate files or change readiness.
+            /// </summary>
+            /// <param name="pfxBytes">Exported certificate bytes (ignored).</param>
+            /// <param name="password">PFX password (ignored).</param>
             public void PublishFromPfx(ReadOnlySpan<byte> pfxBytes, string password)
             {
             }
         }
 
+        /// <summary>Publisher double that records whether Publish was invoked.</summary>
         private sealed class MarkingPublisher : IAcmeCertificatePublisher
         {
+            /// <summary>Readiness marked when publish is invoked.</summary>
             private readonly IAcmeCertificateReadiness _readiness;
 
+            /// <summary>Records readiness on publish without writing certificate files.</summary>
+            /// <param name="readiness">Gate updated in <see cref="PublishFromPfx"/>.</param>
             public MarkingPublisher(IAcmeCertificateReadiness readiness)
             {
                 _readiness = readiness;
             }
 
+            /// <summary>
+            /// Marks the injected readiness gate without persisting PFX material to disk.
+            /// </summary>
+            /// <param name="pfxBytes">Exported certificate bytes (ignored).</param>
+            /// <param name="password">PFX password (ignored).</param>
             public void PublishFromPfx(ReadOnlySpan<byte> pfxBytes, string password)
             {
                 _readiness.MarkReady();

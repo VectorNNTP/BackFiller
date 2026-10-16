@@ -103,7 +103,9 @@ namespace VectorNNTP.BackFiller.Listener
         {
         }
 
-        /// <summary>Initializes the Listener service.</summary>
+        /// <summary>
+        /// Creates the production listener with injectable ACME readiness and startup journal dependencies.
+        /// </summary>
         /// <param name="runtime">Runtime snapshot. Must not be null.</param>
         /// <param name="certificates">Certificate provider. Must not be null.</param>
         /// <param name="retention">Retention authority handed to NNTP sessions. Must not be null.</param>

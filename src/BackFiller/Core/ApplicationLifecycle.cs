@@ -96,11 +96,12 @@ namespace VectorNNTP.BackFiller.Core
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ApplicationLifecycle"/> class.
+        /// Wires the service manager, lifecycle options, and logger, and subscribes to unexpected service termination.
         /// </summary>
-        /// <param name="serviceManager">Service manager used for ordered start/stop.</param>
-        /// <param name="options">Lifecycle options.</param>
-        /// <param name="logger">Logger.</param>
+        /// <param name="serviceManager">Ordered start, stop, and rollback coordinator.</param>
+        /// <param name="options">Display name, optional startup timeout, and graceful-shutdown budget.</param>
+        /// <param name="logger">Receives lifecycle events from <see cref="LifecycleLogMessages"/>.</param>
+        /// <exception cref="ArgumentNullException">Any argument is null.</exception>
         internal ApplicationLifecycle(
             ApplicationServiceManager serviceManager,
             IApplicationLifecycleOptions options,
@@ -585,11 +586,9 @@ namespace VectorNNTP.BackFiller.Core
     /// </summary>
     internal sealed class ApplicationStateChangedEventArgs : EventArgs
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ApplicationStateChangedEventArgs"/> class.
-        /// </summary>
-        /// <param name="fromState">State before the committed transition.</param>
-        /// <param name="toState">State after the committed transition.</param>
+        /// <summary>Captures the committed transition endpoints for <see cref="ApplicationLifecycle.StateChanged"/>.</summary>
+        /// <param name="fromState">State before the transition.</param>
+        /// <param name="toState">State after the transition.</param>
         internal ApplicationStateChangedEventArgs(ApplicationState fromState, ApplicationState toState)
         {
             FromState = fromState;

@@ -4,9 +4,18 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// DATE keep-alive on idle NNTP provider sessions: timing, health, failure recovery, and shutdown.
+    /// </summary>
+
     public sealed class NntpDateKeepAliveTests
     {
+        /// <summary>
+        /// KeepAliveSeconds from provider configuration flows to transport connect and session.
+        /// </summary>
+
         [Fact]
+
         public async Task Provider_and_session_construction_receive_the_mysql_keepalive()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -19,7 +28,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal((byte)30, lease.Session.KeepAliveSeconds);
         }
 
+        /// <summary>
+        /// DATE is not sent before the idle interval elapses.
+        /// </summary>
+
         [Fact]
+
         public async Task Date_is_issued_after_the_configured_idle_interval_and_not_before()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -44,7 +58,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Contains(server.Commands, static command => command.Equals("DATE", StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Successful DATE leaves the session reusable for ARTICLE without extra connects.
+        /// </summary>
+
         [Fact]
+
         public async Task Healthy_date_keeps_the_idle_session_reusable()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -70,7 +89,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Single(factory.ConnectAttempts);
         }
 
+        /// <summary>
+        /// Transport write failure during DATE retires the session and allows replacement.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_date_write_failure_still_retires_the_session()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -95,7 +119,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(replacement.Session.IsReusable);
         }
 
+        /// <summary>
+        /// Non-success DATE response retires the session and replenishes the pool.
+        /// </summary>
+
         [Fact]
+
         public async Task Date_protocol_failure_retires_the_session()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -120,7 +149,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(replacement.Session.IsReusable);
         }
 
+        /// <summary>
+        /// DATE command timeout marks the session not reusable.
+        /// </summary>
+
         [Fact]
+
         public async Task Date_timeout_marks_the_session_unhealthy()
         {
             var dateStarted = NewSource();
@@ -147,7 +181,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Peer EOF during DATE retires the session and triggers reconnect.
+        /// </summary>
+
         [Fact]
+
         public async Task Date_eof_retires_the_session()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -173,7 +212,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(2, factory.ConnectAttempts.Count);
         }
 
+        /// <summary>
+        /// Active ARTICLE suppresses concurrent DATE on the same session.
+        /// </summary>
+
         [Fact]
+
         public async Task Article_on_a_leased_session_does_not_run_date()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -204,7 +248,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.DoesNotContain(server.Commands, static command => command.Equals("DATE", StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Pool disposal cancels pending DATE without completing it and clears sessions.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_cancels_a_pending_keepalive_without_leaking_the_session()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -225,7 +274,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(0, pool.ActiveLeaseCount);
         }
 
+        /// <summary>
+        /// Disposing the pool interrupts an in-flight DATE and clears live sessions.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_interrupts_an_in_flight_date()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -252,7 +306,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(0, pool.ActiveLeaseCount);
         }
 
+        /// <summary>
+        /// Configuration snapshot updates KeepAliveSeconds for new pools while existing leases keep prior values until released.
+        /// </summary>
+
         [Fact]
+
         public async Task Replacement_applies_new_keepalive_to_new_sessions_and_leaves_leased_sessions_intact()
         {
             var catalog = new ProviderConfigurationCatalog();
@@ -303,7 +362,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal((byte)10, after.Provider.KeepAliveSeconds);
         }
 
+        /// <summary>
+        /// KeepAliveSeconds zero disables DATE commands entirely.
+        /// </summary>
+
         [Fact]
+
         public async Task Zero_keepalive_does_not_issue_date()
         {
             var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
@@ -322,9 +386,18 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.DoesNotContain(server.Commands, static command => command.Equals("DATE", StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Creates a run-continuations-asynchronously TaskCompletionSource for DATE synchronization.
+        /// </summary>
+
         private static TaskCompletionSource NewSource() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+
+        /// <summary>
+        /// Polls until <paramref name="predicate"/> is true, or throws after two seconds.
+        /// </summary>
+        /// <param name="predicate">Condition the test is waiting to observe.</param>
         private static async Task WaitUntilAsync(Func<bool> predicate)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));

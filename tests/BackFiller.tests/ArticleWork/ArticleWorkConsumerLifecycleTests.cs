@@ -9,8 +9,14 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Consumer session and service lifecycle: generation binding, admission after retirement, connection loss rebuild, and shutdown interaction.
+    /// </summary>
     public sealed class ArticleWorkConsumerLifecycleTests
     {
+        /// <summary>
+        /// Start binds the session to connection generation 1, declares consume on the provider queue, and leaves the shared connection open.
+        /// </summary>
         [Fact]
         public async Task Session_starts_running_on_the_current_generation()
         {
@@ -26,6 +32,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, context.Factory.ConnectCount);
         }
 
+        /// <summary>
+        /// Start throws when RabbitMQ is not ready; session stays stopped and no connection attempt is made.
+        /// </summary>
         [Fact]
         public async Task Startup_fails_when_the_connection_is_not_ready()
         {
@@ -38,6 +47,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(0, factory.ConnectCount);
         }
 
+        /// <summary>
+        /// Channel creation failure during start leaves the session stopped without a running consumer.
+        /// </summary>
         [Fact]
         public async Task Startup_fails_when_consume_cannot_be_established()
         {
@@ -52,6 +64,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Retire cancels BasicConsume, disposes the manual-ack channel, clears the handle, and does not dispose the shared connection.
+        /// </summary>
         [Fact]
         public async Task Retirement_cancels_the_consumer_disposes_the_channel_and_stops()
         {
@@ -68,6 +83,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(0, context.Factory.LastConnection!.DisposeCount);
         }
 
+        /// <summary>
+        /// Idempotent session dispose performs a single channel cancel/dispose pair.
+        /// </summary>
         [Fact]
         public async Task Repeated_dispose_does_not_dispose_the_channel_again()
         {
@@ -83,6 +101,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(channel.IsOpen);
         }
 
+        /// <summary>
+        /// In-flight work started before retire completes on the original channel and settles once (terminal ack) before dispose.
+        /// </summary>
         [Fact]
         public async Task Shutdown_drains_admitted_work_on_the_original_channel()
         {
@@ -110,6 +131,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// Post-retire deliveries are ignored: no handler invocation, settlement, or response publication.
+        /// </summary>
         [Fact]
         public async Task Delivery_arriving_after_retirement_is_not_admitted()
         {
@@ -125,6 +149,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(context.Publisher.Published);
         }
 
+        /// <summary>
+        /// Service opens a topology-only channel then one consume channel per desired slot (min of catalog max and usable capacity).
+        /// </summary>
         [Fact]
         public async Task Consumer_service_starts_one_session_per_desired_nntp_slot_when_capacity_exists()
         {
@@ -165,6 +192,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Empty usable-capacity snapshot yields no sessions and no RabbitMQ channels.
+        /// </summary>
         [Fact]
         public async Task Consumer_service_does_not_start_topology_backbones_without_capacity()
         {
@@ -182,6 +212,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Connection loss rebuilds sessions on generation 2 using one reconnect; prior consume channels are disposed.
+        /// </summary>
         [Fact]
         public async Task Consumer_service_rebuilds_after_generation_loss_without_opening_a_competing_connection()
         {
@@ -214,6 +247,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Stop with cancellation while generation replacement is in flight still disposes the old consume channel without double-handling the delivery.
+        /// </summary>
         [Fact]
         public async Task Shutdown_cancels_active_replacement_retirement_started_before_stop()
         {
@@ -257,6 +293,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Handler completion on a stale generation after reconnect must not ack/nack on old or new channels.
+        /// </summary>
         [Fact]
         public async Task Stale_session_does_not_mutate_a_newer_generation()
         {
@@ -301,6 +340,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Static guard: production ArticleWork sources must not use blocking wait/sleep patterns on async paths.
+        /// </summary>
         [Fact]
         public void Production_article_work_code_does_not_block_synchronously()
         {
@@ -315,6 +357,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             }
         }
 
+        /// <summary>
+        /// Constructs a single-backbone consumer session wired to the fake connection service and delivery pipeline.
+        /// </summary>
+        /// <param name="connections">RabbitMQ service providing manual-ack channels.</param>
+        /// <param name="handler">Work handler invoked for admitted deliveries.</param>
+        /// <param name="publisher">Optional response publisher; defaults to a recording fake.</param>
+        /// <returns>An unstarted <see cref="ArticleWorkConsumerSession"/>.</returns>
         private static ArticleWorkConsumerSession CreateSession(
             IRabbitMqService connections,
             IArticleWorkHandler handler,
@@ -328,6 +377,14 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 NullLogger.Instance);
         }
 
+        /// <summary>
+        /// Builds the multi-session consumer service with optional catalog and capacity overrides for topology tests.
+        /// </summary>
+        /// <param name="connections">Shared RabbitMQ connection service.</param>
+        /// <param name="handler">Handler used by each session pipeline.</param>
+        /// <param name="catalog">Provider catalog; default defers to runtime wiring when null.</param>
+        /// <param name="capacity">Usable capacity snapshots; default empty.</param>
+        /// <returns>A new <see cref="ArticleWorkConsumerService"/>.</returns>
         private static ArticleWorkConsumerService CreateConsumerService(
             IRabbitMqService connections,
             IArticleWorkHandler handler,
@@ -344,6 +401,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 capacity);
         }
 
+        /// <summary>
+        /// Single-provider catalog entry for lifecycle tests.
+        /// </summary>
+        /// <param name="backbone">Provider backbone name.</param>
+        /// <param name="maxSessions">Configured NNTP slot ceiling for that backbone.</param>
+        /// <returns>A static catalog with one definition.</returns>
         private static StaticBackFillerProviderCatalog CreateCatalog(string backbone, int maxSessions) =>
             new(
             [
@@ -358,6 +421,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                     maxSessions),
             ]);
 
+        /// <summary>
+        /// Publishes an initial usable-capacity snapshot for one backbone (omit publish when <paramref name="active"/> is zero).
+        /// </summary>
+        /// <param name="backbone">Backbone key in the snapshot.</param>
+        /// <param name="active">Active usable slots; values above zero publish the snapshot.</param>
+        /// <returns>Mutable capacity state for driving consumer start/stop reactions.</returns>
         private static BackboneUsableCapacityState CreateCapacity(string backbone, int active)
         {
             var capacity = new BackboneUsableCapacityState();
@@ -372,6 +441,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             return capacity;
         }
 
+        /// <summary>
+        /// Locates <c>src/BackFiller/ArticleWork</c> by walking up from the test output directory.
+        /// </summary>
+        /// <returns>Absolute path to production ArticleWork sources.</returns>
+        /// <exception cref="DirectoryNotFoundException">When the tree cannot be resolved.</exception>
         private static string FindArticleWorkSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -389,8 +463,18 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/ArticleWork.");
         }
 
+        /// <summary>
+        /// Started session plus fake factory and connection service; disposed by stopping the session then the connection service.
+        /// </summary>
         private sealed class ConsumerContext : IAsyncDisposable
         {
+            /// <summary>
+            /// Captures factory, connection, started session, and publisher for lifecycle tests.
+            /// </summary>
+            /// <param name="factory">Fake RabbitMQ connection factory.</param>
+            /// <param name="connections">Started connection service.</param>
+            /// <param name="session">Running consumer session under test.</param>
+            /// <param name="publisher">Publisher wired into the session pipeline.</param>
             private ConsumerContext(
                 FakeBackFillerRabbitMqConnectionFactory factory,
                 RabbitMqService connections,
@@ -403,14 +487,23 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 Publisher = publisher;
             }
 
+            /// <summary>Fake factory recording connect and channel creation.</summary>
             public FakeBackFillerRabbitMqConnectionFactory Factory { get; }
 
+            /// <summary>Shared RabbitMQ service used by the session.</summary>
             public RabbitMqService Connections { get; }
 
+            /// <summary>Consumer session under test (started).</summary>
             public ArticleWorkConsumerSession Session { get; }
 
+            /// <summary>Recording publisher installed in the session pipeline.</summary>
             public RecordingArticleWorkResponsePublisher Publisher { get; }
 
+            /// <summary>
+            /// Connects, starts a single Giganews session with optional handler, and returns the owning context.
+            /// </summary>
+            /// <param name="handler">Handler for admitted work; defaults to a deferred no-op handler.</param>
+            /// <returns>Disposable context with a running session.</returns>
             public static async Task<ConsumerContext> StartSessionAsync(IArticleWorkHandler? handler = null)
             {
                 var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -422,6 +515,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 return new ConsumerContext(factory, connections, session, publisher);
             }
 
+            /// <summary>Retires the session then disposes the connection service.</summary>
             public async ValueTask DisposeAsync()
             {
                 await Session.DisposeAsync();

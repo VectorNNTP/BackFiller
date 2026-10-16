@@ -10,6 +10,11 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
     /// </summary>
     internal static class SuccessfulNntpDbConnectionFactory
     {
+        /// <summary>
+        /// Removes every <see cref="INntpDbConnectionFactory"/> registration from <paramref name="services"/>
+        /// and registers an in-memory factory so host startup tests avoid MySQL.
+        /// </summary>
+        /// <param name="services">Host service collection to mutate before building the provider.</param>
         internal static void Replace(IServiceCollection services)
         {
             ArgumentNullException.ThrowIfNull(services);
@@ -24,8 +29,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             services.AddSingleton<INntpDbConnectionFactory, Factory>();
         }
 
+        /// <summary>Always opens an in-memory session; ignores the connection string.</summary>
         private sealed class Factory : INntpDbConnectionFactory
         {
+            /// <inheritdoc />
             public Task<INntpDbSession> OpenAsync(string connectionString, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -33,14 +40,21 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        /// <summary>Fixed shared-configuration rows for host startup; SQL commands are unsupported.</summary>
         private sealed class Session : INntpDbSession, INntpSharedConfigurationRowSource
         {
+            /// <inheritdoc />
             public ValueTask<int> SelectOneAsync(CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return ValueTask.FromResult(1);
             }
 
+            /// <summary>
+            /// Returns a fixed shared-configuration candidate row for startup paths; ignores database state.
+            /// </summary>
+            /// <param name="cancellationToken">Honored before materializing the static row list.</param>
+            /// <returns>A single hard-coded candidate suitable for host configuration tests.</returns>
             public ValueTask<IReadOnlyList<NntpSharedConfigurationCandidate>> ReadCandidatesAsync(
                 CancellationToken cancellationToken)
             {
@@ -59,15 +73,22 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 return ValueTask.FromResult(rows);
             }
 
+            /// <summary>Not supported; this session never runs ad hoc SQL.</summary>
+            /// <returns>Never returns; always throws.</returns>
             public MySqlCommand CreateCommand() =>
                 throw new NotSupportedException("This test session does not execute SQL.");
 
+            /// <summary>Not supported; this session does not open MySQL transactions.</summary>
+            /// <param name="cancellationToken">Honored before throwing.</param>
             public ValueTask<MySqlTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 throw new NotSupportedException("This test session does not execute SQL.");
             }
 
+            /// <summary>Not supported; isolation level is ignored because no transaction is created.</summary>
+            /// <param name="isolationLevel">Included in the exception message for diagnostics only.</param>
+            /// <param name="cancellationToken">Honored before throwing.</param>
             public ValueTask<MySqlTransaction> BeginTransactionAsync(
                 System.Data.IsolationLevel isolationLevel,
                 CancellationToken cancellationToken)
@@ -77,6 +98,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                     "This test session does not execute SQL at isolation " + isolationLevel + ".");
             }
 
+            /// <summary>No-op dispose; the session holds no connections or transactions.</summary>
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }

@@ -16,10 +16,16 @@ namespace VectorNNTP.BackFiller.Tests.Audit
     /// </summary>
     public sealed class BackFillerRealWorldAuditTests
     {
+        /// <summary>Directory of on-disk articles. Read only when <c>BACKFILLER_AUDIT</c> is <c>1</c>.</summary>
         private const string CorpusRoot = ".artifacts/Articles";
 
+        /// <summary>Worker counts for the timed handler loop, before the separate 1000-worker run.</summary>
         private static readonly int[] ConcurrencyLevels = [1, 16, 64, 256, 512, 1000, 2000];
 
+        /// <summary>
+        /// Writes a corpus report when <c>BACKFILLER_AUDIT</c> is <c>1</c>. Any other value returns without reading files.
+        /// When enabled, body, identity, hash, and size mismatches in the functional pass must be zero.
+        /// </summary>
         [Fact]
         public async Task RealCorpusAudit_WhenEnabled()
         {
@@ -98,6 +104,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             await retention.DisposeAsync();
         }
 
+        /// <summary>Parses and retains every file, then cancels the request so the article does not stay pinned. Progress is written every 2000 files.</summary>
         private static async Task<FunctionalResult> RunFunctionalAsync(
             string[] files,
             NntpArticleParser parser,
@@ -180,6 +187,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return result;
         }
 
+        /// <summary>Discards <paramref name="warmupOps"/> handler calls, then records throughput, latency, allocation, and retention size for one concurrency.</summary>
         private static async Task<ConcurrencyRow> RunConcurrentAsync(
             ProviderArticleWorkHandler handler,
             ArticleRetentionAuthority retention,
@@ -234,6 +242,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 retention.RetainedCount);
         }
 
+        /// <summary>Runs <paramref name="operations"/> successes across <paramref name="concurrency"/> workers. A non-success outcome throws, and each request is cancelled afterward.</summary>
         private static async Task<double[]> ExecuteAsync(
             ProviderArticleWorkHandler handler,
             ArticleRetentionAuthority retention,
@@ -285,6 +294,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return latencies;
         }
 
+        /// <summary>Checks not-found, cancellation, Message-ID mismatch, a one-byte article, and the success, provider-failure, and cancelled dispositions.</summary>
         private static async Task RunFailureCasesAsync(
             ArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -334,6 +344,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             Assert.True(cancelledDisposition.Requeue);
         }
 
+        /// <summary>Destuffs one framed article 20 times and records average allocated bytes and whether every payload matched.</summary>
         private static DestuffMeasure MeasureDestuff(byte[] article)
         {
             var framed = FrameAsNntp(article);
@@ -356,6 +367,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return new DestuffMeasure(iterations, alloc / iterations, equal);
         }
 
+        /// <summary>Stuffs lines that start with a dot and appends the NNTP terminating dot line.</summary>
         private static byte[] FrameAsNntp(byte[] article)
         {
             using var buffer = new MemoryStream(article.Length + 64);
@@ -386,6 +398,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return buffer.ToArray();
         }
 
+        /// <summary>Keeps accepted articles with distinct Message-IDs until <paramref name="maxFiles"/> or <paramref name="maxBytes"/>.</summary>
         private static List<SampleArticle> LoadSample(
             string[] files,
             NntpArticleParser parser,
@@ -420,6 +433,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return sample;
         }
 
+        /// <summary>Counts Message-IDs in the first 16 KiB of each file. A missing separator is counted only inside that prefix.</summary>
         private static HeaderScan ScanHeaders(string[] files)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -456,6 +470,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return scan;
         }
 
+        /// <summary>ASCII equality that folds A-Z to a-z. Other bytes, including non-ASCII, must match exactly.</summary>
         private static bool AsciiEqualsIgnoreCase(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
         {
             if (left.Length != right.Length)
@@ -486,6 +501,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return true;
         }
 
+        /// <summary>Reads the first Message-ID header, ignoring ASCII case of the name. Stops at the blank line and does not unfold continuations.</summary>
         private static bool TryReadMessageId(ReadOnlySpan<byte> article, out string messageId)
         {
             messageId = "";
@@ -523,6 +539,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return false;
         }
 
+        /// <summary>Compares the bodies after the first blank line. Headers are not compared.</summary>
         private static bool BodyEquals(ReadOnlySpan<byte> source, ReadOnlySpan<byte> canonical)
         {
             var sourceBody = Body(source);
@@ -530,6 +547,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return sourceBody.SequenceEqual(canonicalBody);
         }
 
+        /// <summary>Bytes after the first CRLF CRLF, or after the first LF LF. Empty when neither separator is present.</summary>
         private static ReadOnlySpan<byte> Body(ReadOnlySpan<byte> article)
         {
             var crlf = article.IndexOf("\r\n\r\n"u8);
@@ -542,6 +560,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return lf >= 0 ? article[(lf + 2)..] : [];
         }
 
+        /// <summary>One-hour retention with a one-minute sweep interval and the given payload cap. The sweep service is not started.</summary>
         private static ArticleRetentionAuthority CreateRetention(long maximumBytes) =>
             new(
                 new BackFillerArticleRetentionRuntimeOptions(
@@ -554,6 +573,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 TimeProvider.System,
                 NullLogger<ArticleRetentionAuthority>.Instance);
 
+        /// <summary>One audit work item on delivery tag 1. The request id is new on every call.</summary>
         private static ArticleWorkItem Item(FakeBackFillerRabbitMqChannel channel, string messageId) =>
             new(
                 new ArticleWorkRequest(1, Guid.NewGuid(), messageId, "audit"),
@@ -561,34 +581,41 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 "reply",
                 new ArticleWorkSettlementLease(channel, 1, 1));
 
+        /// <summary>Adds one to <paramref name="key"/>, inserting it when absent.</summary>
         private static void Increment(Dictionary<string, int> counts, string key)
         {
             counts.TryGetValue(key, out var value);
             counts[key] = value + 1;
         }
 
+        /// <summary>Nearest-rank percentile of a sorted array. The index is clamped inside the array.</summary>
         private static double Percentile(double[] sorted, double percentile)
         {
             var index = (int)Math.Ceiling(percentile * sorted.Length) - 1;
             return sorted[Math.Clamp(index, 0, sorted.Length - 1)];
         }
 
+        /// <summary>Bytes in GC generation <paramref name="generation"/> after the last collection, or -1 when that generation is absent.</summary>
         private static long GenerationSize(GCMemoryInfo info, int generation)
         {
             var generations = info.GenerationInfo;
             return (uint)generation < (uint)generations.Length ? generations[generation].SizeAfterBytes : -1;
         }
 
+        /// <summary>One report line. The numbers are written to the measurement file and are not compared with a baseline.</summary>
         private static string FormatRow(ConcurrencyRow row) =>
             $"concurrency={row.Concurrency} ops={row.Operations} sec={row.Seconds:F2} articlesPerSec={row.ArticlesPerSecond:F1} miBPerSec={row.MebibytesPerSecond:F1} p50ms={row.P50:F2} p95ms={row.P95:F2} p99ms={row.P99:F2} maxms={row.Max:F2} allocPerArticle={row.AllocPerArticle:F0} gen0={row.Gen0} gen1={row.Gen1} gen2={row.Gen2} workingSet={row.WorkingSet} privateBytes={row.PrivateBytes} heap={row.Heap} loh={row.Loh} poh={row.Poh} pendingWork={row.PendingWorkItems} threads={row.Threads} retainedBytes={row.RetainedBytes} retainedCount={row.RetainedCount}";
 
+        /// <summary>Returns corpus bytes for a known Message-ID. It ignores <c>maxArticleBytes</c> and does not open a provider session.</summary>
         private sealed class IndexedRetriever(IReadOnlyList<SampleArticle> sample) : INntpArticleRetriever
         {
+            /// <summary>Message-ID to raw article bytes served without live NNTP I/O.</summary>
             private readonly Dictionary<string, byte[]> _payloads = sample.ToDictionary(
                 static article => article.MessageId,
                 static article => article.Bytes,
                 StringComparer.Ordinal);
 
+            /// <summary>Invokes the payload callback and returns 220. A cancelled token returns failure and does not call the callback.</summary>
             public Task<ArticleRetrievalResult> RetrieveAsync(
                 ArticleWorkItem item,
                 int maxArticleBytes,
@@ -611,14 +638,17 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             }
         }
 
+        /// <summary>Returns whatever <see cref="Next"/> the test stored. It does not parse or size-check the payload.</summary>
         private sealed class ScriptedRetriever : INntpArticleRetriever
         {
+            /// <summary>Result returned by the next retrieve. Defaults to a provider failure named unset.</summary>
             public ArticleRetrievalResult Next { get; set; } = ArticleRetrievalResult.Failed(
                 ArticleRetrievalKind.ProviderFailure,
                 null,
                 "unset",
                 sessionReusable: false);
 
+            /// <summary>Returns <see cref="Next"/>. When that result carries article bytes, the callback is invoked and its return value is ignored.</summary>
             public Task<ArticleRetrievalResult> RetrieveAsync(
                 ArticleWorkItem item,
                 int maxArticleBytes,
@@ -635,46 +665,66 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             }
         }
 
+        /// <summary>Counters from one pass over every corpus file.</summary>
         private sealed class FunctionalResult
         {
+            /// <summary>Articles that completed the audited pipeline successfully.</summary>
             public int Accepted { get; set; }
 
+            /// <summary>Articles that failed before or during pipeline processing.</summary>
             public int Failed { get; set; }
 
+            /// <summary>Articles whose body after the blank line differs from <c>ArtData</c>.</summary>
             public int BodyMismatch { get; set; }
 
+            /// <summary>Message-ID field disagreements after processing.</summary>
             public int IdMismatch { get; set; }
 
+            /// <summary>Content hash disagreements for accepted articles.</summary>
             public int HashMismatch { get; set; }
 
+            /// <summary>Computed ArtId disagreements versus expected identity.</summary>
             public int ArtIdMismatch { get; set; }
 
+            /// <summary>Accepted records whose <c>ArtSize</c> is not <c>ArtData.Length</c>.</summary>
             public int SizeMismatch { get; set; }
 
+            /// <summary>Wall-clock seconds for the functional audit pass.</summary>
             public double Seconds { get; set; }
 
+            /// <summary>Parse and retain failure names and how many files produced each one.</summary>
             public Dictionary<string, int> Failures { get; } = new(StringComparer.Ordinal);
         }
 
+        /// <summary>Header counts from the first 16 KiB of each file.</summary>
         private sealed class HeaderScan
         {
+            /// <summary>Total corpus files examined in the header scan.</summary>
             public int Files { get; set; }
 
+            /// <summary>Files containing a recognizable Message-ID header.</summary>
             public int WithMessageId { get; set; }
 
+            /// <summary>Files without a Message-ID header.</summary>
             public int MissingMessageId { get; set; }
 
+            /// <summary>Files lacking a header/body separator.</summary>
             public int NoSeparator { get; set; }
 
+            /// <summary>Duplicate Message-ID values observed across files.</summary>
             public int DuplicateIds { get; set; }
 
+            /// <summary>Distinct Message-ID values counted.</summary>
             public int UniqueIds { get; set; }
         }
 
+        /// <summary>One accepted article kept for the concurrent and failure runs.</summary>
         private readonly record struct SampleArticle(string MessageId, byte[] Bytes);
 
+        /// <summary>Twenty destuff iterations: average allocated bytes and whether every payload matched the article.</summary>
         private readonly record struct DestuffMeasure(int Iterations, long AllocPerCall, bool RoundTripEqual);
 
+        /// <summary>One concurrency measurement written to the report. It is not checked against a stored baseline.</summary>
         private readonly record struct ConcurrencyRow(
             int Concurrency,
             int Operations,

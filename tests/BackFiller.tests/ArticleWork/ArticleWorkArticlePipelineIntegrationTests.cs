@@ -8,10 +8,19 @@ using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// End-to-end article-work pipeline through parse, canonical materialization, retention, response publication, and RabbitMQ settlement.
+    /// </summary>
     public sealed class ArticleWorkArticlePipelineIntegrationTests
     {
+        /// <summary>
+        /// Local FQDN used when asserting canonical Path rewriting in retained articles.
+        /// </summary>
         private const string LocalFqdn = "backfiller01.usenet.ninja";
 
+        /// <summary>
+        /// Valid plain article is retained with canonical headers, success JSON is published, and the delivery is acked without requeue.
+        /// </summary>
         [Fact]
         public async Task Valid_normal_article_parses_materializes_retains_publishes_and_acks()
         {
@@ -31,6 +40,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             AssertCanonicalRetainedArticle(ReadRetainedArticle(harness));
         }
 
+        /// <summary>
+        /// Valid yEnc payload is validated on the destuffed body, retained in encoded form, and settled as success without requeue.
+        /// </summary>
         [Fact]
         public async Task Valid_yenc_article_validates_materializes_retains_encoded_body_and_acks()
         {
@@ -48,38 +60,65 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("=yend "u8, retained);
         }
 
+        /// <summary>
+        /// Invalid Date header is a terminal <see cref="ArticleWorkOutcome.InvalidArticle"/> with ack, no requeue, and no retention.
+        /// </summary>
         [Fact]
         public async Task Invalid_date_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidDate());
 
+        /// <summary>
+        /// Invalid required headers yield terminal invalid-article settlement without retention or requeue.
+        /// </summary>
         [Fact]
         public async Task Invalid_headers_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidHeaders());
 
+        /// <summary>
+        /// Wire message-id that fails parser validation is terminal invalid-article with ack and no retain.
+        /// </summary>
         [Fact]
         public async Task Invalid_message_id_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidMessageId());
 
+        /// <summary>
+        /// Invalid Newsgroups is terminal invalid-article settlement without requeue or retention bytes.
+        /// </summary>
         [Fact]
         public async Task Invalid_newsgroups_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidNewsgroups());
 
+        /// <summary>
+        /// Invalid Path header rejects before retention; delivery acks without requeue.
+        /// </summary>
         [Fact]
         public async Task Invalid_path_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidPath());
 
+        /// <summary>
+        /// yEnc CRC failure is invalid-article terminal outcome with ack and published failure JSON, not success.
+        /// </summary>
         [Fact]
         public async Task Bad_yenc_crc_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.BadYEncCrc());
 
+        /// <summary>
+        /// Invalid yEnc escape sequences fail validation as invalid-article without retain or requeue.
+        /// </summary>
         [Fact]
         public async Task Invalid_yenc_escape_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.InvalidYEncEscape());
 
+        /// <summary>
+        /// Canonical Path rewrite that exceeds line limits fails materialization as invalid-article with terminal ack settlement.
+        /// </summary>
         [Fact]
         public async Task Canonical_materialization_exceeding_line_limit_acks_without_requeue_or_retain()
             => await AssertInvalidArticleAsync(ArticleWorkTestArticles.PathRewriteExceedsLineLimit(LocalFqdn));
 
+        /// <summary>
+        /// Retrieved Message-ID must match the request; mismatch publishes InvalidArticle (not Success) and acks without retain.
+        /// </summary>
         [Fact]
         public async Task Article_message_id_mismatch_acks_without_requeue_retain_or_success_response()
         {
@@ -101,6 +140,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.NotEqual("Success", document.RootElement.GetProperty("outcome").GetString());
         }
 
+        /// <summary>
+        /// Provider connect failure is retryable: nack with requeue, no terminal response publication, no retention.
+        /// </summary>
         [Fact]
         public async Task Provider_network_failure_nacks_with_requeue()
         {
@@ -118,6 +160,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(harness.PublishChannel.Publications);
         }
 
+        /// <summary>
+        /// Article bytes above <c>MaxArticleBytes</c> abort receive as invalid-article: ack, terminal JSON without success endpoint fields, no retain.
+        /// </summary>
         [Fact]
         public async Task Oversized_article_acks_as_invalid_article_without_requeue_retain_or_success()
         {
@@ -151,6 +196,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(document.RootElement.TryGetProperty("uri", out _));
         }
 
+        /// <summary>
+        /// Oversized payload may retire the NNTP session yet a subsequent valid article on a new delivery still succeeds and retains.
+        /// </summary>
         [Fact]
         public async Task Oversized_article_retires_session_but_pool_still_serves_later_work()
         {
@@ -181,6 +229,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
 
+        /// <summary>
+        /// Success path still acks without requeue when response publish/confirm fails (requester gone); article remains retained.
+        /// </summary>
         [Fact]
         public async Task Successful_article_acks_when_requester_has_disappeared()
         {
@@ -197,12 +248,18 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Requeue);
         }
 
+        /// <summary>
+        /// Interior bare LF makes the article not frameable: invalid-article terminal settlement with explicit error, no success outcome.
+        /// </summary>
         [Fact]
         public async Task Interior_bare_lf_is_invalid_article_and_is_not_retained_or_reported_as_success()
         {
             await AssertInvalidArticleAsync(ArticleWorkTestArticles.Valid(body: "plain\nmid.dot\r\n"), "NotFrameable");
         }
 
+        /// <summary>
+        /// Canonical retention rewrites Date and Path (single tracker insertion) while preserving the logical body bytes.
+        /// </summary>
         [Fact]
         public async Task Canonical_retained_article_rewrites_date_and_path_and_keeps_body()
         {
@@ -220,6 +277,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("unchanged-body", text, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Shared invalid-article invariant: ack without requeue, zero retention, published InvalidArticle JSON (optional error field).
+        /// </summary>
+        /// <param name="destuffed">Provider article bytes enqueued on the harness NNTP fake.</param>
+        /// <param name="error">When set, expected <c>error</c> property in the response JSON.</param>
         private static async Task AssertInvalidArticleAsync(byte[] destuffed, string? error = null)
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync();
@@ -244,6 +306,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             }
         }
 
+        /// <summary>
+        /// Asserts retained bytes include canonical Date/Path, one tracker hop, parse acceptance, and expected body marker.
+        /// </summary>
+        /// <param name="retained">Stuffed canonical article bytes read from retention.</param>
         private static void AssertCanonicalRetainedArticle(byte[]? retained)
         {
             Assert.NotNull(retained);
@@ -257,6 +323,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(parse.IsAccepted);
         }
 
+        /// <summary>
+        /// Path traversal prepends the local hop once when the incoming Path already starts with the site tracker.
+        /// </summary>
         [Fact]
         public async Task First_traversal_does_not_duplicate_existing_leading_tracker()
         {
@@ -270,6 +339,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, CountOccurrences(text, "news.usenet.ninja"));
         }
 
+        /// <summary>
+        /// Path traversal does not duplicate a tracker token that appears later in the upstream Path chain.
+        /// </summary>
         [Fact]
         public async Task First_traversal_does_not_duplicate_tracker_that_occurs_later()
         {
@@ -283,6 +355,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, CountOccurrences(text, "news.usenet.ninja"));
         }
 
+        /// <summary>
+        /// Loads retained stuffed bytes via success response <c>articleId</c> and a delivery claim on the canonical message-id.
+        /// </summary>
+        /// <param name="harness">Running pipeline harness with retention and publish channel.</param>
+        /// <returns>Owned copy of retained article bytes (claim disposed before return).</returns>
         private static byte[] ReadRetainedArticle(BackFillerPipelineHarness harness)
         {
             var publication = Assert.Single(harness.PublishChannel.Publications);
@@ -297,6 +374,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             return bytes;
         }
 
+        /// <summary>
+        /// Counts non-overlapping ordinal occurrences of <paramref name="value"/> in <paramref name="source"/>.
+        /// </summary>
+        /// <param name="source">Text to scan (for example retained Path header).</param>
+        /// <param name="value">Substring to count.</param>
+        /// <returns>Number of matches.</returns>
         private static int CountOccurrences(string source, string value)
         {
             var count = 0;

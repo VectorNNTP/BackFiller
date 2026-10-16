@@ -14,8 +14,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>TLS-only bind validation, listener prerequisites (ACME readiness and certificate), and startup journal ordering.</summary>
     public sealed class BackFillerTlsStartupTests
     {
+        /// <summary>TlsOnlyAcmeCloudflareOptionsValidator rejects BindPortTls zero with a TLS-only failure message.</summary>
         [Fact]
         public void BindPortTls_zero_fails_tls_only_validation()
         {
@@ -25,6 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.True(result.Failed);
             Assert.Contains("TLS-only", result.Failures!.Single(), StringComparison.Ordinal);
         }
+        /// <summary>Out-of-range BindPortTls values fail TLS-only validation before runtime options are built.</summary>
 
         [Theory]
         [InlineData(0)]
@@ -37,6 +40,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             var result = new TlsOnlyAcmeCloudflareOptionsValidator().Validate(null, options);
             Assert.True(result.Failed);
         }
+        /// <summary>Runtime options expose only BindPortTls as the listener port; legacy BindPort is not used for TLS listen.</summary>
 
         [Fact]
         public void BindPortTls_valid_is_the_only_listener_port()
@@ -53,6 +57,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(5630, runtime.BindPortTls);
             Assert.DoesNotContain(119, runtime.BindAddressTokens.Select(_ => runtime.BindPortTls).Distinct().Except([5630]));
         }
+        /// <summary>BackFillerRuntimeOptionsFactory throws when BindPortTls is disabled rather than falling back to BindPort.</summary>
 
         [Fact]
         public void Runtime_factory_does_not_fall_back_to_BindPort_when_tls_is_disabled()
@@ -70,6 +75,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Contains("TLS-only", ex.Message, StringComparison.Ordinal);
             Assert.Contains("BindPortTls", ex.Message, StringComparison.Ordinal);
         }
+        /// <summary>CacheListenerService start fails before ListenerStarted when ACME readiness is false.</summary>
 
         [Fact]
         public async Task Listener_does_not_start_when_acme_is_not_ready()
@@ -91,6 +97,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.DoesNotContain(BackFillerStartupStages.ListenerStarted, journal.Stages);
             Assert.Empty(service.LocalEndPoints);
         }
+        /// <summary>Start fails with no TLS certificate when readiness is true but the provider has no cert.</summary>
 
         [Fact]
         public async Task Listener_does_not_start_when_certificate_is_missing()
@@ -112,6 +119,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(CacheListenerState.Stopped, service.State);
             Assert.DoesNotContain(BackFillerStartupStages.ListenerStarted, journal.Stages);
         }
+        /// <summary>With readiness and a published cert, listener binds only on BindPortTls endpoints.</summary>
 
         [Fact]
         public async Task Valid_certificate_starts_tls_listener_on_BindPortTls_only()
@@ -145,6 +153,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 await service.StopAsync(CancellationToken.None);
             }
         }
+        /// <summary>Full host startup journal orders AcmeCertificateReady before ListenerStarted.</summary>
 
         [Fact]
         public async Task Hosted_startup_records_acme_ready_before_listener()
@@ -202,6 +211,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 await host.StopAsync();
             }
         }
+        /// <summary>CertificateIdentities omits news hostname when IncludeNewsHostnameInCertificate is false.</summary>
 
         [Fact]
         public void Certificate_identities_are_only_the_backfiller_fqdn()
@@ -214,6 +224,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.DoesNotContain("*.usenet.ninja", names);
         }
 
+        /// <summary>Runtime options with loopback bind and the given TLS port.</summary>
         private static BackFillerRuntimeOptions CreateRuntime(int tlsPort)
         {
             var identity = BackFillerTestOptions.CreateValid();
@@ -227,6 +238,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 acme);
         }
 
+        /// <summary>Substitutes immediate-ready ACME application service in the service collection.</summary>
         private static void ReplaceAcme(IServiceCollection services)
         {
             for (var i = 0; i < services.Count; i++)
@@ -239,6 +251,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Ephemeral loopback port for listener bind tests.</summary>
         private static int GetFreePort()
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0);

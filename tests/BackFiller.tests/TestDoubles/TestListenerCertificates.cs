@@ -5,8 +5,16 @@ using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
 {
+    /// <summary>
+    /// Creates self-signed TLS certificates and TlsCertificateContextProvider fixtures for listener tests.
+    /// </summary>
+
     internal static class TestListenerCertificates
     {
+        /// <summary>
+        /// Builds an exportable RSA-2048 self-signed server certificate with localhost and backfiller.test names.
+        /// </summary>
+        /// <param name="commonName">Subject CN. Defaults to backfiller.test.</param>
         internal static X509Certificate2 CreateSelfSigned(string commonName = "backfiller.test")
         {
             using var rsa = RSA.Create(2048);
@@ -39,6 +47,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
         }
 
+        /// <summary>Provider that has already published <see cref="CreateSelfSigned"/> so listener tests can handshake.</summary>
+        /// <param name="commonName">Subject CN of the published certificate.</param>
         internal static TlsCertificateContextProvider CreatePublishedProvider(string commonName = "backfiller.test")
         {
             var provider = new TlsCertificateContextProvider(NullLogger<TlsCertificateContextProvider>.Instance);
@@ -47,6 +57,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             return provider;
         }
 
+        /// <summary>Provider with no published certificate, so listener tests can observe the unavailable path.</summary>
         internal static TlsCertificateContextProvider CreateUnavailableProvider() =>
             new(NullLogger<TlsCertificateContextProvider>.Instance);
     }

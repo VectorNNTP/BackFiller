@@ -71,6 +71,7 @@ namespace VectorNNTP.BackFiller.Accounts
             try
             {
                 await using var session = await _nntpDb.OpenAsync(cancellationToken).ConfigureAwait(false);
+                
                 {
                     var command = session.CreateCommand();
                     await using (command.ConfigureAwait(false))

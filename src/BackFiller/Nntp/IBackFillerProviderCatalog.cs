@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Nntp
     /// <summary>Resolves a provider definition for a consuming backbone.</summary>
     internal interface IBackFillerProviderCatalog
     {
-        /// <summary>Gets the provider definitions this catalog currently exposes.</summary>
+        /// <summary>Snapshot of configured upstream providers; order is catalog-specific and not a priority ranking.</summary>
         IReadOnlyList<BackFillerProviderDefinition> Providers { get; }
 
         /// <summary>

@@ -15,6 +15,8 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// Returns whether a listed A/AAAA record already matches managed content attributes
         /// (TTL and proxy), given that its content is already the desired address.
         /// </summary>
+        /// <param name="record">Cloudflare list result. Null TTL or proxy returns <see langword="false"/>.</param>
+        /// <returns><see langword="true"/> when TTL is <see cref="ManagedTtl"/> and proxied is <see cref="ManagedProxied"/>.</returns>
         internal static bool MatchesManagedAttributes(CloudflareDnsRecord record) =>
             record is { Ttl: ManagedTtl, Proxied: ManagedProxied };
     }

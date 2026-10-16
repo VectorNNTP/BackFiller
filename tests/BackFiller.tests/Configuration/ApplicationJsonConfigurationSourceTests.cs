@@ -6,8 +6,14 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Verifies <see cref="ApplicationJsonConfiguration"/> replaces generic host JSON sources with entry-assembly file names.
+    /// </summary>
     public sealed class ApplicationJsonConfigurationSourceTests
     {
+        /// <summary>
+        /// Committed JSON file names match production assembly naming; legacy <c>appsettings</c> files are absent from the project tree.
+        /// </summary>
         [Fact]
         public void Production_assembly_names_the_configuration_files()
         {
@@ -21,6 +27,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.False(File.Exists(RelativePath.Under(root, "src", "BackFiller", "RabbitMq.json")));
         }
 
+        /// <summary>
+        /// After registration, only primary, environment, and shared RabbitMQ JSON sources remain before environment variables, with expected optional/reload flags.
+        /// </summary>
         [Fact]
         public void Host_defaults_are_removed_and_entry_assembly_files_are_registered()
         {
@@ -49,6 +58,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.IsType<EnvironmentVariablesConfigurationSource>(builder.Sources[^1]);
         }
 
+        /// <summary>
+        /// When no JSON sources exist yet, all three entry-assembly files are added as optional with reload enabled.
+        /// </summary>
         [Fact]
         public void Entry_assembly_files_are_added_when_the_host_registered_no_json_sources()
         {
@@ -65,6 +77,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.IsType<EnvironmentVariablesConfigurationSource>(builder.Sources[^1]);
         }
 
+        /// <summary>
+        /// Optional environment and RabbitMQ files may be absent without failing <see cref="IConfigurationBuilder.Build"/>.
+        /// </summary>
         [Fact]
         public void Missing_optional_files_do_not_fail_configuration_build()
         {
@@ -88,6 +103,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// The primary BackFiller JSON file is required; build throws when it is missing from the base path.
+        /// </summary>
         [Fact]
         public void Missing_required_primary_file_fails_configuration_build()
         {
@@ -108,6 +126,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Malformed primary JSON surfaces as <see cref="InvalidDataException"/> with an inner format error.
+        /// </summary>
         [Fact]
         public void Invalid_primary_json_fails_configuration_build()
         {
@@ -132,6 +153,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Generic host configuration after registration excludes <c>appsettings*</c> and <c>*.settings.json</c> paths.
+        /// </summary>
         [Fact]
         public void Generic_host_builder_does_not_keep_appsettings_sources()
         {
@@ -168,6 +192,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>Returns file-backed configuration sources in registration order.</summary>
+        /// <param name="configuration">Builder whose sources are filtered.</param>
         private static IEnumerable<FileConfigurationSource> FileSources(IConfigurationBuilder configuration)
             => configuration.Sources.OfType<FileConfigurationSource>();
     }

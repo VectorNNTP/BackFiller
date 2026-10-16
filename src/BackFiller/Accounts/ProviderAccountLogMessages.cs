@@ -1,6 +1,11 @@
 namespace VectorNNTP.BackFiller.Accounts
 {
     /// <summary>Source-generated account control-plane logs. Never includes passwords or connection strings.</summary>
+    /// <remarks>
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/>.
+    /// Host log filtering can suppress a call without changing runtime behaviour.
+    /// <see cref="Exception"/> parameters are attached to the event and are not thrown by these methods.
+    /// </remarks>
     internal static partial class ProviderAccountLogMessages
     {
         /// <summary>

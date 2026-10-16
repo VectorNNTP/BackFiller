@@ -10,6 +10,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class SabctoolsYEncArticleValidationTests
     {
+        /// <summary>SABCTools yEnc fixtures paired with expected validator status after NNTP destuffing.</summary>
+        /// <returns>Theory rows of fixture file name and <see cref="YEncArticleValidationStatus"/> value.</returns>
         public static IEnumerable<object[]> ExpectedStatuses()
         {
             yield return ["test_regular.yenc", (int)YEncArticleValidationStatus.ValidMultiPart];
@@ -26,6 +28,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             yield return ["test_ypart_without_ybegin.yenc", (int)YEncArticleValidationStatus.ValidNonYEnc];
         }
 
+        /// <summary>Destuffed fixture body status matches standalone validation and parser-detected yEnc when present.</summary>
+        /// <param name="name">Fixture file name under SabctoolsYEnc.</param>
+        /// <param name="expectedStatus">Expected validation status ordinal.</param>
         [Theory]
         [MemberData(nameof(ExpectedStatuses))]
         public async Task Destuffed_body_matches_the_validator_status(string name, int expectedStatus)
@@ -50,6 +55,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(article, roundTrip);
         }
 
+        /// <summary>Validating stuffed wire bytes must not match destuffed body status (validator runs on logical body).</summary>
         [Fact]
         public async Task Stuffed_yenc_payload_is_not_validated_as_the_destuffed_article()
         {
@@ -69,6 +75,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.False(stuffed.IsValid);
         }
 
+        /// <summary>UTF-16 empty file bytes are non-yEnc payload with zero sections validated.</summary>
         [Fact]
         public void Empty_file_fixture_is_not_an_nntp_article()
         {
@@ -79,6 +86,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(0, result.SectionsValidated);
         }
 
+        /// <summary>Destuffs NNTP-framed fixture payload through <see cref="NntpStreamReader"/>.</summary>
+        /// <param name="framed">Multiline wire bytes.</param>
+        /// <returns>Logical article after unstuffing.</returns>
         private static async Task<byte[]> ReadPayloadAsync(byte[] framed)
         {
             var stream = new MemoryStream(framed, writable: false);
@@ -89,6 +99,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 CancellationToken.None);
         }
 
+        /// <summary>Applies dot stuffing and NNTP terminator to logical fixture bytes for round-trip checks.</summary>
+        /// <param name="logical">Destuffed article span.</param>
+        /// <returns>Framed bytes including <c>.\r\n</c>.</returns>
         private static byte[] FrameLogicalArticle(ReadOnlySpan<byte> logical)
         {
             var extra = 0;
@@ -127,6 +140,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return framed;
         }
 
+        /// <summary>Resolves a Sabctools yEnc sample path in the test fixtures tree.</summary>
+        /// <param name="name">File name within SabctoolsYEnc.</param>
+        /// <returns>Absolute path to the fixture file.</returns>
         private static string Fixture(string name)
             => RepositoryFiles.Under("tests", "fixtures", "SabctoolsYEnc", name);
     }

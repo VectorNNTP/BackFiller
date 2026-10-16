@@ -26,30 +26,49 @@ namespace VectorNNTP.BackFiller.Listener
     /// </remarks>
     internal sealed class NntpCacheListenerSession
     {
+        /// <summary>RFC 3977 command-line limit, including the terminating CRLF. A longer line is rejected whole.</summary>
         private const int MaximumCommandOctets = 512;
 
+        /// <summary>Initial <c>201</c> greeting. Posting is not implemented.</summary>
         private static readonly byte[] Greeting = "201 NNTP Service Ready, posting prohibited\r\n"u8.ToArray();
 
+        /// <summary>Suffix of the <c>220</c> response, including CRLF.</summary>
         private static readonly byte[] ArticleFollowsSuffix = " article follows\r\n"u8.ToArray();
 
+        /// <summary>Fixed prefix of a successful <c>ARTICLE</c> response. The article number is always <c>0</c>.</summary>
         private static readonly byte[] ArticlePrefix = "220 0 "u8.ToArray();
 
+        /// <summary>Terminating dot line written after the article image.</summary>
         private static readonly byte[] Terminator = ".\r\n"u8.ToArray();
 
+        /// <summary><c>430</c> when no retained article matches the Message-ID.</summary>
         private static readonly byte[] NoSuchArticle = "430 No Such Article Found\r\n"u8.ToArray();
 
+        /// <summary>
+        /// <c>403</c> when the Message-ID matches an entry that is in delivery or not frameable. Nothing is claimed.
+        /// </summary>
         private static readonly byte[] NotAvailable = "403 Article not available\r\n"u8.ToArray();
 
+        /// <summary>
+        /// <c>412</c> when <c>ARTICLE</c> has no argument or the argument is a numeric article number. Number selection is not implemented.
+        /// </summary>
         private static readonly byte[] NoNewsgroup = "412 No newsgroup selected\r\n"u8.ToArray();
 
+        /// <summary>
+        /// <c>501</c> for an overlong command, <c>QUIT</c> with an argument, <c>ARTICLE</c> with more than one argument, or a Message-ID that is not a valid token.
+        /// </summary>
         private static readonly byte[] SyntaxError = "501 Syntax error\r\n"u8.ToArray();
 
+        /// <summary><c>500</c> when the command is neither <c>ARTICLE</c> nor <c>QUIT</c>.</summary>
         private static readonly byte[] UnknownCommand = "500 Unknown command\r\n"u8.ToArray();
 
+        /// <summary><c>205</c> written before the session stops reading after <c>QUIT</c>.</summary>
         private static readonly byte[] Closing = "205 Connection closing\r\n"u8.ToArray();
 
+        /// <summary>ASCII command verb compared case-insensitively.</summary>
         private static readonly byte[] ArticleKeyword = "ARTICLE"u8.ToArray();
 
+        /// <summary>ASCII command verb compared case-insensitively.</summary>
         private static readonly byte[] QuitKeyword = "QUIT"u8.ToArray();
 
         /// <summary>Connected transport. Disposed by the listener, not by this session.</summary>
@@ -379,7 +398,7 @@ namespace VectorNNTP.BackFiller.Listener
                 index++;
             }
 
-            argument = line.Slice(start, end - start).ToArray();
+            argument = line[start..end].ToArray();
             return index >= line.Length;
         }
 
@@ -461,16 +480,19 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>One read from the command buffer.</summary>
         private readonly struct CommandRead
         {
+            /// <summary>Stores a classified read. <paramref name="line"/> is null unless <paramref name="kind"/> is a command.</summary>
+            /// <param name="kind">Whether a command, an overlong line, or disconnect was observed.</param>
+            /// <param name="line">Command bytes without CRLF, or null.</param>
             private CommandRead(CommandReadKind kind, byte[]? line)
             {
                 Kind = kind;
                 Line = line;
             }
 
-            /// <summary>Gets whether a command, an overlong line, or disconnect was observed.</summary>
+            /// <summary>Whether a complete command, an overlong discard, or peer close was read from the buffer.</summary>
             internal CommandReadKind Kind { get; }
 
-            /// <summary>Gets the command line without CRLF when <see cref="Kind"/> is <see cref="CommandReadKind.Command"/>.</summary>
+            /// <summary>Command octets without CRLF when <see cref="Kind"/> is <see cref="CommandReadKind.Command"/>; otherwise empty.</summary>
             internal ReadOnlyMemory<byte> Line { get; }
 
             /// <summary>Creates a parsed command.</summary>

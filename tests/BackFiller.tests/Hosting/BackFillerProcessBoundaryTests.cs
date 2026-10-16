@@ -4,8 +4,11 @@ using VectorNNTP.BackFiller.NntpDb;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>Regresses process exit codes and teardown when host failures, logging, or console restore throw.</summary>
     public sealed class BackFillerProcessBoundaryTests
     {
+        /// <summary>Operational and unexpected exceptions map to <see cref="BackFillerProcessBoundary.FailureExitCode"/> and are forwarded to the observer.</summary>
+        /// <param name="failure">Host or dependency failure surfaced to the process boundary.</param>
         [Theory]
         [MemberData(nameof(OperationalFailures))]
         public void Operational_and_unexpected_host_failures_return_the_failure_exit_code(Exception failure)
@@ -18,6 +21,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Same(failure, observed);
         }
 
+        /// <summary>Failure to log a host exception must not change the failure exit code returned to the process.</summary>
         [Fact]
         public void Fatal_log_failure_still_returns_the_failure_exit_code()
         {
@@ -33,6 +37,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Contains("host failure log failed", diagnostic, StringComparison.Ordinal);
         }
 
+        /// <summary>Logger close failure after exit code 0 still yields failure exit code; console restore still runs once.</summary>
         [Fact]
         public async Task Logger_shutdown_failure_after_a_clean_run_returns_the_failure_exit_code()
         {
@@ -47,6 +52,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(1, restored);
         }
 
+        /// <summary>When the process already failed, logger shutdown failure must not downgrade the exit code.</summary>
         [Fact]
         public async Task Logger_shutdown_failure_keeps_an_existing_host_failure_code()
         {
@@ -66,6 +72,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Contains("close boom", diagnostic, StringComparison.Ordinal);
         }
 
+        /// <summary>Console restore failure after a clean run leaves exit code 0 and records self-log diagnostics.</summary>
         [Fact]
         public async Task Console_restore_failure_does_not_replace_the_exit_code()
         {
@@ -82,6 +89,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Contains("restore boom", diagnostic, StringComparison.Ordinal);
         }
 
+        /// <summary>Representative host-failure exceptions for exit-code mapping.</summary>
+        /// <returns>Theory data of exceptions that must yield the failure exit code.</returns>
         public static TheoryData<Exception> OperationalFailures() =>
         [
             new NntpDbAuthenticationException("access denied"),

@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Owned destuffed payload. <see cref="Dispose"/> clears the reference.</summary>
         private byte[]? _bytes;
 
-        /// <summary>Initializes an owner for <paramref name="bytes"/>.</summary>
+        /// <summary>Takes ownership of destuffed ARTICLE payload bytes independent of the provider session.</summary>
         /// <param name="bytes">Exact destuffed article payload. Ownership transfers to this instance.</param>
         /// <exception cref="ArgumentNullException"><paramref name="bytes"/> is null.</exception>
         internal RetrievedArticle(byte[] bytes)
@@ -17,7 +17,7 @@ namespace VectorNNTP.BackFiller.Nntp
             _bytes = bytes;
         }
 
-        /// <summary>Gets the destuffed article bytes.</summary>
+        /// <summary>Owned destuffed payload until <see cref="Dispose"/> clears the backing array.</summary>
         /// <exception cref="ObjectDisposedException">Thrown after <see cref="Dispose"/>.</exception>
         internal ReadOnlyMemory<byte> Memory
         {
@@ -28,7 +28,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Gets the payload length.</summary>
+        /// <summary>Destuffed byte count; aliases <see cref="Memory"/>.Length.</summary>
         /// <exception cref="ObjectDisposedException">Thrown after <see cref="Dispose"/>.</exception>
         internal int Length => Memory.Length;
 

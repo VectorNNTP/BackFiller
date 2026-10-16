@@ -10,8 +10,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Shared VECTOR environment variable names and BackFiller host binding without root-level bind settings.
+    /// </summary>
+
     public sealed class SharedNntpdEnvironmentBindingTests
     {
+        /// <summary>
+        /// Contract: BackFiller UsesTheSameVectorEnvironmentVariableNames.
+        /// </summary>
+
         [Fact]
         public void BackFiller_UsesTheSameVectorEnvironmentVariableNames()
         {
@@ -37,6 +45,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("nntpd__", AcmeCloudflareOptions.CloudFlareApiKeyEnvironmentVariable, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("backfiller__", AcmeCloudflareOptions.AcmeCertificatePasswordEnvironmentVariable, StringComparison.OrdinalIgnoreCase);
         }
+
+        /// <summary>
+        /// Contract: BackFiller BindsNestedSection AndRootSecrets WithoutUsingRootBindSettings.
+        /// </summary>
 
         [Fact]
         public void BackFiller_BindsNestedSection_AndRootSecrets_WithoutUsingRootBindSettings()
@@ -70,6 +82,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("203.0.113.10", acme.BindAddress);
             Assert.NotEqual("root-must-not-bind.example", acme.DnsSuffix);
         }
+
+        /// <summary>
+        /// Contract: BackFillerHost RegistersSharedAcmeCloudflareOptions WithoutNewsSan.
+        /// </summary>
 
         [Fact]
         public void BackFillerHost_RegistersSharedAcmeCloudflareOptions_WithoutNewsSan()

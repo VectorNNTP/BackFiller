@@ -17,9 +17,13 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {
+    /// <summary>
+    /// ConfigureBackFillerLogging Serilog wiring, levels, paths, retention, and production JSON contract.
+    /// </summary>
     [Collection(SerilogCollection.Name)]
     public sealed class BackFillerSerilogLoggingTests
     {
+        /// <summary>Host registers single SerilogLoggerFactory and removes default ILoggerProvider registrations.</summary>
         [Fact]
         public void ConfigureBackFillerLogging_RegistersSerilog_AndRemovesDefaultProviders()
         {
@@ -33,6 +37,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.DoesNotContain(providers, static p => p is ConsoleLoggerProvider);
             Assert.DoesNotContain(providers, static p => p is DebugLoggerProvider);
         }
+        /// <summary>Default omits debug; explicit Debug enables it; explicit Information disables debug.</summary>
 
         [Fact]
         public void LogLevel_OmittedUsesInformation_ExplicitDebugEnablesDebug_ExplicitInformationDisablesDebug()
@@ -85,6 +90,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>File logs land under ApplicationLocalPath resolved from configured log dir.</summary>
 
         [Fact]
         public void FileSink_IsConfigured_BeneathApplicationLocalLogs()
@@ -112,6 +118,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Relative log dir resolves from application base, not process cwd.</summary>
 
         [Fact]
         public void FileLog_ResolvesRelativeDirectory_FromApplicationBase_NotWorkingDirectory()
@@ -149,6 +156,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(expected);
             }
         }
+        /// <summary>First log write creates configured absolute log directory.</summary>
 
         [Fact]
         public void FileLog_CreatesDirectory_FromConfiguredLogDirectory()
@@ -180,6 +188,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Shipped VectorNNTP.BackFiller.json uses BackFiller:Logging only, not Serilog section.</summary>
 
         [Fact]
         public void ProductionJson_DeclaresLoggingSettings_AndOmitsSerilogSection()
@@ -205,6 +214,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(TimeSpan.FromSeconds(1), BackFillerFileLogging.FileFlushToDiskInterval);
             Assert.False(backFiller.TryGetProperty("Serilog", out _));
         }
+        /// <summary>Each configured LogLevel maps to expected ILogger.IsEnabled threshold.</summary>
 
         [Theory]
         [InlineData("Verbose", LogLevel.Trace)]
@@ -238,6 +248,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>LogRetentionDays binds GzipRollingFileSink retained file count.</summary>
 
         [Fact]
         public void LogRetentionDays_ControlsFileRetention()
@@ -264,6 +275,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Serilog config section is ignored; BackFiller logging options remain authoritative.</summary>
 
         [Fact]
         public void SerilogJsonSection_DoesNotChangeLevelDirectoryOrRetention()
@@ -308,6 +320,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(decoy);
             }
         }
+        /// <summary>Invalid LogLevel throws InvalidOperationException listing allowed names.</summary>
 
         [Theory]
         [InlineData("Trace")]
@@ -333,6 +346,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Default configure builds async gzip daily sink with expected buffer and flush wiring.</summary>
 
         [Fact]
         public void ExplicitConfiguration_BuildsUnlimitedDailyAsyncGzipFileSink()
@@ -380,6 +394,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Console and file include debug; trace stays off file sink at default levels.</summary>
 
         [Fact]
         public void ConsoleReceivesDebug_FileReceivesDebugNotTrace()
@@ -429,6 +444,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.DoesNotContain("backfiller-file-trace-marker", fileText, StringComparison.Ordinal);
             TryDelete(logDir);
         }
+        /// <summary>WriteLoggingInitialized emits information event without secrets via Serilog.</summary>
 
         [Fact]
         public void LoggingInitialized_ReachesSerilog_ThroughILogger()
@@ -450,6 +466,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Contains(ApplicationJsonConfiguration.EntryAssemblyName, evt.RenderMessage(), StringComparison.Ordinal);
             Assert.DoesNotContain("Password", evt.RenderMessage(), StringComparison.OrdinalIgnoreCase);
         }
+        /// <summary>Production references sink packages but not Serilog.Settings.Configuration or RabbitMQ sink package.</summary>
 
         [Fact]
         public void ProductionAssembly_ReferencesSinkPackages_NotSettingsConfiguration()
@@ -467,6 +484,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.DoesNotContain("Serilog.Sinks.RabbitMQ", names);
             Assert.DoesNotContain("Serilog.Settings.Configuration", names);
         }
+        /// <summary>Host logging works without Serilog:WriteTo configuration keys.</summary>
 
         [Fact]
         public void HostLogger_DoesNotRequireSerilogWriteToConfigurationKeys()
@@ -503,6 +521,12 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Builds a generic host with BackFiller logging configured from in-memory settings.</summary>
+        /// <param name="logDir">Optional file log directory; otherwise a temp dir is created.</param>
+        /// <param name="configure">Optional extra Serilog configuration.</param>
+        /// <param name="settings">Additional configuration key/value pairs.</param>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <returns>Built host with logging pipeline registered.</returns>
         private static IHost CreateLoggingHost(
             string? logDir = null,
             Action<LoggerConfiguration>? configure = null,
@@ -531,6 +555,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return builder.Build();
         }
 
+        /// <summary>Creates a unique directory under the system temp folder for file sink tests.</summary>
+        /// <returns>Existing empty directory path.</returns>
         private static string CreateTempLogDir()
         {
             var dir = Path.Join(Path.GetTempPath(), "vectornntp-bf-filelog-" + Guid.NewGuid().ToString("N"));
@@ -538,6 +564,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return dir;
         }
 
+        /// <summary>Walks upward from the test base directory to locate committed BackFiller JSON settings.</summary>
+        /// <returns>Absolute path to <c>VectorNNTP.BackFiller.json</c>.</returns>
+        /// <exception cref="FileNotFoundException">When the production settings file cannot be found.</exception>
         private static string FindProductionConfigurationFile()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -555,6 +584,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             throw new FileNotFoundException("Could not locate src/BackFiller/VectorNNTP.BackFiller.json.");
         }
 
+        /// <summary>Best-effort recursive delete of a temp log directory; ignores files still in use.</summary>
+        /// <param name="path">Directory to remove.</param>
         private static void TryDelete(string path)
         {
             try
@@ -570,6 +601,10 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Reflects a private instance field across the inheritance chain for sink introspection.</summary>
+        /// <param name="instance">Object hosting the field.</param>
+        /// <param name="name">Field name.</param>
+        /// <returns>Field value or null when absent.</returns>
         private static object? ReadInstanceField(object instance, string name)
         {
             for (var type = instance.GetType(); type is not null; type = type.BaseType)
@@ -584,6 +619,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return null;
         }
 
+        /// <summary>Asserts the periodic file flush sink timer period is one second (1000 ms).</summary>
+        /// <param name="sinks">Sink objects discovered from the logger graph.</param>
         private static void AssertFlushesOncePerSecond(IEnumerable<object> sinks)
         {
             var flush = Assert.Single(
@@ -600,6 +637,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1000u, Assert.IsType<uint>(period));
         }
 
+        /// <summary>Walks nested <see cref="ILogEventSink"/> references reachable from fields.</summary>
+        /// <param name="root">Logger or wrapper to traverse.</param>
+        /// <returns>Unique sink objects in discovery order.</returns>
         private static IEnumerable<object> WalkLogEventSinks(object root)
         {
             var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
@@ -633,12 +673,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Thread-safe in-memory sink for Serilog integration assertions.</summary>
         private sealed class CollectingSink : ILogEventSink
         {
+            /// <summary>Events queued by host logging threads. <see cref="Events"/> copies them at read time.</summary>
             private readonly ConcurrentQueue<LogEvent> _events = new();
 
+            /// <summary>Snapshot of queued events at read time.</summary>
             public IReadOnlyCollection<LogEvent> Events => _events.ToArray();
 
+            /// <inheritdoc />
             public void Emit(LogEvent logEvent)
             {
                 ArgumentNullException.ThrowIfNull(logEvent);

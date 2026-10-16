@@ -3,8 +3,13 @@ using VectorNNTP.BackFiller.Networking;
 
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
 {
+    /// <summary>
+    /// <see cref="ICloudflareDnsReconciler"/> that completes without Cloudflare API calls.
+    /// Used when host composition tests require the service registration but must not perform DNS I/O.
+    /// </summary>
     internal sealed class NoOpCloudflareDnsReconciler : ICloudflareDnsReconciler
     {
+        /// <inheritdoc />
         public Task ReconcileAsync(
             string zoneId,
             string fqdn,
@@ -12,6 +17,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+        /// <inheritdoc />
         public Task RemoveAllRecordsForFqdnAsync(
             string zoneId,
             string fqdn,

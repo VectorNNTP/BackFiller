@@ -3,9 +3,14 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
+    /// <summary>
+    /// Delivery claim commit/rollback, TTL interaction, framing rules, and FIFO pin during claim.
+    /// </summary>
     public sealed class ArticleDeliveryClaimTests
     {
+        /// <summary>Fixed clock anchor for TTL and expiry scenarios.</summary>
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
+        /// <summary>Commit after claim removes retention entry and subtracts bytes exactly once.</summary>
 
         [Fact]
         public void Commit_removes_the_entry_and_subtracts_bytes_once()
@@ -31,6 +36,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleDeliveryClaimKind.NotFound, authority.TryClaimForDelivery(Id("<a@b>")).Kind);
             Assert.False(authority.TryCancelPendingRequest(prepared.RequestId));
         }
+        /// <summary>Dispose without commit leaves bytes and allows a second claim.</summary>
 
         [Fact]
         public void Rollback_leaves_an_unexpired_entry_claimable()
@@ -51,6 +57,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(second.Claim!.ArticleBytes.Span.SequenceEqual(prepared.Record.ArtData.Span));
             second.Claim.Dispose();
         }
+        /// <summary>Commit clears all request-id capabilities tied to the message id.</summary>
 
         [Fact]
         public void Commit_clears_every_request_id_on_the_entry()
@@ -71,6 +78,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.False(authority.TryCancelPendingRequest(first.RequestId));
             Assert.False(authority.TryCancelPendingRequest(second.RequestId));
         }
+        /// <summary>Concurrent delivery returns InDelivery until the first claim is disposed.</summary>
 
         [Fact]
         public void A_second_claim_is_rejected_until_the_first_is_released()
@@ -92,6 +100,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(third.Claim!.ArticleBytes.Span.SequenceEqual(prepared.Record.ArtData.Span));
             third.Claim.Dispose();
         }
+        /// <summary>TTL sweep during claim zeroes authority bytes; commit does not restore index.</summary>
 
         [Fact]
         public void Ttl_during_a_claim_keeps_the_captured_bytes_and_does_not_resurrect_the_entry()
@@ -113,6 +122,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleDeliveryClaimKind.NotFound, authority.TryClaimForDelivery(Id("<a@b>")).Kind);
             Assert.True(claimed.Claim.ArticleBytes.Span.SequenceEqual(prepared.Record.ArtData.Span));
         }
+        /// <summary>Dispose after TTL sweep leaves NotFound and zero counts.</summary>
 
         [Fact]
         public void Rollback_after_ttl_does_not_restore_the_entry()
@@ -130,6 +140,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(ArticleDeliveryClaimKind.NotFound, authority.TryClaimForDelivery(Id("<a@b>")).Kind);
         }
+        /// <summary>Open claim blocks FIFO reclaim until released.</summary>
 
         [Fact]
         public void An_active_claim_pins_fifo_reclaim_after_the_last_request_id_is_cancelled()
@@ -158,6 +169,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleDeliveryClaimKind.NotFound, authority.TryClaimForDelivery(Id("<a@b>")).Kind);
             Assert.Equal(ArticleDeliveryClaimKind.Claimed, authority.TryClaimForDelivery(Id("<c@d>")).Kind);
         }
+        /// <summary>Authority dispose during claim keeps captured bytes; further claims throw ObjectDisposedException.</summary>
 
         [Fact]
         public async Task Dispose_during_a_claim_does_not_resurrect_or_double_release()
@@ -178,6 +190,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.Record.ArtData.Span));
             Assert.Throws<ObjectDisposedException>(() => authority.TryClaimForDelivery(Id("<a@b>")));
         }
+        /// <summary>BeginShutdown does not block delivery claim on existing retained artdata.</summary>
 
         [Fact]
         public void Begin_shutdown_still_allows_a_claim()
@@ -189,6 +202,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleDeliveryClaimKind.Claimed, claimed.Kind);
             claimed.Claim!.Dispose();
         }
+        /// <summary>Non-CRLF-terminated retained payload returns NotFrameable without mutating store.</summary>
 
         [Fact]
         public void An_article_that_does_not_end_in_crlf_is_not_claimed()
@@ -208,6 +222,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(1, authority.RetainedCount);
             Assert.Equal(before.Length, authority.RetainedPayloadBytes);
         }
+        /// <summary>Interior bare CR/LF yields NotFrameable while retention bytes stay unchanged.</summary>
 
         [Theory]
         [InlineData("plain\nmid.dot\r\n")]
@@ -237,6 +252,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             delivered.Claim.Dispose();
             Assert.Equal(2, authority.RetainedCount);
         }
+        /// <summary>Valid CRLF framing returns Claimed bytes identical to stored artdata.</summary>
 
         [Theory]
         [InlineData("alpha\r\nbeta\r\n")]
@@ -257,12 +273,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(1, authority.RetainedCount);
             Assert.Equal(before.Length, authority.RetainedPayloadBytes);
         }
+        /// <summary>Commit at TTL boundary removes entry once without double byte subtraction.</summary>
 
         [Fact]
         public void Commit_at_exact_expiry_without_a_sweep_removes_the_entry_once()
         {
             SettleAtExactExpiry(commit: true);
         }
+        /// <summary>Rollback at TTL boundary removes entry once; idempotent dispose/commit.</summary>
 
         [Fact]
         public void Rollback_at_exact_expiry_without_a_sweep_removes_the_entry_once()
@@ -270,6 +288,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             SettleAtExactExpiry(commit: false);
         }
 
+        /// <summary>Shared exact-TTL boundary scenario; commit or rollback via <paramref name="commit"/>.</summary>
         private static void SettleAtExactExpiry(bool commit)
         {
             var time = new ManualTimeProvider(Start);
@@ -307,6 +326,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.Record.ArtData.Span));
         }
 
+        /// <summary>ASCII message-id octets for TryClaimForDelivery.</summary>
         private static byte[] Id(string messageId) => Encoding.ASCII.GetBytes(messageId);
     }
 }

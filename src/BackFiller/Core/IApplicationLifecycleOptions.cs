@@ -22,6 +22,11 @@ namespace VectorNNTP.BackFiller.Core
         /// Gets a value indicating whether the process should exit if an application service
         /// terminates unexpectedly while running.
         /// </summary>
+        /// <remarks>
+        /// Shared contract with NNTPD. BackFiller binds this option but does not read it:
+        /// <see cref="VectorNNTP.BackFiller.Hosting.BackFillerApplicationHostedService"/> always stops the host
+        /// on unexpected execution termination.
+        /// </remarks>
         bool StopHostOnUnexpectedServiceTermination { get; }
     }
 }

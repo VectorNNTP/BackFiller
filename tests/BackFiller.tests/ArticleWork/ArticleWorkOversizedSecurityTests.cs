@@ -6,10 +6,19 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Work-request size limits: oversized bodies are rejected before handler execution with bounded diagnostics.
+    /// </summary>
     public sealed class ArticleWorkOversizedSecurityTests
     {
+        /// <summary>
+        /// Configured <c>WorkRequestMaxPayloadBytes</c> ceiling used in parser and pipeline tests.
+        /// </summary>
         private const int ConfiguredMaxPayload = 1024;
 
+        /// <summary>
+        /// Parser rejects bodies above the byte limit and surfaces a reason referencing <c>WorkRequestMaxPayloadBytes</c> without parsing JSON identities.
+        /// </summary>
         [Fact]
         public void Parser_rejects_oversized_payload_and_returns_reason()
         {
@@ -24,6 +33,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("WorkRequestMaxPayloadBytes", parsed.Failure.Reason, System.StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Pipeline returns <see cref="ArticleWorkOutcome.InvalidRequest"/> for pre-parsed oversized deliveries; handler is not invoked.
+        /// </summary>
         [Fact]
         public async Task Pipeline_ProcessAsync_returns_diagnostic_reason_for_oversized_payload()
         {
@@ -54,32 +66,63 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("WorkRequestMaxPayloadBytes", parsed.Failure.Reason, System.StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Handler stub that must not run for oversized requests; returns cancelled if invoked.
+        /// </summary>
         private sealed class TestNullHandler : IArticleWorkHandler
         {
+            /// <inheritdoc />
             public ValueTask<ArticleWorkHandlerResult> HandleAsync(ArticleWorkItem item, CancellationToken cancellationToken)
             {
                 return ValueTask.FromResult(new ArticleWorkHandlerResult(ArticleWorkOutcome.Cancelled, null, null, null, null));
             }
         }
 
+        /// <summary>
+        /// No-op publisher; does not record intents or simulate confirm. Not used to assert publication in these tests.
+        /// </summary>
         private sealed class TestPublisher : IArticleWorkResponsePublisher
         {
+            /// <inheritdoc />
             public bool CompletesSuccessPublication => false;
 
+            /// <inheritdoc />
             public Task PublishAsync(ArticleWorkResponseIntent intent, CancellationToken cancellationToken) => Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Minimal open manual-ack channel stub: settlement methods complete without recording ops or enforcing generation semantics.
+        /// </summary>
         private sealed class TestManualAckChannel : IRabbitMqManualAckChannel
         {
+            /// <inheritdoc />
             public long Generation => 1;
+
+            /// <inheritdoc />
             public bool IsOpen => true;
+
+            /// <inheritdoc />
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+            /// <inheritdoc />
             public Task ExchangeDeclareAsync(string exchange, string type, bool durable, bool autoDelete, IReadOnlyDictionary<string, object?>? arguments, CancellationToken cancellationToken) => Task.CompletedTask;
+
+            /// <inheritdoc />
             public Task QueueDeclareAsync(string queue, bool durable, bool exclusive, bool autoDelete, IReadOnlyDictionary<string, object?>? arguments, CancellationToken cancellationToken) => Task.CompletedTask;
+
+            /// <inheritdoc />
             public Task QueueBindAsync(string queue, string exchange, string routingKey, IReadOnlyDictionary<string, object?>? arguments, CancellationToken cancellationToken) => Task.CompletedTask;
+
+            /// <inheritdoc />
             public Task<string> BasicConsumeAsync(string queue, ushort prefetch, Func<RabbitMqManualAckDelivery, Task> onDeliveryAsync, CancellationToken cancellationToken) => Task.FromResult(string.Empty);
+
+            /// <inheritdoc />
             public Task BasicCancelAsync(string consumerTag, CancellationToken cancellationToken) => Task.CompletedTask;
+
+            /// <inheritdoc />
             public Task BasicAckAsync(ulong deliveryTag, CancellationToken cancellationToken) => Task.CompletedTask;
+
+            /// <inheritdoc />
             public Task BasicNackAsync(ulong deliveryTag, bool requeue, CancellationToken cancellationToken) => Task.CompletedTask;
         }
     }

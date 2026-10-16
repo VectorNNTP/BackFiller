@@ -21,8 +21,12 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>
+    /// Regresses DI registration order, singleton runtime options, RabbitMQ lazy connect, and absence of legacy NNTPD or placeholder hosted services.
+    /// </summary>
     public sealed class BackFillerHostCompositionTests
     {
+        /// <summary>Hosted service order, application-service triple (DNS, ACME, listener), and key singleton aliases match the current composition contract.</summary>
         [Fact]
         public void AddBackFillerHosting_registers_rabbitmq_then_article_work_consumers()
         {
@@ -79,6 +83,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.NotNull(host.Services.GetRequiredService<CloudflareDnsReconciliationService>());
         }
 
+        /// <summary><see cref="BackFillerRuntimeOptions"/> is a single snapshot shared by resolves; shutdown grace matches <see cref="HostOptions.ShutdownTimeout"/>.</summary>
         [Fact]
         public void AddBackFillerHosting_registers_a_single_runtime_options_snapshot()
         {
@@ -100,6 +105,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 host.Services.GetRequiredService<IOptions<HostOptions>>().Value.ShutdownTimeout);
         }
 
+        /// <summary>After host start, RabbitMQ is ready with one connection generation; stop disposes consumer and publish channels exactly once.</summary>
         [Fact]
         public async Task Host_starts_rabbitmq_and_article_work_consumers_without_a_placeholder_background_service()
         {
@@ -135,6 +141,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.All(factory.LastConnection.PublishChannels, static channel => Assert.Equal(1, channel.DisposeCount));
         }
 
+        /// <summary>Building the host must not connect to RabbitMQ until hosted services start.</summary>
         [Fact]
         public void AddBackFillerHosting_registers_rabbitmq_without_connecting()
         {
@@ -149,6 +156,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(0, factory.ConnectCount);
         }
 
+        /// <summary>Physical memory comes from <see cref="OsPhysicalMemoryProvider"/> as a singleton.</summary>
         [Fact]
         public void AddBackFillerHosting_registers_os_physical_memory_provider()
         {
@@ -162,6 +170,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(typeof(OsPhysicalMemoryProvider), descriptor.ImplementationType);
         }
 
+        /// <summary>Without test overrides, provider accounts load from MySQL via <see cref="MySqlProviderAccountSource"/>.</summary>
         [Fact]
         public void AddBackFillerHosting_defaults_to_the_mysql_account_source()
         {
@@ -171,6 +180,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.IsType<ProviderConfigurationCatalog>(host.Services.GetRequiredService<IBackFillerProviderCatalog>());
         }
 
+        /// <summary>BackFiller assembly must not take a compile-time dependency on VectorNNTP.NNTPD.</summary>
         [Fact]
         public void BackFiller_assembly_does_not_reference_NNTPD()
         {
@@ -181,6 +191,11 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.DoesNotContain("VectorNNTP.NNTPD", referenced);
         }
 
+        /// <summary>Test host with valid in-memory configuration, platform hosting, logging, and optional fakes.</summary>
+        /// <param name="factory">RabbitMQ factory spy; default creates a new fake.</param>
+        /// <param name="injectAccountSource">When true, registers <see cref="FakeProviderAccountSource"/>.</param>
+        /// <param name="replaceAcme">When true, swaps ACME for immediate-ready test service.</param>
+        /// <returns>Built host; caller must dispose.</returns>
         private static IHost CreateHost(
             FakeBackFillerRabbitMqConnectionFactory? factory = null,
             bool injectAccountSource = true,
@@ -215,6 +230,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return builder.Build();
         }
 
+        /// <summary>Replaces <see cref="AcmeCertificateApplicationService"/> registration with <see cref="ImmediateAcmeReadyApplicationService"/>.</summary>
+        /// <param name="services">Service collection after hosting registration.</param>
         private static void ReplaceAcmeApplicationServiceWithImmediateReady(IServiceCollection services)
         {
             for (var i = 0; i < services.Count; i++)
@@ -227,6 +244,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Allocates an ephemeral loopback TCP port for TLS bind configuration.</summary>
+        /// <returns>Port number that was bound transiently.</returns>
         private static int GetFreePort()
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0);

@@ -1,6 +1,11 @@
 namespace VectorNNTP.BackFiller.Messaging.RabbitMq
 {
     /// <summary>Source-generated RabbitMQ infrastructure log messages. Never includes credentials.</summary>
+    /// <remarks>
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/> (summaries cite the event id where useful).
+    /// Host log filtering can suppress a call without changing runtime behavior.
+    /// <see cref="Exception"/> parameters are attached to the event and are not thrown by these methods unless noted otherwise in the method summary.
+    /// </remarks>
     internal static partial class RabbitMqLogMessages
     {
         /// <summary>Logs event 2800 (information): a broker connect is starting. Credentials are not included.</summary>

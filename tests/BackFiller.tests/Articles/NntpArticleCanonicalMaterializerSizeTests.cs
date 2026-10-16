@@ -9,6 +9,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class NntpArticleCanonicalMaterializerSizeTests
     {
+        /// <summary>Under the byte ceiling, canonical length equals the stuffed wire length and rents once at that size.</summary>
         [Fact]
         public void Plain_article_below_the_limit_keeps_its_stuffed_length()
         {
@@ -27,6 +28,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(measured.WireLength, pool.LastMinimumLength);
         }
 
+        /// <summary>Plain articles exactly at the configured byte ceiling are accepted without overshooting rent.</summary>
         [Fact]
         public void Plain_article_exactly_at_the_limit_is_accepted()
         {
@@ -43,6 +45,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(measured.WireLength, pool.LastMinimumLength);
         }
 
+        /// <summary>One byte over the stuffed limit rejects with <see cref="NntpArticleCanonicalFailureCode.ArticleTooLarge"/> before array rent.</summary>
         [Fact]
         public void Plain_article_one_byte_over_the_limit_is_rejected_before_rent()
         {
@@ -60,6 +63,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(0, pool.RentCalls);
         }
 
+        /// <summary>Limit checked against stuffed length: pre-stuff budget alone is insufficient when dots expand the wire image.</summary>
         [Fact]
         public void Stuffing_dots_that_cross_the_limit_are_rejected_before_rent()
         {
@@ -78,6 +82,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(0, pool.RentCalls);
         }
 
+        /// <summary>Dot-heavy bodies at the stuffed byte ceiling accept and rent for the expanded canonical length.</summary>
         [Fact]
         public void Dot_heavy_article_exactly_at_the_stuffed_limit_is_accepted()
         {
@@ -95,6 +100,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(measured.WireLength, pool.LastMinimumLength);
         }
 
+        /// <summary>Dot-heavy articles one stuffed byte over the limit reject before renting output buffers.</summary>
         [Fact]
         public void Dot_heavy_article_one_byte_over_the_stuffed_limit_is_rejected_before_rent()
         {
@@ -112,6 +118,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(0, pool.RentCalls);
         }
 
+        /// <summary>Empty parse failures and ordinary accepted articles keep prior failure codes and length semantics.</summary>
         [Fact]
         public void Empty_and_ordinary_articles_keep_their_existing_results()
         {
@@ -133,6 +140,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.InRange(materialized.CanonicalLength, 1, ArticleResourceLimits.MaxArticleBytes);
         }
 
+        /// <summary>Materializes once and derives stuffed versus pre-stuff lengths from body dot counts.</summary>
+        /// <param name="parsed">Accepted parse result to measure.</param>
+        /// <returns>Wire length, pre-stuff length, and extra dot count.</returns>
         private static MeasuredArticle Measure(in NntpArticleParseResult parsed)
         {
             var pool = new RecordingArrayPool();
@@ -144,6 +154,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return new MeasuredArticle(accepted.CanonicalLength, accepted.CanonicalLength - extra, extra);
         }
 
+        /// <summary>Parses test articles with organizational path host and asserts acceptance except for intentional empty input.</summary>
+        /// <param name="article">Logical article bytes.</param>
+        /// <param name="maxArticleBytes">Parser size ceiling.</param>
+        /// <returns>Parse result passed to materialize tests.</returns>
         private static NntpArticleParseResult Parse(byte[] article, int maxArticleBytes)
         {
             var parsed = new NntpArticleParser("backfiller.test").Parse(
@@ -154,6 +168,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return parsed;
         }
 
+        /// <summary>Materializes with normalize path mode and an injectable array pool for rent assertions.</summary>
+        /// <param name="parsed">Accepted parse result.</param>
+        /// <param name="maxArticleBytes">Materializer byte ceiling.</param>
+        /// <param name="pool">Pool that records rent calls.</param>
+        /// <returns>Materialize outcome under test.</returns>
         private static NntpArticleCanonicalMaterializeResult Materialize(
             in NntpArticleParseResult parsed,
             int maxArticleBytes,
@@ -165,6 +184,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 ArticlePathCanonicalizer.OrganizationalTrackerHost,
                 pool);
 
+        /// <summary>Builds a minimal valid header set with the supplied body bytes.</summary>
+        /// <param name="body">Body after the CRLF separator.</param>
+        /// <returns>Full logical article bytes.</returns>
         private static byte[] Article(string body)
         {
             var text =
@@ -179,16 +201,27 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return Encoding.ASCII.GetBytes(text);
         }
 
+        /// <summary>Repeats dot-leading CRLF body lines to inflate stuffed size.</summary>
+        /// <param name="count">Number of <c>.\r\n</c> lines.</param>
+        /// <returns>Concatenated body fragment.</returns>
         private static string DotLines(int count) => string.Concat(Enumerable.Repeat(".\r\n", count));
 
+        /// <summary>Canonical wire length, logical pre-stuff length, and counted stuffing dots for boundary tests.</summary>
+        /// <param name="WireLength">Accepted canonical byte length.</param>
+        /// <param name="PreStuffLength">Length before dot stuffing expansion.</param>
+        /// <param name="ExtraDots">Number of extra leading dots added in the body.</param>
         private readonly record struct MeasuredArticle(int WireLength, int PreStuffLength, int ExtraDots);
 
+        /// <summary>Array pool test double that counts rents and records the last minimum length requested.</summary>
         private sealed class RecordingArrayPool : ArrayPool<byte>
         {
+            /// <summary>Number of <see cref="Rent"/> calls observed.</summary>
             public int RentCalls { get; private set; }
 
+            /// <summary>Most recent <paramref name="minimumLength"/> passed to <see cref="Rent"/>.</summary>
             public int LastMinimumLength { get; private set; }
 
+            /// <inheritdoc />
             public override byte[] Rent(int minimumLength)
             {
                 RentCalls++;
@@ -196,6 +229,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 return GC.AllocateUninitializedArray<byte>(minimumLength);
             }
 
+            /// <inheritdoc />
             public override void Return(byte[] array, bool clearArray = false)
             {
             }

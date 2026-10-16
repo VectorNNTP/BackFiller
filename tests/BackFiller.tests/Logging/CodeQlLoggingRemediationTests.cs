@@ -9,9 +9,14 @@ using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {
+    /// <summary>
+    /// GzipRollingFileSink checkpoints, PeriodicFileFlushSink concurrency and failure containment.
+    /// </summary>
     public sealed class CodeQlLoggingRemediationTests
     {
+        /// <summary>Serializes console replacement tests that mutate Console.Out.</summary>
         private static readonly object ConsoleGate = new();
+        /// <summary>Daily rolling checkpoint handles leap day and next day with preserved DateTimeKind.</summary>
 
         [Fact]
         public void Daily_checkpoint_crosses_29_February_and_keeps_kind()
@@ -22,6 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(new DateTime(2024, 2, 29, 0, 0, 0, DateTimeKind.Utc), sink.Checkpoint(leap));
             Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc), sink.NextCheckpoint(leap));
         }
+        /// <summary>Monthly checkpoint rolls December to January and handles month-end dates.</summary>
 
         [Fact]
         public void Monthly_checkpoint_crosses_December_and_month_end()
@@ -35,6 +41,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Unspecified), sink.Checkpoint(january));
             Assert.Equal(new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Unspecified), sink.NextCheckpoint(january));
         }
+        /// <summary>Year 9999 next checkpoint throws ArgumentOutOfRangeException.</summary>
 
         [Fact]
         public void Yearly_checkpoint_rejects_a_year_that_cannot_be_represented()
@@ -45,6 +52,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(new DateTime(9999, 1, 1, 0, 0, 0, DateTimeKind.Utc), sink.Checkpoint(last));
             Assert.Throws<ArgumentOutOfRangeException>(() => sink.NextCheckpoint(last));
         }
+        /// <summary>Hourly checkpoint crosses midnight preserving kind.</summary>
 
         [Fact]
         public void Hourly_checkpoint_crosses_midnight()
@@ -55,6 +63,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(new DateTime(2024, 2, 29, 23, 0, 0, DateTimeKind.Local), sink.Checkpoint(instant));
             Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Local), sink.NextCheckpoint(instant));
         }
+        /// <summary>Rolling path with parent traversal is rejected.</summary>
 
         [Fact]
         public void Log_file_name_cannot_leave_the_directory()
@@ -69,6 +78,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 Directory.Delete(directory);
             }
         }
+        /// <summary>PeriodicFileFlushSink dispose flushes buffered event; double dispose is safe.</summary>
 
         [Fact]
         public void Dispose_flushes_the_last_event_and_a_second_dispose_is_safe()
@@ -104,6 +114,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 Directory.Delete(directory, recursive: true);
             }
         }
+        /// <summary>UseAutoFlushConsoleOutput swaps writers and RestoreConsoleOutput restores original stdout.</summary>
 
         [Fact]
         public void Console_writer_replaces_and_restores_without_closing_stdout()
@@ -142,6 +153,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 }
             }
         }
+        /// <summary>OnTick flush callback holds disposal until release.</summary>
 
         [Fact]
         public async Task Flush_callback_blocks_disposal_until_the_callback_leaves_the_lock()
@@ -173,6 +185,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.FlushCount);
             Assert.Equal(1, inner.DisposeCount);
         }
+        /// <summary>Timer flush failure is self-logged; dispose propagates flush IOException and disposes timer.</summary>
 
         [Fact]
         public void Timer_callback_contains_a_flush_failure()
@@ -195,6 +208,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.DisposeCount);
             AssertTimerDisposed(sink);
         }
+        /// <summary>Transient flush failure is retried on next timer tick.</summary>
 
         [Fact]
         public void Timer_flush_failure_is_retried_by_the_next_callback()
@@ -216,6 +230,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.DisposeCount);
             AssertTimerDisposed(sink);
         }
+        /// <summary>Final flush failure on dispose still tears down timer.</summary>
 
         [Fact]
         public void Final_flush_failure_still_disposes_the_sink_and_timer()
@@ -235,6 +250,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             AssertTimerDisposed(sink);
             Assert.Equal(1, inner.DisposeCount);
         }
+        /// <summary>Inner sink dispose failure still disposes periodic flush timer.</summary>
 
         [Fact]
         public void Inner_sink_disposal_failure_still_disposes_the_timer()
@@ -248,6 +264,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.DisposeCount);
             AssertTimerDisposed(sink);
         }
+        /// <summary>Primary flush exception wins over secondary dispose failure.</summary>
 
         [Fact]
         public void Flush_failure_stays_primary_when_disposal_also_fails()
@@ -271,6 +288,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(1, inner.DisposeCount);
             AssertTimerDisposed(sink);
         }
+        /// <summary>Parallel dispose calls inner sink dispose exactly once.</summary>
 
         [Fact]
         public async Task Concurrent_dispose_disposes_the_inner_sink_once()
@@ -285,6 +303,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             AssertTimerDisposed(sink);
         }
 
+        /// <summary>Emits a minimal information event through a periodic flush wrapper.</summary>
+        /// <param name="sink">Sink under test.</param>
         private static void Emit(PeriodicFileFlushSink sink) =>
             sink.Emit(new LogEvent(
                 DateTimeOffset.UtcNow,
@@ -293,6 +313,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 new MessageTemplateParser().Parse("marker"),
                 []));
 
+        /// <summary>Invokes the private timer callback to simulate a flush tick without waiting.</summary>
+        /// <param name="sink">Periodic flush sink instance.</param>
         private static void InvokeOnTick(PeriodicFileFlushSink sink)
         {
             var onTick = typeof(PeriodicFileFlushSink).GetMethod(
@@ -302,6 +324,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             onTick.Invoke(sink, [null]);
         }
 
+        /// <summary>Asserts the internal timer is disarmed after dispose.</summary>
+        /// <param name="sink">Disposed or disposing sink.</param>
         private static void AssertTimerDisposed(PeriodicFileFlushSink sink)
         {
             var timerField = typeof(PeriodicFileFlushSink).GetField(
@@ -311,6 +335,10 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.False(timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan));
         }
 
+        /// <summary>Builds an uncompressed gzip rolling file sink for checkpoint tests.</summary>
+        /// <param name="interval">Rolling interval under test.</param>
+        /// <param name="path">Optional file path; otherwise a temp checkpoint name.</param>
+        /// <returns>Configured rolling sink.</returns>
         private static GzipRollingFileSink Create(RollingInterval interval, string? path = null)
         {
             path ??= Path.Join(Path.GetTempPath(), "bf-checkpoint-.log");
@@ -325,27 +353,42 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 rollOnFileSizeLimit: false);
         }
 
+        /// <summary>Inner sink that blocks flush until released, for concurrent dispose/flush regressions.</summary>
         private sealed class BlockingFlushSink : ILogEventSink, IFlushableFileSink, IDisposable
         {
+            /// <summary>Completed when a flush begins, so the test can dispose while flush is blocked.</summary>
             private readonly TaskCompletionSource _entered;
+
+            /// <summary>Completed by the test to let a blocked flush return.</summary>
             private readonly TaskCompletionSource _release;
+
+            /// <summary>Flush entries, including the one waiting on <see cref="_release"/>.</summary>
             private int _flushCount;
+
+            /// <summary>Dispose calls observed, including a dispose that overlaps a blocked flush.</summary>
             private int _disposeCount;
 
+            /// <summary>Creates a sink that signals entry and waits on <paramref name="release"/> during flush.</summary>
+            /// <param name="entered">Set when flush begins.</param>
+            /// <param name="release">Completes to unblock a waiting flush.</param>
             internal BlockingFlushSink(TaskCompletionSource entered, TaskCompletionSource release)
             {
                 _entered = entered;
                 _release = release;
             }
 
+            /// <summary>Number of flush calls that entered the gate.</summary>
             internal int FlushCount => Volatile.Read(ref _flushCount);
 
+            /// <summary>Number of dispose calls observed.</summary>
             internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
+            /// <inheritdoc />
             public void Emit(LogEvent logEvent)
             {
             }
 
+            /// <inheritdoc />
             public void FlushToDisk()
             {
                 Interlocked.Increment(ref _flushCount);
@@ -353,36 +396,50 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 _release.Task.GetAwaiter().GetResult();
             }
 
+            /// <inheritdoc />
             public void Dispose()
             {
                 Interlocked.Increment(ref _disposeCount);
             }
         }
 
+        /// <summary>Configurable inner sink that throws on flush or dispose for fault-tolerance tests.</summary>
         private sealed class FaultingFlushSink : ILogEventSink, IFlushableFileSink, IDisposable
         {
+            /// <summary>Dispose calls, including a dispose that throws <see cref="DisposeException"/>.</summary>
             private int _disposeCount;
+
+            /// <summary>Flush attempts, including attempts that throw.</summary>
             private int _flushCount;
+
+            /// <summary>Flush attempts that still throw. Starts at <see cref="int.MaxValue"/> so every flush throws until the test sets <see cref="FailuresRemaining"/>.</summary>
             private int _failuresRemaining = int.MaxValue;
 
+            /// <summary>Exception thrown from flush when failures remain.</summary>
             public Exception? FlushException { get; init; }
 
+            /// <summary>Exception thrown from dispose when set.</summary>
             public Exception? DisposeException { get; init; }
 
+            /// <summary>Remaining flush attempts that should throw <see cref="FlushException"/>.</summary>
             public int FailuresRemaining
             {
                 get => _failuresRemaining;
                 init => _failuresRemaining = value;
             }
 
+            /// <summary>Flush attempts observed.</summary>
             public int FlushCount => Volatile.Read(ref _flushCount);
 
+            /// <summary>Dispose attempts observed.</summary>
             public int DisposeCount => Volatile.Read(ref _disposeCount);
 
+            /// <inheritdoc />
             public void Emit(LogEvent logEvent)
             {
             }
 
+            /// <inheritdoc />
             public void FlushToDisk()
             {
                 Interlocked.Increment(ref _flushCount);
@@ -392,6 +449,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 }
             }
 
+            /// <inheritdoc />
             public void Dispose()
             {
                 Interlocked.Increment(ref _disposeCount);

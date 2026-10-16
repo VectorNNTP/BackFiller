@@ -3,6 +3,13 @@ namespace VectorNNTP.BackFiller.Logging
     /// <summary>
     /// Source-generated structured log messages for application service manager events.
     /// </summary>
+    /// <remarks>
+    /// Reserved for NNTPD-style service-manager timing. BackFiller production uses
+    /// <see cref="VectorNNTP.BackFiller.Core.ApplicationServiceManagerLogMessages"/> instead.
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/>.
+    /// Host log filtering can suppress a call without changing runtime behavior.
+    /// <see cref="Exception"/> parameters are attached to the event and are not thrown by these methods.
+    /// </remarks>
     internal static partial class ServiceManagerLogMessages
     {
         /// <summary>Emitted once at the start of a startup pass, before any service is started.</summary>

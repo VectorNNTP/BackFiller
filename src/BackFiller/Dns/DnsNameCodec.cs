@@ -19,6 +19,9 @@ namespace VectorNNTP.BackFiller.Dns
         /// Reads a domain name starting at <paramref name="offset"/>; advances <paramref name="offset"/> past the
         /// on-wire encoding (after the root label, or past a compression pointer that ends the name).
         /// </summary>
+        /// <param name="packet">Full DNS message used to resolve compression pointers.</param>
+        /// <param name="offset">Start of the name encoding. On success, the first byte after the on-wire name.</param>
+        /// <param name="name">Presentation-form name with labels joined by dots. Empty when the wire name is the root.</param>
         /// <returns><see langword="true"/> on success; <see langword="false"/> on malformed encoding.</returns>
         internal static bool TryReadDomainName(ReadOnlySpan<byte> packet, ref int offset, out string name)
         {
@@ -101,6 +104,9 @@ namespace VectorNNTP.BackFiller.Dns
         /// Compression pointers advance by two bytes without following the target (sufficient when skipping
         /// owner names and questions before parsing typed RDATA).
         /// </remarks>
+        /// <param name="packet">Full DNS message.</param>
+        /// <param name="offset">Start of the name encoding. On success, the first byte after the on-wire name.</param>
+        /// <returns><see langword="false"/> when the encoding is malformed or exceeds <see cref="MaxPointerHops"/>.</returns>
         internal static bool TrySkipName(ReadOnlySpan<byte> packet, ref int offset)
         {
             int hops = 0;

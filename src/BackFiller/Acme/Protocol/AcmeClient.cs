@@ -41,10 +41,11 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             _time = time;
         }
 
-        /// <summary>Gets the account key used for JWS.</summary>
+        /// <summary>Account key that signs every JWS. Not disposed by this client.</summary>
         private AcmeAccountKey AccountKey => _accountKey;
 
-        /// <summary>Gets the bound account URL (kid), or throws if not registered/bound.</summary>
+        /// <summary>Account Location URL used as JWS <c>kid</c> after registration or <see cref="BindExistingAccount"/>.</summary>
+        /// <exception cref="InvalidOperationException">No account URL is bound yet.</exception>
         internal string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
 
         /// <summary>

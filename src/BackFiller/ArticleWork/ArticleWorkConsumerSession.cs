@@ -1,8 +1,7 @@
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Logging;
-using VectorNNTP.BackFiller.RabbitMq;
-
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
+using VectorNNTP.BackFiller.RabbitMq;
 
 namespace VectorNNTP.BackFiller.ArticleWork
 {
@@ -176,16 +175,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _shutdown = shutdown;
         }
 
-        /// <summary>Gets the backbone context for this session.</summary>
+        /// <summary>Provider backbone label for this consume session. Not case-folded.</summary>
         internal string Backbone => _backbone;
 
-        /// <summary>Gets the one-based consumer slot matching the old NNTP connection number.</summary>
+        /// <summary>One-based slot reconciled against desired NNTP pool capacity for this backbone.</summary>
         internal int ConnectionNumber => _connectionNumber;
 
-        /// <summary>Gets the desired NNTP slot count used as the consume-session limit.</summary>
+        /// <summary>Desired NNTP connection count that bounds how many consume sessions may run for this backbone.</summary>
         internal int ConnectionLimit => _connectionLimit;
 
-        /// <summary>Gets the reconcile key <c>backbone/connectionNumber</c>.</summary>
+        /// <summary>Stable reconcile identity <c>backbone/connectionNumber</c> used by consumer reconciliation.</summary>
         internal string SessionKey => ComposeSessionKey(_backbone, _connectionNumber);
 
         /// <summary>Composes the reconciled key for one consume slot.</summary>
@@ -195,13 +194,13 @@ namespace VectorNNTP.BackFiller.ArticleWork
         internal static string ComposeSessionKey(string backbone, int connectionNumber) =>
             $"{backbone}/{connectionNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
-        /// <summary>Gets the consumer queue name.</summary>
+        /// <summary>Durable quorum queue name from <see cref="BackFillerRabbitMqTopology.ComposeProviderEntity"/>.</summary>
         internal string Queue => _queue;
 
-        /// <summary>Gets the captured shutdown snapshot used by retirement.</summary>
+        /// <summary>Shutdown policy captured at construction; retirement does not re-read host options.</summary>
         internal BackFillerShutdownRuntimeOptions Shutdown => _shutdown;
 
-        /// <summary>Gets admitted deliveries that have not yet entered <c>ProcessAsync</c>.</summary>
+        /// <summary>Admitted deliveries waiting for <see cref="_dispatch"/> that have not yet entered pipeline processing.</summary>
         internal int QueuedCount
         {
             get
@@ -213,16 +212,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
         }
 
-        /// <summary>Gets deliveries that currently hold dispatch and are inside <c>ProcessAsync</c>.</summary>
+        /// <summary>Deliveries that hold <see cref="_dispatch"/> and are inside the pipeline handler.</summary>
         internal int ActiveCount => Volatile.Read(ref _active);
 
-        /// <summary>Gets the token cancelled when queued work must not start.</summary>
+        /// <summary>Cancelled when retirement or dispose must not admit new queued pipeline work.</summary>
         internal CancellationToken QueueCancellationToken => _queueCts.Token;
 
-        /// <summary>Gets the token cancelled when active work must stop.</summary>
+        /// <summary>Cancelled when in-flight handler work must observe shutdown during retirement.</summary>
         internal CancellationToken WorkCancellationToken => _workCts.Token;
 
-        /// <summary>Gets the current local lifecycle state.</summary>
+        /// <summary>Local session lifecycle under <see cref="_gate"/>.</summary>
         internal ArticleWorkConsumerState State
         {
             get
@@ -234,10 +233,10 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
         }
 
-        /// <summary>Gets the channel generation or zero before start.</summary>
+        /// <summary>Connection generation of the open consumer channel, or zero before start and after retirement clears it.</summary>
         internal long Generation { get; private set; }
 
-        /// <summary>Gets the caller-owned consumer channel while the session is live.</summary>
+        /// <summary>Manual-ack consume channel used for settlement; null before start and after retirement.</summary>
         internal IRabbitMqManualAckChannel? Channel
         {
             get

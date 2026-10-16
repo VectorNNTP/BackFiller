@@ -43,7 +43,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         private int _fqdnOwnershipActive;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsReconciliationService"/> class.
+        /// Captures configuration, bind-address resolution, and the reconciler used by <see cref="StartAsync"/> and <see cref="StopAsync"/>.
         /// </summary>
         /// <param name="options">ACME and Cloudflare options, including the generated FQDN and zone id.</param>
         /// <param name="bindAddressResolver">Resolves addresses published as A and AAAA records.</param>
@@ -66,10 +66,10 @@ namespace VectorNNTP.BackFiller.Cloudflare
             _logger = logger;
         }
 
-        /// <summary>Gets the stable service name recorded by the application service manager.</summary>
+        /// <summary>Stable <see cref="Core.IApplicationService.Name"/> value registered with the application service manager.</summary>
         internal static string Name => "CloudflareDnsReconciliation";
 
-        /// <summary>Gets null. This service has no background execution after <see cref="StartAsync"/> returns.</summary>
+        /// <summary>Always null: reconcile work completes inside <see cref="StartAsync"/> with no long-running task.</summary>
         internal static Task? Execution => null;
 
         /// <summary>

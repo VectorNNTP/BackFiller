@@ -64,7 +64,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsClient"/> class.
+        /// Captures the HTTP client, options, and logger. Sets <see cref="ApiBaseAddress"/> when the client has no base address.
         /// </summary>
         /// <param name="httpClient">Client for the Cloudflare API. A missing base address is set to the v4 API root.</param>
         /// <param name="options">Options that supply the API token. The token is read per request and is not logged.</param>

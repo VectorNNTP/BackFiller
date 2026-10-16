@@ -47,14 +47,17 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Non-zero after <see cref="Dispose"/> begins.</summary>
         private int _disposed;
 
-        /// <summary>Initializes a new instance of the <see cref="CertificateManager"/> class.</summary>
-        /// <param name="fqdn">Certificate FQDN that owns this manager.</param>
-        /// <param name="stateDir">Shared ACME state root.</param>
-        /// <param name="acmeDirectoryUrl">ACME directory URL recorded in the journal.</param>
+        /// <summary>
+        /// Wires FQDN-scoped storage, journaling, and issuance for server certificate ensure/renew.
+        /// Does not contact the CA until <see cref="EnsureCertificateAsync"/> or <see cref="RenewIfDueAsync"/> runs.
+        /// </summary>
+        /// <param name="fqdn">Certificate FQDN that owns this manager's store and journal partition.</param>
+        /// <param name="stateDir">Shared ACME state root passed to the store and journal.</param>
+        /// <param name="acmeDirectoryUrl">ACME directory URL recorded on each journal transaction.</param>
         /// <param name="store">FQDN-scoped live certificate store.</param>
-        /// <param name="issuer">Certificate issuer.</param>
-        /// <param name="pfxPassword">PKCS#12 password.</param>
-        /// <param name="renewalThreshold">Renewal threshold.</param>
+        /// <param name="issuer">Issuer invoked when material is missing, invalid, or due for renewal.</param>
+        /// <param name="pfxPassword">PKCS#12 password. Not logged.</param>
+        /// <param name="renewalThreshold">Window before not-after in which a usable certificate is treated as due for renewal. Must be positive.</param>
         /// <param name="logger">Logger.</param>
         /// <param name="includeNewsHostname">Whether to include <see cref="CertificateIdentities.NewsHostname"/>.</param>
         /// <param name="journal">
@@ -99,13 +102,13 @@ namespace VectorNNTP.BackFiller.Acme
             _logger = logger;
         }
 
-        /// <summary>Gets the required certificate DNS identities.</summary>
+        /// <summary>DNS SAN set from <see cref="CertificateIdentities.ForFqdn"/> used for validation and issuance.</summary>
         private IReadOnlyList<string> Domains => _domains;
 
-        /// <summary>Gets the monotonic generation counter after successful persist.</summary>
+        /// <summary>In-process count of successful persists; logged at ready time, distinct from filesystem generation ids.</summary>
         private int Generation => _generation;
 
-        /// <summary>Gets the current in-memory material, if any.</summary>
+        /// <summary>Last material accepted by ensure or renew on this instance. Null until the first successful load or persist.</summary>
         internal CertificateMaterial? CurrentMaterial => _current;
 
         /// <summary>Assesses on-disk certificate without contacting ACME.</summary>

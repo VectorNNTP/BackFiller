@@ -5,8 +5,10 @@ using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>Regresses BackFillerStartupSmoke gating, isolated configuration, and Native AOT publish analysis settings.</summary>
     public sealed class BackFillerStartupSmokeTests
     {
+        /// <summary>IsRequested is false for null, empty, and values that are not the exact enabled token.</summary>
         [Theory]
         [InlineData(null)]
         [InlineData("")]
@@ -16,12 +18,14 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
         {
             Assert.False(BackFillerStartupSmoke.IsRequested(value));
         }
+        /// <summary>IsRequested is true only when the value equals BackFillerStartupSmoke.EnabledValue.</summary>
 
         [Fact]
         public void Smoke_is_requested_for_the_enabled_value()
         {
             Assert.True(BackFillerStartupSmoke.IsRequested(BackFillerStartupSmoke.EnabledValue));
         }
+        /// <summary>Isolated smoke binds fixture configuration and Complete returns 0 with the checkpoint message.</summary>
 
         [Fact]
         public void Isolated_configuration_binds_and_writes_the_checkpoint()
@@ -52,6 +56,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 output.ToString(),
                 StringComparison.Ordinal);
         }
+        /// <summary>UseIsolatedConfiguration throws FileNotFoundException for a missing path before host construction.</summary>
 
         [Fact]
         public void Missing_smoke_configuration_file_fails_before_host_construction()
@@ -70,6 +75,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 Environment.SetEnvironmentVariable(BackFillerStartupSmoke.ConfigurationPathVariable, null);
             }
         }
+        /// <summary>win-x64 Release publish enables AOT without suppressing IL analysis; unsupported RID fails the guard target.</summary>
 
         [Fact]
         public void Native_aot_publish_keeps_trim_analysis_enabled()
@@ -114,6 +120,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Contains("win-x64 and linux-x64", rejected.Output, StringComparison.Ordinal);
         }
 
+        /// <summary>Runs msbuild -getProperty for a Release x64 project evaluation.</summary>
         private static string Evaluate(string project, string property, string? runtimeIdentifier = null)
         {
             var arguments = new List<string>
@@ -135,6 +142,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return result.Output.Trim();
         }
 
+        /// <summary>Runs a process from the repository root and captures combined stdout/stderr.</summary>
         private static (int ExitCode, string Output) Run(string fileName, IReadOnlyList<string> arguments)
         {
             using var process = new Process();
@@ -156,6 +164,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return (process.ExitCode, stdout + stderr);
         }
 
+        /// <summary>Locates startup-smoke.json under tests/BackFiller.tests/Fixtures.</summary>
         private static string FindFixture()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -178,6 +187,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             throw new InvalidOperationException("startup-smoke.json was not found.");
         }
 
+        /// <summary>Locates src/BackFiller/BackFiller.csproj from the test base directory.</summary>
         private static string FindProjectFile()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -195,6 +205,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             throw new InvalidOperationException("BackFiller.csproj was not found.");
         }
 
+        /// <summary>Repository root (parent of src) from BackFiller.csproj location.</summary>
         private static string FindRepositoryRoot() =>
             Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(FindProjectFile())))!;
     }

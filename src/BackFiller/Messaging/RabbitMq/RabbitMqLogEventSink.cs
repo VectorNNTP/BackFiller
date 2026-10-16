@@ -89,7 +89,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>Gets the destination exchange.</summary>
         private string Exchange { get; }
 
-        /// <summary>Gets the routing key.</summary>
+        /// <summary>Routing key copied from the constructor after trimming. It does not change afterward.</summary>
         private string RoutingKey { get; }
 
         /// <summary>Gets the AMQP AppId.</summary>

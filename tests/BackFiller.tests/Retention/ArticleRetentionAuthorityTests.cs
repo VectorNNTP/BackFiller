@@ -6,9 +6,14 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
+    /// <summary>
+    /// ArticleRetentionAuthority retain, capacity, TTL, shutdown, and concurrency invariants.
+    /// </summary>
     public sealed class ArticleRetentionAuthorityTests
     {
+        /// <summary>Fixed clock anchor for ManualTimeProvider in retention tests.</summary>
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
+        /// <summary>Retained canonical exposes fqdn, listener port, identity, and claimable artdata.</summary>
 
         [Fact]
         public void RetainCanonical_then_open_exposes_owned_artdata_and_endpoint()
@@ -32,6 +37,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             using var claim = Claim(authority, "<a@b>", prepared.ArtData);
             Assert.Equal("<a@b>", claim.MessageId);
         }
+        /// <summary>Second retain is AlreadyPresent with first-wins artdata and single byte count.</summary>
 
         [Fact]
         public void Duplicate_message_id_is_first_wins_and_does_not_double_count()
@@ -50,6 +56,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             using var claim = Claim(authority, "<a@b>", first.ArtData);
             Assert.False(claim.ArticleBytes.Span.SequenceEqual(second.ArtData.AsSpan()));
         }
+        /// <summary>After TTL, claim is NotFound and sweep returns zero.</summary>
 
         [Fact]
         public void Claim_after_ttl_is_rejected_and_sweep_finds_nothing()
@@ -64,6 +71,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.SweepExpired());
             Assert.Equal(0, authority.RetainedCount);
         }
+        /// <summary>Re-retain after expiry creates a new generation not removed by prior expiry sweep.</summary>
 
         [Fact]
         public void Sweep_does_not_remove_a_newer_generation_of_the_same_identity()
@@ -78,6 +86,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.SweepExpired());
             using var claim = Claim(authority, "<a@b>", newer.ArtData);
         }
+        /// <summary>InvalidPayload rejection reports existing byte total without mutating retained entries.</summary>
 
         [Fact]
         public void Invalid_payload_rejection_reports_current_retained_total_and_leaves_state_unchanged()
@@ -104,6 +113,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(1, authority.RetainedCount);
             using var claim = Claim(authority, "<fit@b>", fit.ArtData);
         }
+        /// <summary>PayloadExceedsCapacity leaves prior retains intact.</summary>
 
         [Fact]
         public void Payload_exceeds_capacity_rejection_reports_current_retained_total_and_leaves_state_unchanged()
@@ -130,6 +140,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(1, authority.RetainedCount);
             using var claim = Claim(authority, "<fit-cap@b>", fit.ArtData);
         }
+        /// <summary>FIFO reclaims unpinned oldest to admit a third entry while pinned remains.</summary>
 
         [Fact]
         public void Insufficient_remaining_capacity_reclaims_unpinned_oldest_then_admits()
@@ -154,6 +165,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             Assert.Equal(two.Record.ArtSize + three.Record.ArtSize, authority.RetainedPayloadBytes);
         }
+        /// <summary>All pinned entries yield CapacityUnavailable without eviction.</summary>
 
         [Fact]
         public void Insufficient_remaining_capacity_with_all_pinned_rejects_without_evicting()
@@ -175,6 +187,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             using var claimTwo = Claim(authority, "<two-pin@b>", two.ArtData);
             Assert.Equal(one.Record.ArtSize + two.Record.ArtSize, authority.RetainedPayloadBytes);
         }
+        /// <summary>BeginShutdown rejects new retains; existing claim still succeeds.</summary>
 
         [Fact]
         public void Shutdown_rejects_insert_and_existing_open_still_works_until_dispose()
@@ -187,6 +200,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 "<b@c>", later.RequestId, later.Record, later.SelectedDateHeaderName).Kind);
             using var claim = Claim(authority, "<a@b>", keep.ArtData);
         }
+        /// <summary>DisposeAsync clears state and throws on subsequent RetainCanonical.</summary>
 
         [Fact]
         public async Task Dispose_releases_entries_and_rejects_further_use()
@@ -198,6 +212,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Throws<ObjectDisposedException>(() => authority.RetainCanonical(
                 "<b@c>", next.RequestId, next.Record, next.SelectedDateHeaderName));
         }
+        /// <summary>Parallel retains and claims preserve total byte accounting.</summary>
 
         [Fact]
         public async Task Concurrent_insert_and_open_keep_exact_accounting()
@@ -228,6 +243,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var claimed = await Task.WhenAll(claims);
             Assert.Equal(32, claimed.Length);
         }
+        /// <summary>Claim racing TTL expiry returns NotFound with zero bytes.</summary>
 
         [Fact]
         public async Task Claim_while_expiry_occurs_does_not_return_expired_bytes()
@@ -250,6 +266,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleDeliveryClaimKind.NotFound, result.Kind);
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
+        /// <summary>Concurrent same message id retains yield one Retained and exact byte total.</summary>
 
         [Fact]
         public async Task Duplicate_identity_race_keeps_one_entry_and_exact_bytes()
@@ -274,6 +291,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             var winner = Assert.Single(results, static r => r.Kind == ArticleRetentionKind.Retained);
             Assert.Equal(winner.RetainedPayloadBytes, authority.RetainedPayloadBytes);
         }
+        /// <summary>Claim during shutdown still serves artdata; new retains rejected.</summary>
 
         [Fact]
         public void Shutdown_during_open_still_returns_a_live_entry()
@@ -290,6 +308,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleRetentionKind.ShuttingDown, authority.RetainCanonical(
                 "<c@d>", later.RequestId, later.Record, later.SelectedDateHeaderName).Kind);
         }
+        /// <summary>Retention sources must not use blocking wait patterns in hot paths.</summary>
 
         [Fact]
         public void Production_retention_code_does_not_block_synchronously()
@@ -304,6 +323,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             }
         }
 
+        /// <summary>Clones a record with an overridden parse status for invalid-payload scenarios.</summary>
         private static ArticleRecord CreateRecordWithParseStatus(ArticleRecord source, ArticleParseStatus parseStatus) =>
             new(
                 source.ArtId,
@@ -315,6 +335,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 source.ArtData.ToArray(),
                 source.Fields);
 
+        /// <summary>Asserts Claimed and returns the claim when bytes match <paramref name="expected"/>.</summary>
         internal static ArticleRetentionAuthority.ArticleDeliveryClaim Claim(
             ArticleRetentionAuthority authority,
             string messageId,
@@ -327,11 +348,13 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             return result.Claim;
         }
 
+        /// <summary>Asserts TryClaimForDelivery returns NotFound for the message id.</summary>
         internal static void AssertNotFound(ArticleRetentionAuthority authority, string messageId) =>
             Assert.Equal(
                 ArticleDeliveryClaimKind.NotFound,
                 authority.TryClaimForDelivery(Encoding.ASCII.GetBytes(messageId)).Kind);
 
+        /// <summary>Constructs authority with test endpoint, manual time, and retention limits.</summary>
         internal static ArticleRetentionAuthority Create(
             TimeProvider time,
             int maxBytes,
@@ -349,6 +372,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 time,
                 NullLogger.Instance);
 
+        /// <summary>Locates src/BackFiller/Retention for static source scans.</summary>
         private static string FindSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);

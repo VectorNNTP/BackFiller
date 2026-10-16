@@ -8,8 +8,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
     /// </summary>
     public sealed class ArticleRetentionRequestPinTests
     {
+        /// <summary>Fixed UTC anchor for pin and FIFO reclaim tests.</summary>
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
+
+        /// <summary>Upper bound for waiting on pin-related async coordination.</summary>
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+        /// <summary>Open request id pins entry against equal-size FIFO pressure.</summary>
 
         [Fact]
         public void PublishedSuccess_IsPinnedAgainstFifoEviction()
@@ -31,6 +35,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(pinned.Record.ArtSize, authority.RetainedPayloadBytes);
             using var claim = ArticleRetentionAuthorityTests.Claim(authority, pinned.MessageId, pinned.ArtData);
         }
+        /// <summary>After cancel, equal-size admission evicts unpinned entry.</summary>
 
         [Fact]
         public void UnpinnedEntry_RemainsFifoEvictable()
@@ -54,6 +59,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             ArticleRetentionAuthorityTests.AssertNotFound(authority, unpinned.MessageId);
             using var claim = ArticleRetentionAuthorityTests.Claim(authority, next.MessageId, next.ArtData);
         }
+        /// <summary>FIFO skips pinned oldest and evicts unpinned newer.</summary>
 
         [Fact]
         public void PinnedOldest_UnpinnedNewer_IsSkipped()
@@ -87,6 +93,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             ArticleRetentionAuthorityTests.AssertNotFound(authority, unpinned.MessageId);
             Assert.Equal(pinned.Record.ArtSize + incoming.Record.ArtSize, authority.RetainedPayloadBytes);
         }
+        /// <summary>When all entries pinned, admission returns CapacityUnavailable.</summary>
 
         [Fact]
         public void AllCandidatesPinned_ReturnsCapacityUnavailable()
@@ -112,6 +119,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             using var claimOne = ArticleRetentionAuthorityTests.Claim(authority, one.MessageId, one.ArtData);
             using var claimTwo = ArticleRetentionAuthorityTests.Claim(authority, two.MessageId, two.ArtData);
         }
+        /// <summary>Entry stays pinned until every request id is cancelled.</summary>
 
         [Fact]
         public void MultipleRequestIdsKeepEntryPinned_UntilTheLastIsCancelled()
@@ -144,6 +152,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                     replacement.MessageId, replacement.RequestId, replacement.Record, replacement.SelectedDateHeaderName).Kind);
             Assert.Equal(replacement.Record.ArtSize, tight.RetainedPayloadBytes);
         }
+        /// <summary>Cancel last pin allows replacement retain.</summary>
 
         [Fact]
         public void CancelLastRequestId_MakesEntryEvictable()
@@ -166,6 +175,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                     replacement.MessageId, replacement.RequestId, replacement.Record, replacement.SelectedDateHeaderName).Kind);
             ArticleRetentionAuthorityTests.AssertNotFound(authority, pinned.MessageId);
         }
+        /// <summary>TTL sweep removes pinned entry and clears request id.</summary>
 
         [Fact]
         public void TtlExpiry_RemovesPinnedEntry()
@@ -182,6 +192,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.False(authority.TryCancelPendingRequest(prepared.RequestId));
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
+        /// <summary>Concurrent claim and retain keeps claim and blocks reclaim.</summary>
 
         [Fact]
         public async Task ConcurrentClaimAndReclaim_DoesNotDropAnOpenableEntry()
@@ -219,6 +230,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleRetentionKind.CapacityUnavailable, reclaim.Kind);
             claim.Claim.Dispose();
         }
+        /// <summary>Concurrent AlreadyPresent attach and reclaim respects pin semantics.</summary>
 
         [Fact]
         public async Task ConcurrentAlreadyPresentAndReclaim_AttachPinsAtomically()

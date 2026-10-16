@@ -168,10 +168,10 @@ namespace VectorNNTP.BackFiller.Articles
         /// <inheritdoc />
         public override int GetHashCode() => HashCode.Combine(_w0, _w1, _w2, _w3);
 
-        /// <summary>Equality operator.</summary>
+        /// <summary>True when all 32 digest bytes are equal.</summary>
         public static bool operator ==(ArticleId left, ArticleId right) => left.Equals(right);
 
-        /// <summary>Inequality operator.</summary>
+        /// <summary>True when any digest byte differs.</summary>
         public static bool operator !=(ArticleId left, ArticleId right) => !left.Equals(right);
 
         /// <summary>

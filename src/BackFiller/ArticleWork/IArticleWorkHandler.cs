@@ -1,3 +1,5 @@
+using VectorNNTP.BackFiller.Articles;
+
 namespace VectorNNTP.BackFiller.ArticleWork
 {
     /// <summary>
@@ -15,7 +17,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         Nntp.RetrievedArticle? Article = null,
         string? Fqdn = null,
         int? ListenerPort = null,
-        VectorNNTP.BackFiller.Articles.ArticleId? ArticleId = null);
+        ArticleId? ArticleId = null);
 
     /// <summary>
     /// Processes admitted Article Work. Retrieval and retention happen here; publication and ACK do not.

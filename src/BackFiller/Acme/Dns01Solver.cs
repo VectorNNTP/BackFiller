@@ -5,7 +5,9 @@ namespace VectorNNTP.BackFiller.Acme
     /// <param name="Validation">TXT RDATA (key authorization digest).</param>
     internal sealed record Dns01ChallengeSpec(string Domain, string Validation)
     {
-        /// <summary>Gets the <c>_acme-challenge.</c> record name.</summary>
+        /// <summary>
+        /// DNS-01 TXT owner name: <c>_acme-challenge.</c> plus a trimmed, lowercased <see cref="Domain"/> without a trailing dot.
+        /// </summary>
         internal string RecordName =>
             "_acme-challenge." + Domain.Trim().TrimEnd('.').ToLowerInvariant();
     }
@@ -13,10 +15,13 @@ namespace VectorNNTP.BackFiller.Acme
     /// <summary>Looks up TXT RDATA for authoritative visibility checks (injectable).</summary>
     internal interface IAuthoritativeTxtResolver
     {
-        /// <summary>Returns TXT strings for <paramref name="name"/> (maybe empty).</summary>
-        /// <param name="name">TXT owner name.</param>
-        /// <param name="cancellationToken">Cancels the lookup.</param>
-        /// <returns>TXT RDATA values. Empty when none are visible.</returns>
+        /// <summary>
+        /// Returns TXT RDATA visible on authoritative nameservers for <paramref name="name"/>.
+        /// Implementations may throw <see cref="AcmeChallengeException"/> when discovery fails; callers treat other failures as skipped servers.
+        /// </summary>
+        /// <param name="name">TXT owner name (FQDN or relative).</param>
+        /// <param name="cancellationToken">Cancels discovery and each nameserver query.</param>
+        /// <returns>TXT strings agreed by every successful authoritative answer, or empty when no server answered.</returns>
         Task<IReadOnlyList<string>> LookupTxtAsync(string name, CancellationToken cancellationToken);
     }
 
@@ -58,14 +63,16 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Set after <see cref="RecoverAsync"/> finishes, including the no-recovery-directory path.</summary>
         private bool _recovered;
 
-        /// <summary>Initializes a new instance of the <see cref="Dns01Solver"/> class.</summary>
-        /// <param name="client">Cloudflare DNS client.</param>
-        /// <param name="zoneId">Cloudflare zone id.</param>
-        /// <param name="resolver">Authoritative TXT resolver.</param>
-        /// <param name="fqdn">Certificate FQDN that owns this DNS-01 recovery partition.</param>
-        /// <param name="stateDir">Shared ACME state root. When omitted, recovery files are disabled.</param>
-        /// <param name="propagationTimeout">Visibility wait timeout.</param>
-        /// <param name="propagationInterval">Visibility poll interval.</param>
+        /// <summary>
+        /// Binds Cloudflare mutation, authoritative visibility checks, and optional on-disk DNS-01 recovery for one certificate FQDN.
+        /// </summary>
+        /// <param name="client">Cloudflare DNS client used for create, list, and delete.</param>
+        /// <param name="zoneId">Cloudflare zone id for every record this instance creates.</param>
+        /// <param name="resolver">Authoritative TXT resolver used by <see cref="WaitPropagatedAsync"/>.</param>
+        /// <param name="fqdn">Certificate FQDN that owns recovery files and journal attribution.</param>
+        /// <param name="stateDir">Shared ACME state root. When omitted, recovery files are disabled and <see cref="RecoverAsync"/> is a no-op.</param>
+        /// <param name="propagationTimeout">Wall-clock budget for <see cref="WaitPropagatedAsync"/>. Default is 120 seconds.</param>
+        /// <param name="propagationInterval">Delay between visibility polls. Default is 2 seconds.</param>
         /// <param name="historyJournal">
         /// Optional persistent ACME journal. DNS create/remove events are recorded here
         /// only when a transaction is already active for this FQDN.
@@ -100,7 +107,7 @@ namespace VectorNNTP.BackFiller.Acme
             }
         }
 
-        /// <summary>Gets the FQDN this solver is scoped to.</summary>
+        /// <summary>Normalized certificate FQDN that scopes recovery files and journal events.</summary>
         private string Fqdn => _fqdn;
 
         /// <summary>Idempotent startup recovery of journalled TXT records.</summary>
@@ -273,7 +280,7 @@ namespace VectorNNTP.BackFiller.Acme
                 {
                     throw;
                 }
-                // codeql[cs/catch-of-all-exceptions] An unexpected deletion failure keeps the record for another cleanup attempt.
+                // codeql[cs/catch-of-all-exceptions] An unexpected deletion failure keeps the record for another clean-up attempt.
                 catch
                 {
                     remaining.Add(item);
@@ -421,18 +428,17 @@ namespace VectorNNTP.BackFiller.Acme
         {
             var records = await _client.ListAllRecordsForNameAsync(zoneId, name, cancellationToken)
                 .ConfigureAwait(false);
-            return records
+            return [.. records
                 .Where(r =>
                     string.Equals(r.Type, Cloudflare.CloudflareDnsRecordTypes.TXT, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(r.Content, content, StringComparison.Ordinal))
-                .Select(r => r.Id)
-                .ToArray();
+                .Select(r => r.Id)];
         }
 
         /// <summary>Deletes one record. HTTP 404, a message containing <c>not found</c>, or Cloudflare error 81044 is treated as already deleted.</summary>
         /// <param name="zoneId">Cloudflare zone id.</param>
         /// <param name="recordId">Cloudflare record id.</param>
-        /// <param name="cancellationToken">Cancels the delete.</param>
+        /// <param name="cancellationToken">Cancels to delete.</param>
         private async Task DeleteOwnedRecordAsync(
             string zoneId,
             string recordId,
@@ -457,7 +463,7 @@ namespace VectorNNTP.BackFiller.Acme
 
         /// <summary>
         /// Calls <see cref="CleanupAsync"/>. Cancellation of <paramref name="cancellationToken"/> propagates.
-        /// Other cleanup failures are ignored.
+        /// Other clean-up failures are ignored.
         /// </summary>
         /// <param name="cancellationToken">Passed to <see cref="CleanupAsync"/>.</param>
         private async Task BestEffortCleanupAsync(CancellationToken cancellationToken)
@@ -470,7 +476,7 @@ namespace VectorNNTP.BackFiller.Acme
             {
                 throw;
             }
-            // codeql[cs/catch-of-all-exceptions] Best-effort TXT cleanup must not replace the issuance failure being reported.
+            // codeql[cs/catch-of-all-exceptions] Best-effort TXT clean-up must not replace the issuance failure being reported.
             catch
             {
                 // Logged by callers via category.
@@ -491,7 +497,7 @@ namespace VectorNNTP.BackFiller.Acme
             return cleaned;
         }
 
-        /// <summary>One TXT record created by this solver and still tracked for cleanup.</summary>
+        /// <summary>One TXT record created by this solver and still tracked for clean-up.</summary>
         /// <param name="Spec">Challenge that produced the record.</param>
         /// <param name="RecordId">Cloudflare record id.</param>
         /// <param name="ZoneId">Cloudflare zone id.</param>

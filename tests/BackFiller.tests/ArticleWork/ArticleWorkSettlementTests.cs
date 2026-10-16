@@ -5,8 +5,18 @@ using VectorNNTP.BackFiller.Tests.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Disposition planning and <see cref="ArticleWorkSettlementLease"/> invariants: single settlement, generation/channel gates, broker op serialization.
+    /// </summary>
     public sealed class ArticleWorkSettlementTests
     {
+        /// <summary>
+        /// <see cref="ArticleWorkDispositionPlanner"/> maps each outcome to ack/requeue/publish flags for replyable, non-cancelled work.
+        /// </summary>
+        /// <param name="outcomeName">Outcome enum name.</param>
+        /// <param name="acknowledge">Expected ack flag.</param>
+        /// <param name="requeue">Expected requeue flag.</param>
+        /// <param name="publish">Expected publish-response flag.</param>
         [Theory]
         [InlineData(nameof(ArticleWorkOutcome.Success), true, false, true)]
         [InlineData(nameof(ArticleWorkOutcome.ArticleNotFound), true, false, true)]
@@ -29,6 +39,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(publish, disposition.PublishResponse);
         }
 
+        /// <summary>
+        /// InvalidRequest still acks without requeue when reply coordinates are absent, but skips response publication.
+        /// </summary>
         [Fact]
         public void InvalidRequest_without_reply_coordinates_does_not_publish()
         {
@@ -42,6 +55,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(disposition.PublishResponse);
         }
 
+        /// <summary>
+        /// Cancellation requested converts even success disposition to nack/requeue without publishing.
+        /// </summary>
         [Fact]
         public void Cancellation_overrides_a_terminal_outcome()
         {
@@ -55,6 +71,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(disposition.PublishResponse);
         }
 
+        /// <summary>
+        /// Deferred handler (not completed) surfaces provider failure with requeue and no published terminal JSON.
+        /// </summary>
         [Fact]
         public async Task Valid_work_is_admitted_as_provider_failure_without_a_fake_success()
         {
@@ -80,6 +99,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(7UL, settlement.DeliveryTag);
         }
 
+        /// <summary>
+        /// Malformed request acks once, records InvalidRequest intent, no requeue.
+        /// </summary>
         [Fact]
         public async Task InvalidRequest_acks_without_requeue_and_records_a_response_intent()
         {
@@ -106,6 +128,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Requeue);
         }
 
+        /// <summary>
+        /// Terminal handler outcomes publish once; duplicate <see cref="ArticleWorkSettlementLease.TrySettleAsync"/> returns false.
+        /// </summary>
+        /// <param name="handlerOutcomeName">Terminal outcome.</param>
+        /// <param name="acknowledge">Expected ack on first settlement.</param>
+        /// <param name="requeue">Expected requeue flag (false for terminal).</param>
         [Theory]
         [InlineData(nameof(ArticleWorkOutcome.Success), true, false)]
         [InlineData(nameof(ArticleWorkOutcome.ArticleNotFound), true, false)]
@@ -137,6 +165,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(requeue, settlement.Requeue);
         }
 
+        /// <summary>
+        /// Handler exception maps to UnexpectedFailure with nack/requeue and empty publisher log.
+        /// </summary>
         [Fact]
         public async Task Retryable_failures_nack_requeue_without_a_terminal_response()
         {
@@ -157,6 +188,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(Assert.Single(channel.Settlements).Requeue);
         }
 
+        /// <summary>
+        /// Cancelled token before processing yields Cancelled outcome with nack/requeue and no publication.
+        /// </summary>
         [Fact]
         public async Task Cancellation_nacks_requeue_without_a_terminal_response()
         {
@@ -183,6 +217,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(settlement.Requeue);
         }
 
+        /// <summary>
+        /// InvalidRequest still terminal-acks when recording publisher throws (no requeue).
+        /// </summary>
         [Fact]
         public async Task InvalidRequest_publish_failure_acks_without_requeue()
         {
@@ -210,6 +247,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Requeue);
         }
 
+        /// <summary>
+        /// Success handler with failed confirm/publication still acks without requeue (article may be retained upstream).
+        /// </summary>
         [Fact]
         public async Task Success_publish_failure_acks_and_does_not_requeue()
         {
@@ -236,6 +276,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Requeue);
         }
 
+        /// <summary>
+        /// Lease settles only on the channel instance captured at admission; replacement channel is not original.
+        /// </summary>
         [Fact]
         public async Task Settlement_uses_only_the_original_channel()
         {
@@ -251,6 +294,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(replacement.Settlements);
         }
 
+        /// <summary>
+        /// Closed original channel with wrong <c>channelStillCurrent</c> predicate does not settle on any channel.
+        /// </summary>
         [Fact]
         public async Task Stale_channel_cannot_settle_through_a_replacement()
         {
@@ -270,6 +316,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(replacement.Settlements);
         }
 
+        /// <summary>
+        /// <c>channelStillCurrent: false</c> suppresses settlement even if the channel object remains open.
+        /// </summary>
         [Fact]
         public async Task Lost_generation_skips_settlement_even_when_the_old_channel_object_is_still_open()
         {
@@ -286,6 +335,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(original.Settlements);
         }
 
+        /// <summary>
+        /// Second TrySettle after success returns false; first broker op wins.
+        /// </summary>
         [Fact]
         public async Task Duplicate_settlement_is_prevented()
         {
@@ -300,6 +352,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Acknowledge);
         }
 
+        /// <summary>
+        /// Handler completing after reconnect must not publish or ack on stale or replacement consume channels.
+        /// </summary>
         [Fact]
         public async Task In_flight_delivery_does_not_settle_on_a_replaced_generation()
         {
@@ -355,6 +410,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Concurrent nacks on one channel serialize through the settlement gate (max one broker op in flight).
+        /// </summary>
         [Fact]
         public async Task Two_nacks_on_one_channel_do_not_enter_together()
         {
@@ -383,6 +441,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(second.IsSettled);
         }
 
+        /// <summary>
+        /// BasicCancel waits until an in-flight nack settlement releases the exclusive gate.
+        /// </summary>
         [Fact]
         public async Task Basic_cancel_does_not_enter_while_a_nack_holds_the_channel()
         {
@@ -407,6 +468,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, channel.CancelCount);
         }
 
+        /// <summary>
+        /// Ack and nack settlements on the same channel do not overlap broker operations.
+        /// </summary>
         [Fact]
         public async Task Ack_and_nack_on_one_channel_do_not_enter_together()
         {
@@ -443,6 +507,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, channel.MaxBrokerOpsInFlight);
         }
 
+        /// <summary>
+        /// Cancelled TrySettle while waiting does not mark settled; a later call completes the second delivery tag.
+        /// </summary>
         [Fact]
         public async Task Cancelled_wait_does_not_claim_the_lease_and_a_later_call_settles_once()
         {
@@ -470,6 +537,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(new ulong[] { 7, 8 }, channel.Settlements.Select(static settlement => settlement.DeliveryTag));
         }
 
+        /// <summary>
+        /// Failed broker nack marks lease settled once; waiter still completes settlement for the other tag.
+        /// </summary>
         [Fact]
         public async Task Broker_failure_claims_the_lease_once_and_the_waiter_still_settles()
         {
@@ -494,6 +564,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(8UL, Assert.Single(channel.Settlements).DeliveryTag);
         }
 
+        /// <summary>
+        /// Channel closed while second waiter is queued prevents that waiter from settling afterward.
+        /// </summary>
         [Fact]
         public async Task Closed_channel_does_not_claim_a_waiting_lease()
         {
@@ -518,6 +591,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(7UL, Assert.Single(channel.Settlements).DeliveryTag);
         }
 
+        /// <summary>
+        /// Settlement gates are per-channel/generation; nacks on two channels may run concurrently.
+        /// </summary>
         [Fact]
         public async Task Replacement_channel_uses_an_independent_gate()
         {
@@ -544,6 +620,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(await newSettle);
         }
 
+        /// <summary>
+        /// Channel dispose waits for in-flight nack; concurrent dispose calls serialize after the settlement completes.
+        /// </summary>
         [Fact]
         public async Task Dispose_does_not_enter_while_a_nack_holds_the_channel()
         {
@@ -580,6 +659,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(7UL, Assert.Single(channel.Settlements).DeliveryTag);
         }
 
+        /// <summary>
+        /// Lease generation mismatch with open channel suppresses settlement (stale delivery tag generation).
+        /// </summary>
         [Fact]
         public async Task Stale_generation_check_does_not_settle_the_current_channel()
         {
@@ -592,6 +674,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(channel.Settlements);
         }
 
+        /// <summary>
+        /// Fake consume channel with nack enter/complete gates for exclusive settlement tests.
+        /// </summary>
+        /// <returns>Channel with <see cref="FakeBackFillerRabbitMqChannel.NackEntered"/> and <see cref="FakeBackFillerRabbitMqChannel.NackGate"/> wired.</returns>
         private static FakeBackFillerRabbitMqChannel GatedChannel() =>
             new(1)
             {
@@ -599,6 +685,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 NackGate = NewSource(),
             };
 
+        /// <summary>
+        /// TaskCompletionSource configured for async test coordination without inline continuations.
+        /// </summary>
+        /// <returns>New completion source for gates and startup signals.</returns>
         private static TaskCompletionSource NewSource() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

@@ -9,8 +9,14 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Provider RabbitMQ topology: quorum fanout exchange/queue per backbone, declare ordering, capacity-driven consumer lifecycle.
+    /// </summary>
     public sealed class ArticleWorkProviderTopologyTests
     {
+        /// <summary>
+        /// Usable capacity starts consumers only after a dedicated topology channel declares exchange, durable quorum queue, and bind, then disposes.
+        /// </summary>
         [Fact]
         public async Task Active_backbone_declares_quorum_fanout_topology_before_consumers()
         {
@@ -50,6 +56,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Queue declare precondition failure leaves zero running sessions and no BasicConsume on any channel.
+        /// </summary>
         [Fact]
         public async Task Topology_declare_failure_does_not_start_consumers()
         {
@@ -72,6 +81,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Catalog entries without positive usable capacity do not open channels or sessions.
+        /// </summary>
         [Fact]
         public async Task Inactive_backbone_does_not_declare_or_consume()
         {
@@ -92,6 +104,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Capacity drop to zero retires consume sessions but does not delete exchanges/queues via manual-ack channel APIs.
+        /// </summary>
         [Fact]
         public async Task Losing_capacity_retires_consumers_without_deleting_topology()
         {
@@ -128,6 +143,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Capacity restored after zero re-runs declare on a fresh channel and starts consumers; prior declaration counts increase idempotently.
+        /// </summary>
         [Fact]
         public async Task Reactivating_backbone_redeclares_idempotently_and_starts_consumers()
         {
@@ -181,6 +199,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Only backbones with positive usable capacity get provider endpoint topology; inactive catalog entries are skipped.
+        /// </summary>
         [Fact]
         public async Task Only_usable_backbones_are_declared()
         {
@@ -208,6 +229,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Repeated <see cref="BackFillerArticleWorkTopology.DeclareProviderEndpointAsync"/> on one channel records a single declare triple with quorum queue arguments.
+        /// </summary>
         [Fact]
         public async Task DeclareProviderEndpoint_is_idempotent_on_same_channel()
         {
@@ -227,6 +251,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             });
         }
 
+        /// <summary>
+        /// Consumer service with deferred handler and recording publisher for topology-only assertions.
+        /// </summary>
+        /// <param name="connections">Started RabbitMQ service.</param>
+        /// <param name="catalog">Provider definitions driving queue names.</param>
+        /// <param name="capacity">Usable capacity state consumed at start.</param>
+        /// <returns>New <see cref="ArticleWorkConsumerService"/>.</returns>
         private static ArticleWorkConsumerService CreateConsumer(
             IRabbitMqService connections,
             IBackFillerProviderCatalog catalog,
@@ -240,6 +271,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 catalog,
                 capacity);
 
+        /// <summary>
+        /// Builds a static catalog from backbone/max-session pairs with fixed loopback NNTP endpoints.
+        /// </summary>
+        /// <param name="providers">Backbone names and session ceilings.</param>
+        /// <returns>Catalog passed to the consumer service.</returns>
         private static StaticBackFillerProviderCatalog CreateCatalog(
             IReadOnlyList<(string Backbone, int MaxSessions)> providers) =>
             new(
@@ -255,6 +291,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                     p.MaxSessions)),
             ]);
 
+        /// <summary>
+        /// Creates capacity state, publishing a snapshot when at least one backbone has active slots above zero.
+        /// </summary>
+        /// <param name="capacities">Backbone/active-slot pairs.</param>
+        /// <returns>Initialized <see cref="BackboneUsableCapacityState"/>.</returns>
         private static BackboneUsableCapacityState CreateCapacity(
             IReadOnlyList<(string Backbone, int Active)> capacities)
         {

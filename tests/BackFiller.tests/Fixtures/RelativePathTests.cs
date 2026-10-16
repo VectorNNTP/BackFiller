@@ -1,7 +1,15 @@
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {
+    /// <summary>
+    /// RelativePath.Under containment and rejection of rooted or traversing segments.
+    /// </summary>
+
     public sealed class RelativePathTests
     {
+        /// <summary>
+        /// Contract: Under appends relative segments beneath the parent.
+        /// </summary>
+
         [Fact]
         public void Under_appends_relative_segments_beneath_the_parent()
         {
@@ -23,6 +31,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             }
         }
 
+        /// <summary>
+        /// Invalid path or argument is rejected before resolution proceeds.
+        /// </summary>
+
         [Fact]
         public void Under_rejects_a_rooted_segment_instead_of_discarding_the_parent()
         {
@@ -42,6 +54,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             }
         }
 
+        /// <summary>
+        /// Invalid path or argument is rejected before resolution proceeds.
+        /// </summary>
+
         [Fact]
         public void Under_rejects_parent_segment_traversal()
         {
@@ -57,6 +73,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 Directory.Delete(root);
             }
         }
+
+        /// <summary>
+        /// Invalid path or argument is rejected before resolution proceeds.
+        /// </summary>
 
         [Fact]
         public void Under_rejects_a_sibling_prefix_escape()

@@ -16,6 +16,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class ArticleCorpusBench
     {
+        /// <summary>
+        /// Walks <c>.artifacts/articles</c> once, writes a report under <c>.artifacts</c>, and asserts every file is classified.
+        /// Skips quietly when the corpus directory is absent.
+        /// </summary>
         [Fact]
         public void Measure_local_article_corpus()
         {
@@ -179,6 +183,18 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(files.Length, valid + invalid + unsupported);
         }
 
+        /// <summary>
+        /// Parses, materializes, and hashes one article while recording stage timings and stuffed-dot counts for bench output.
+        /// </summary>
+        /// <param name="parser">Shared parser instance for the corpus pass.</param>
+        /// <param name="bytes">Raw stored article bytes (not NNTP-framed).</param>
+        /// <param name="parseElapsed">Stopwatch ticks spent in <see cref="NntpArticleParser.Parse"/>.</param>
+        /// <param name="materializeElapsed">Stopwatch ticks spent in canonical materialization.</param>
+        /// <param name="hashElapsed">Stopwatch ticks spent locating fields and hashing canonical bytes.</param>
+        /// <param name="canonicalBytes">Accepted canonical length when the outcome is valid.</param>
+        /// <param name="stuffedDots">Extra body dots counted on the parsed body span.</param>
+        /// <param name="reason">Parse or materialize failure label when the outcome is invalid.</param>
+        /// <returns>Valid when parse and materialize succeed; invalid otherwise.</returns>
         private static CorpusOutcome Process(
             NntpArticleParser parser,
             byte[] bytes,
@@ -267,12 +283,19 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return false;
         }
 
+        /// <summary>Increments a rejection-reason counter for the corpus report.</summary>
+        /// <param name="reasons">Mutable reason histogram.</param>
+        /// <param name="reason">Reason key to increment.</param>
         private static void Add(Dictionary<string, int> reasons, string reason)
         {
             reasons.TryGetValue(reason, out var count);
             reasons[reason] = count + 1;
         }
 
+        /// <summary>Returns an order statistic from a sorted sample (0 = minimum, 1 = maximum).</summary>
+        /// <param name="sorted">Ascending sorted values.</param>
+        /// <param name="fraction">Quantile in [0, 1].</param>
+        /// <returns>Selected element or zero when the sample is empty.</returns>
         private static long At(long[] sorted, double fraction)
         {
             if (sorted.Length == 0)
@@ -294,16 +317,28 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return sorted[index];
         }
 
+        /// <summary>Converts stopwatch ticks to milliseconds for report lines.</summary>
+        /// <param name="ticks">Elapsed ticks.</param>
+        /// <returns>Milliseconds at the current stopwatch frequency.</returns>
         private static double Ms(long ticks)
             => ticks * 1000d / Stopwatch.Frequency;
 
+        /// <summary>Converts stopwatch ticks to seconds for aggregate stage totals.</summary>
+        /// <param name="ticks">Elapsed ticks.</param>
+        /// <returns>Seconds at the current stopwatch frequency.</returns>
         private static double TicksToSeconds(long ticks)
             => ticks / (double)Stopwatch.Frequency;
 
+        /// <summary>Per-file classification bucket used by the corpus bench and <see cref="ClassifyArticle"/>.</summary>
         internal enum CorpusOutcome
         {
+            /// <summary>Parse and materialize succeeded.</summary>
             Valid,
+
+            /// <summary>Article bytes were read but rejected by parse or materialize.</summary>
             Invalid,
+
+            /// <summary>File could not be read or is empty; not treated as a malformed article.</summary>
             Unsupported,
         }
     }

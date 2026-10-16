@@ -26,13 +26,13 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             Thumbprint = ComputeThumbprint(Jwk);
         }
 
-        /// <summary>Gets the JWS <c>alg</c> value (<c>RS256</c>).</summary>
+        /// <summary>JWS protected header <c>alg</c> value. Always <c>RS256</c> for account keys.</summary>
         internal string SignatureAlgorithm { get; }
 
-        /// <summary>Gets the canonical JWK JSON object used for thumbprints and newAccount.</summary>
+        /// <summary>Canonical JWK JSON (member order fixed) used for thumbprints and <c>newAccount</c> payloads.</summary>
         internal string Jwk { get; }
 
-        /// <summary>Gets the JWK thumbprint (base64url SHA-256 of <see cref="Jwk"/>).</summary>
+        /// <summary>Base64url SHA-256 of <see cref="Jwk"/>; used in DNS-01 key authorizations.</summary>
         internal string Thumbprint { get; }
 
         /// <summary>Creates a new RSA account key (minimum 2048 bits).</summary>

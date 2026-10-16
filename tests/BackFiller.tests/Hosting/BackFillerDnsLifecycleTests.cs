@@ -16,10 +16,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>
+    /// Regresses Cloudflare DNS reconciliation ordering in <see cref="ApplicationServiceManager"/> and full-host startup:
+    /// DNS runs before ACME and the cache listener, rollback removes only the BackFiller FQDN, and bind resolution runs once per start attempt.
+    /// </summary>
     public sealed class BackFillerDnsLifecycleTests
     {
+        /// <summary>FQDN that must never appear in reconcile or remove calls during these tests.</summary>
         private const string UnrelatedFqdn = "nntpd01.usenet.ninja";
 
+        /// <summary>DNS reconciliation is registered as a shared Cloudflare application service, not a BackFiller-only hosted wrapper type.</summary>
         [Fact]
         public void Adapter_is_the_shared_common_type()
         {
@@ -34,6 +40,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                     .GetType("VectorNNTP.BackFiller.Hosting.CloudflareDnsReconciliationHostedService"));
         }
 
+        /// <summary>When DNS reconcile throws, later application services never start, started-services is empty, and remove runs for the BackFiller FQDN only.</summary>
         [Fact]
         public async Task Dns_startup_failure_does_not_start_later_services_and_cleans_up()
         {
@@ -55,6 +62,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Equal(1, harness.Resolver.ResolveCount);
         }
 
+        /// <summary>After DNS and ACME start, an ACME failure stops DNS and leaves the listener unstarted; remove targets only the configured BackFiller FQDN.</summary>
         [Fact]
         public async Task Dns_succeeds_then_acme_failure_rolls_back_exact_backfiller_fqdn()
         {
@@ -81,6 +89,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Empty(manager.StartedServices);
         }
 
+        /// <summary>Listener failure after DNS and ACME succeed rolls back in reverse order (listener, ACME, DNS) without touching unrelated FQDNs.</summary>
         [Fact]
         public async Task Dns_succeeds_then_listener_failure_rolls_back_exact_backfiller_fqdn()
         {
@@ -110,6 +119,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Empty(manager.StartedServices);
         }
 
+        /// <summary>Successful start records DNS→ACME→listener; stop reverses that order and remove runs once for the BackFiller FQDN.</summary>
         [Fact]
         public async Task Normal_shutdown_stops_listener_then_acme_then_dns_and_removes_exact_fqdn()
         {
@@ -143,6 +153,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             Assert.Empty(manager.StartedServices);
         }
 
+        /// <summary>Composed host wires DNS as the first <see cref="IApplicationService"/>; stop removes only the configured FQDN and does not register a legacy DNS hosted service type.</summary>
         [Fact]
         public async Task Host_start_and_stop_uses_manager_dns_and_removes_only_the_backfiller_fqdn()
         {
@@ -192,6 +203,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 static service => service.GetType().Name == "CloudflareDnsReconciliationHostedService");
         }
 
+        /// <summary>Builds an <see cref="ApplicationServiceManager"/> with valid runtime options and no logging side effects.</summary>
+        /// <param name="services">Ordered application services under test.</param>
         private static VectorNNTP.BackFiller.Core.ApplicationServiceManager CreateManager(params IApplicationService[] services)
         {
             var runtime = BackFillerRuntimeOptionsFactory.Create(
@@ -203,6 +216,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 NullLogger<VectorNNTP.BackFiller.Core.ApplicationServiceManager>.Instance);
         }
 
+        /// <summary>Real DNS reconciliation adapter with counting bind resolver and recording reconciler for FQDN-scoped assertions.</summary>
         private static DnsHarness CreateDnsHarness()
         {
             var identity = BackFillerTestOptions.CreateValid();
@@ -225,6 +239,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 options);
         }
 
+        /// <summary>Swaps real ACME application service registration for immediate-ready test double in the host composition test.</summary>
+        /// <param name="services">Host service collection after <c>AddBackFillerHosting</c>.</param>
         private static void ReplaceAcme(IServiceCollection services)
         {
             for (var i = 0; i < services.Count; i++)
@@ -237,18 +253,27 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>DNS reconciliation test fixture: adapter, spy reconciler, resolve counter, and bound options.</summary>
+        /// <param name="Adapter">Application-service wrapper around the inner reconciler.</param>
+        /// <param name="Reconciler">Records reconcile and remove calls.</param>
+        /// <param name="Resolver">Counts bind-address resolution invocations.</param>
+        /// <param name="Options">ACME/Cloudflare options including FQDN under test.</param>
         private sealed record DnsHarness(
             CloudflareDnsReconciliationApplicationService Adapter,
             RecordingCloudflareDnsReconciler Reconciler,
             CountingBindAddressResolver Resolver,
             AcmeCloudflareOptions Options);
 
+        /// <summary>Delegates bind resolution and exposes a thread-safe call count for startup-once assertions.</summary>
         private sealed class CountingBindAddressResolver(IBindAddressResolver inner) : IBindAddressResolver
         {
+            /// <summary>Observed <see cref="Resolve"/> invocations.</summary>
             private int _resolveCount;
 
+            /// <summary>Number of <see cref="Resolve"/> calls observed.</summary>
             public int ResolveCount => Volatile.Read(ref _resolveCount);
 
+            /// <inheritdoc />
             public ResolvedBindAddresses Resolve(AcmeCloudflareOptions options)
             {
                 Interlocked.Increment(ref _resolveCount);
@@ -256,12 +281,19 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Records start/stop order; optionally wraps a real service or throws on start to simulate downstream failure.</summary>
         private sealed class OrderRecordingService : IApplicationService
         {
+            /// <summary>Optional inner service whose lifecycle is forwarded after recording.</summary>
             private readonly IApplicationService? _inner;
+            /// <summary>Shared list receiving start/stop order markers.</summary>
             private readonly List<string> _order;
+            /// <summary>When set, thrown from <see cref="StartAsync"/> after recording start.</summary>
             private readonly Exception? _startException;
 
+            /// <summary>Wraps an inner service and forwards start/stop after recording order.</summary>
+            /// <param name="inner">Service whose <see cref="Name"/> and lifecycle are delegated.</param>
+            /// <param name="order">Mutable list receiving <c>start:</c> and <c>stop:</c> entries.</param>
             public OrderRecordingService(IApplicationService inner, List<string> order)
             {
                 ArgumentNullException.ThrowIfNull(inner);
@@ -271,6 +303,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 Name = inner.Name;
             }
 
+            /// <summary>Stub service that records order and optionally fails <see cref="StartAsync"/>.</summary>
+            /// <param name="name">Recorded service name in order entries.</param>
+            /// <param name="order">Mutable list receiving lifecycle order.</param>
+            /// <param name="startException">When set, thrown from <see cref="StartAsync"/> after recording start.</param>
             public OrderRecordingService(string name, List<string> order, Exception? startException = null)
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -280,12 +316,16 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 _startException = startException;
             }
 
+            /// <inheritdoc />
             public string Name { get; }
 
+            /// <inheritdoc />
             public Task? Execution => _inner?.Execution;
 
+            /// <summary>Number of successful entries into <see cref="StartAsync"/> before any throw.</summary>
             public int StartCount { get; private set; }
 
+            /// <inheritdoc />
             public async Task StartAsync(CancellationToken cancellationToken)
             {
                 StartCount++;
@@ -301,6 +341,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 }
             }
 
+            /// <inheritdoc />
             public async Task StopAsync(CancellationToken cancellationToken)
             {
                 _order.Add("stop:" + Name);

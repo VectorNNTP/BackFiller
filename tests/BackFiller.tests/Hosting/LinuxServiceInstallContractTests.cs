@@ -8,6 +8,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
     /// </summary>
     public sealed class LinuxServiceInstallContractTests
     {
+        /// <summary>README install steps and the shipped unit file agree on account, paths, permissions, and systemd enablement without world-writable modes.</summary>
         [Fact]
         public void Readme_creates_the_service_account_and_limits_write_access_to_logs_and_certs()
         {

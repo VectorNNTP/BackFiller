@@ -79,10 +79,10 @@ namespace VectorNNTP.BackFiller.Articles
         public override int GetHashCode() =>
             HashCode.Combine(MessageId, Newsgroups, Subject, From, Date, References, Path);
 
-        /// <summary>Equality operator.</summary>
+        /// <summary>True when every header range matches.</summary>
         public static bool operator ==(ArticleFieldTable left, ArticleFieldTable right) => left.Equals(right);
 
-        /// <summary>Inequality operator.</summary>
+        /// <summary>True when any header range differs.</summary>
         public static bool operator !=(ArticleFieldTable left, ArticleFieldTable right) => !left.Equals(right);
 
         /// <summary>

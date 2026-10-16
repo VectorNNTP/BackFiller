@@ -9,14 +9,14 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// </remarks>
     internal sealed class NntpDbConfigurationException : Exception
     {
-        /// <summary>Initializes a new instance of the <see cref="NntpDbConfigurationException"/> class.</summary>
+        /// <summary>Signals a malformed NntpDB connection string that must fail startup without retry.</summary>
         /// <param name="reason">Parser or configuration reason without secrets.</param>
         internal NntpDbConfigurationException(string reason)
             : this(reason, innerException: null)
         {
         }
 
-        /// <summary>Initializes a new instance of the <see cref="NntpDbConfigurationException"/> class.</summary>
+        /// <summary>Signals a malformed connection string, optionally wrapping MySqlConnector's parse exception.</summary>
         /// <param name="reason">Parser or configuration reason without secrets.</param>
         /// <param name="innerException">Optional MySqlConnector parse exception.</param>
         internal NntpDbConfigurationException(string reason, Exception? innerException)
@@ -25,7 +25,7 @@ namespace VectorNNTP.BackFiller.NntpDb
             Reason = reason;
         }
 
-        /// <summary>Gets the MySqlConnector parse or configuration reason without secrets.</summary>
+        /// <summary>MySqlConnector parse or configuration reason copied at construction; never includes the connection string.</summary>
         internal string Reason { get; }
 
         /// <summary>

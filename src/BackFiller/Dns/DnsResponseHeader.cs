@@ -21,6 +21,13 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Returns <see langword="true"/> when the buffer has a header, matching ID, and sane response flags.
         /// </summary>
+        /// <param name="buffer">DNS message starting at offset zero.</param>
+        /// <param name="expectedId">Transaction id that must match the header.</param>
+        /// <param name="questionCount">QD count from the header when the read succeeds.</param>
+        /// <param name="answerCount">AN count from the header when the read succeeds.</param>
+        /// <param name="authorityCount">NS count from the header when the read succeeds.</param>
+        /// <param name="additionalCount">AR count from the header when the read succeeds.</param>
+        /// <returns><see langword="false"/> when the buffer is too short, the id mismatches, or flags fail the sanity mask.</returns>
         internal static bool TryReadCounts(
             ReadOnlySpan<byte> buffer,
             ushort expectedId,
@@ -60,6 +67,8 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Returns <see langword="true"/> when the UDP response header indicates truncation (TC).
         /// </summary>
+        /// <param name="buffer">DNS message. Buffers shorter than <see cref="DnsWireFormat.HeaderSize"/> are treated as truncated.</param>
+        /// <returns><see langword="true"/> when TC is set or the buffer cannot contain a full header.</returns>
         internal static bool IsTruncated(ReadOnlySpan<byte> buffer)
         {
             if (buffer.Length < DnsWireFormat.HeaderSize)
@@ -74,6 +83,10 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Advances past the question section.
         /// </summary>
+        /// <param name="span">Full DNS message.</param>
+        /// <param name="offset">Start of the question section. On success, the first byte after the last question.</param>
+        /// <param name="questionCount">QD count from the header.</param>
+        /// <returns><see langword="false"/> when a QNAME or QTYPE/QCLASS does not fit.</returns>
         internal static bool TrySkipQuestions(ReadOnlySpan<byte> span, ref int offset, ushort questionCount)
         {
             for (int q = 0; q < questionCount; q++)

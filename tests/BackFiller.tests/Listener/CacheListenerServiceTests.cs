@@ -16,9 +16,18 @@ using VectorNNTP.BackFiller.Networking.Certificates;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
+    /// <summary>
+    /// TLS cache listener service: bind, admission, handshake/timeouts, article delivery, and lifecycle.
+    /// </summary>
+
     public sealed class CacheListenerServiceTests(ITestOutputHelper output)
     {
+        /// <summary>
+        /// Start binds loopback, Running state, and repeated dispose reaches Stopped safely.
+        /// </summary>
+
         [Fact]
+
         public async Task Starts_binds_ipv4_and_repeated_dispose_is_safe()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -30,7 +39,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Stopped, context.Service.State);
         }
 
+        /// <summary>
+        /// Missing certificate provider fails StartAsync and leaves Stopped.
+        /// </summary>
+
         [Fact]
+
         public async Task Startup_fails_when_the_certificate_is_missing()
         {
             var runtime = CreateRuntime(GetFreePort());
@@ -44,7 +58,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Stopped, service.State);
         }
 
+        /// <summary>
+        /// Faulted connection task is logged; dispose still stops listener.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_connection_task_fault_during_dispose_still_stops_the_listener()
         {
             var logger = new CollectingLogger<CacheListenerService>();
@@ -68,7 +87,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                     && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Session exception is logged; service remains Running with zero active connections.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_connection_failure_is_logged_and_the_listener_stays_up()
         {
             var logger = new CollectingLogger<CacheListenerService>();
@@ -98,7 +122,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>
+        /// TLS client reads 201 posting-prohibited greeting after handshake.
+        /// </summary>
+
         [Fact]
+
         public async Task Tls_client_receives_the_nntp_greeting()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -106,7 +135,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await ReadGreetingAsync(client.Stream);
         }
 
+        /// <summary>
+        /// ARTICLE returns stuffed wire bytes then 430 on second request; retention claim consumes entry.
+        /// </summary>
+
         [Fact]
+
         public async Task Tls_article_writes_exact_bytes_and_the_next_request_is_430()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -129,7 +163,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, context.Authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Certificate renewal updates served cert without stopping listener.
+        /// </summary>
+
         [Fact]
+
         public async Task Renewal_publishes_to_the_running_listener_without_restart()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -154,7 +193,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Running, context.Service.State);
         }
 
+        /// <summary>
+        /// Invalid TLS ClientHello does not stop Running listener.
+        /// </summary>
+
         [Fact]
+
         public async Task Handshake_failure_does_not_fault_the_listener()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -167,7 +211,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 TimeSpan.FromSeconds(2));
         }
 
+        /// <summary>
+        /// MaxActiveConnections prevents second simultaneous connection.
+        /// </summary>
+
         [Fact]
+
         public async Task Max_connections_rejects_additional_clients()
         {
             var runtime = CreateRuntime(GetFreePort(), maxConnections: 1);
@@ -181,7 +230,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(1, context.Service.ActiveConnections);
         }
 
+        /// <summary>
+        /// Writer timeout/failure during command flood releases admission slot for a new client.
+        /// </summary>
+
         [Fact]
+
         public async Task Writer_failure_releases_connection_admission()
         {
             var runtime = CreateRuntime(GetFreePort(), maxConnections: 1);
@@ -214,7 +268,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(1, context.Service.ActiveConnections);
         }
 
+        /// <summary>
+        /// Test harness observes flood task completion around synthetic wait timeout.
+        /// </summary>
+
         [Fact]
+
         public async Task Writer_wait_timeout_observes_the_flood_task_before_disposal()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -239,7 +298,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(flood.IsCompleted);
         }
 
+        /// <summary>
+        /// Dispose during TCP connect/handshake leaves Stopped without crashing.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_during_handshake_is_safe()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -249,7 +313,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Stopped, context.Service.State);
         }
 
+        /// <summary>
+        /// TlsHandshakeTimeout releases admission while listener stays Running.
+        /// </summary>
+
         [Fact]
+
         public async Task Handshake_timeout_releases_the_connection_slot()
         {
             var options = BackFillerTestOptions.CreateValid();
@@ -273,7 +342,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Running, context.Service.State);
         }
 
+        /// <summary>
+        /// IoProgressTimeout closes idle authenticated TLS session.
+        /// </summary>
+
         [Fact]
+
         public async Task Io_timeout_closes_an_idle_authenticated_connection()
         {
             var options = BackFillerTestOptions.CreateValid();
@@ -294,7 +368,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 TimeSpan.FromSeconds(2));
         }
 
+        /// <summary>
+        /// BindAddress * includes IPv6Any endpoint when started.
+        /// </summary>
+
         [Fact]
+
         public async Task Wildcard_bind_listens_on_ipv4_any()
         {
             var options = BackFillerTestOptions.CreateValid();
@@ -317,7 +396,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(CacheListenerState.Stopped, service.State);
         }
 
+        /// <summary>
+        /// StreamCacheListenerTransport ReadAsync throws TimeoutException when peer stalls.
+        /// </summary>
+
         [Fact]
+
         public async Task Stream_transport_enforces_io_progress_timeout()
         {
             await using var hanging = new HangingStream();
@@ -329,13 +413,23 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             });
         }
 
+        /// <summary>
+        /// TLS 1.2 client completes handshake and reads greeting.
+        /// </summary>
+
         [Fact]
+
         public async Task Tls12_client_can_complete_handshake()
         {
             await AssertHandshakeProtocolAsync(SslProtocols.Tls12);
         }
 
+        /// <summary>
+        /// TLS 1.3 handshake when platform supports SslStream TLS 1.3.
+        /// </summary>
+
         [Fact]
+
         public async Task Tls13_client_can_complete_handshake_when_the_platform_supports_it()
         {
             try
@@ -349,7 +443,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>
+        /// Non-NNTP GET receives 500 then QUIT closes with 205.
+        /// </summary>
+
         [Fact]
+
         public async Task Legacy_get_is_an_unknown_nntp_command()
         {
             await using var context = await ListenerContext.StartAsync();
@@ -369,7 +468,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 TimeSpan.FromSeconds(2));
         }
 
+        /// <summary>
+        /// Bind ::1 when OS supports IPv6 loopback bind.
+        /// </summary>
+
         [Fact]
+
         public async Task Explicit_ipv6_loopback_binds_when_the_platform_supports_it()
         {
             if (!Socket.OSSupportsIPv6)
@@ -414,7 +518,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>
+        /// Production Listener sources avoid blocking sync waits on async paths.
+        /// </summary>
+
         [Fact]
+
         public void Production_listener_code_does_not_block_synchronously()
         {
             var directory = FindListenerSourceDirectory();
@@ -427,6 +536,8 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>Connects with the given TLS protocol mask, asserts negotiation, and reads the NNTP greeting.</summary>
+        /// <param name="protocol">Enabled client SSL protocols for the handshake.</param>
         private static async Task AssertHandshakeProtocolAsync(SslProtocols protocol)
         {
             await using var context = await ListenerContext.StartAsync();
@@ -435,6 +546,8 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             await ReadGreetingAsync(client.Stream);
         }
 
+        /// <summary>Reads exactly the 201 posting-prohibited greeting from the TLS stream.</summary>
+        /// <param name="stream">Authenticated client-side SSL stream.</param>
         private static async Task ReadGreetingAsync(SslStream stream)
         {
             var expected = "201 NNTP Service Ready, posting prohibited\r\n"u8.ToArray();
@@ -443,6 +556,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(expected, greeting);
         }
 
+        /// <summary>Background loop sending invalid NOPE commands until canceled or the connection fails.</summary>
+        /// <param name="client">TLS client whose stream receives the flood.</param>
+        /// <param name="floodCts">Cancellation that stops the flood loop.</param>
         private static Task StartRejectedCommandFlood(TlsClient client, CancellationTokenSource floodCts) =>
             Task.Run(async () =>
             {
@@ -464,6 +580,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 }
             });
 
+        /// <summary>Cancels the flood and awaits its task, ignoring expected IO failures during teardown.</summary>
+        /// <param name="floodCts">Source used to cancel the flood.</param>
+        /// <param name="flood">Background flood task from <see cref="StartRejectedCommandFlood"/>.</param>
         private async Task ObserveFloodAsync(CancellationTokenSource floodCts, Task flood)
         {
             try
@@ -485,11 +604,17 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>Opens a TLS client to the listener started in <paramref name="context"/>.</summary>
+        /// <param name="context">Running listener exposing the bind port.</param>
+        /// <param name="protocols">Enabled client SSL protocols.</param>
         private static Task<TlsClient> ConnectAsync(
             ListenerContext context,
             SslProtocols protocols = SslProtocols.Tls12 | SslProtocols.Tls13) =>
             ConnectAsync(context.Port, protocols);
 
+        /// <summary>Connects to loopback on <paramref name="port"/> and completes TLS with certificate validation disabled.</summary>
+        /// <param name="port">Listener TLS port.</param>
+        /// <param name="protocols">Enabled client SSL protocols.</param>
         private static async Task<TlsClient> ConnectAsync(
             int port,
             SslProtocols protocols = SslProtocols.Tls12 | SslProtocols.Tls13)
@@ -506,6 +631,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return new TlsClient(tcp, ssl);
         }
 
+        /// <summary>Builds valid runtime options bound to loopback <paramref name="port"/> with a connection cap.</summary>
+        /// <param name="port">TLS bind port for the listener under test.</param>
+        /// <param name="maxConnections">Maximum concurrent active connections.</param>
         private static BackFillerRuntimeOptions CreateRuntime(int port, int maxConnections = 8)
         {
             var options = BackFillerTestOptions.CreateValid();
@@ -520,6 +648,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             };
         }
 
+        /// <summary>Allocates an ephemeral TCP port by binding loopback port zero.</summary>
         private static int GetFreePort()
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -529,6 +658,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return port;
         }
 
+        /// <summary>Locates <c>src/BackFiller/Listener</c> by walking up from the test output directory.</summary>
         private static string FindListenerSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -546,34 +676,52 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/Listener.");
         }
 
+        /// <summary>
+        /// Stream whose ReadAsync waits until canceled for IO timeout tests.
+        /// </summary>
+
         private sealed class HangingStream : Stream
         {
+            /// <inheritdoc />
             public override bool CanRead => true;
 
+            /// <inheritdoc />
             public override bool CanSeek => false;
 
+            /// <inheritdoc />
             public override bool CanWrite => false;
 
+            /// <inheritdoc />
             public override long Length => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override long Position
             {
                 get => throw new NotSupportedException();
                 set => throw new NotSupportedException();
             }
 
+            /// <inheritdoc />
             public override void Flush()
             {
             }
 
+            /// <inheritdoc />
             public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void SetLength(long value) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
+            /// <summary>Never completes until <paramref name="cancellationToken"/> fires, exercising read timeouts.</summary>
+            /// <param name="buffer">Unused; no bytes are ever copied.</param>
+            /// <param name="cancellationToken">Cancellation that ends the infinite delay.</param>
+            /// <returns>Zero after cancellation; otherwise the delay does not return.</returns>
             public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -581,10 +729,16 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>
+        /// Owns TcpClient and SslStream for listener integration tests.
+        /// </summary>
+
         private sealed class TlsClient(TcpClient tcp, SslStream stream) : IAsyncDisposable
         {
+            /// <summary>Negotiated SSL stream used to send NNTP commands to the listener.</summary>
             public SslStream Stream { get; } = stream;
 
+            /// <summary>Disposes the SSL stream and underlying TCP client.</summary>
             public async ValueTask DisposeAsync()
             {
                 await Stream.DisposeAsync();
@@ -592,14 +746,27 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             }
         }
 
+        /// <summary>
+        /// IArticleRetentionAuthority double that throws on all operations for failure logging test.
+        /// </summary>
+
         private sealed class ThrowingRetention : IArticleRetentionAuthority
         {
+            /// <summary>Reports zero sweep interval; no retention backing store exists.</summary>
             public TimeSpan SweepInterval => TimeSpan.Zero;
 
+            /// <summary>Always zero retained payload bytes.</summary>
             public long RetainedPayloadBytes => 0;
 
+            /// <summary>Always zero retained articles.</summary>
             public int RetainedCount => 0;
 
+            /// <summary>Always throws to simulate retention failure during listener handling.</summary>
+            /// <param name="messageId">Unused; throws before processing.</param>
+            /// <param name="requestId">Unused; throws before processing.</param>
+            /// <param name="record">Unused; throws before processing.</param>
+            /// <param name="selectedDateHeaderName">Unused; throws before processing.</param>
+            /// <param name="endpointFqdn">Unused; throws before processing.</param>
             public ArticleRetentionResult RetainCanonical(
                 string messageId,
                 Guid requestId,
@@ -608,21 +775,36 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 string? endpointFqdn = null) =>
                 throw new NotSupportedException("retention boom");
 
+            /// <summary>Always throws to simulate delivery claim failure.</summary>
+            /// <param name="messageIdOctets">Unused; throws before processing.</param>
             public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
                 throw new NotSupportedException("retention boom");
 
+            /// <summary>Always throws to simulate cancel failure.</summary>
+            /// <param name="requestId">Unused; throws before processing.</param>
             public bool TryCancelPendingRequest(Guid requestId) =>
                 throw new NotSupportedException("retention boom");
 
+            /// <summary>Always throws to simulate sweep failure.</summary>
             public long SweepExpired() => throw new NotSupportedException("retention boom");
 
+            /// <summary>No-op shutdown hook; other members still throw if invoked.</summary>
             public void BeginShutdown()
             {
             }
         }
 
+        /// <summary>
+        /// Started CacheListenerService with retention and certificates for integration tests.
+        /// </summary>
+
         private sealed class ListenerContext : IAsyncDisposable
         {
+            /// <summary>Captures started service, shared retention, bind port, and certificate provider from <see cref="StartAsync"/>.</summary>
+            /// <param name="service">Running listener service under test.</param>
+            /// <param name="authority">Retention store used by the listener and disposed with the context.</param>
+            /// <param name="port">TLS bind port from runtime options.</param>
+            /// <param name="certificates">Published test certificate context disposed on teardown.</param>
             private ListenerContext(
                 CacheListenerService service,
                 ArticleRetentionAuthority authority,
@@ -635,14 +817,20 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 Certificates = certificates;
             }
 
+            /// <summary>Running cache listener service under test.</summary>
             public CacheListenerService Service { get; }
 
+            /// <summary>Shared retention authority wired into the listener.</summary>
             public ArticleRetentionAuthority Authority { get; }
 
+            /// <summary>Published test TLS certificate provider disposed with the context.</summary>
             public TlsCertificateContextProvider Certificates { get; }
 
+            /// <summary>TLS bind port from runtime options.</summary>
             public int Port { get; }
 
+            /// <summary>Starts a listener on a free or supplied runtime with test retention and certificates.</summary>
+            /// <param name="runtime">Optional runtime; defaults to loopback on an ephemeral port.</param>
             public static async Task<ListenerContext> StartAsync(BackFillerRuntimeOptions? runtime = null)
             {
                 runtime ??= CreateRuntime(GetFreePort());
@@ -657,6 +845,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 return new ListenerContext(service, authority, runtime.BindPortTls, certificates);
             }
 
+            /// <summary>Stops the listener and disposes retention and certificate resources.</summary>
             public async ValueTask DisposeAsync()
             {
                 await Service.DisposeAsync();

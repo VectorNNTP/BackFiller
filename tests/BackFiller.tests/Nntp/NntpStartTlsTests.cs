@@ -7,11 +7,21 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// STARTTLS during connect: capability parsing, handshake ordering, failures, and credential redaction in logs.
+    /// </summary>
+
     public sealed class NntpStartTlsTests
     {
+        /// <summary>Known AUTHINFO password used in scripted servers; must appear redacted in wire logs.</summary>
         private const string Password = "super-secret-nntp-password";
 
+        /// <summary>
+        /// Loopback server: CAPABILITIES, STARTTLS 382, TLS handshake, then AUTHINFO with redacted wire logs.
+        /// </summary>
+
         [Fact]
+
         public async Task Capabilities_starttls_382_then_tls_then_authentication()
         {
             var logger = new CollectingLogger<NntpProviderSession>();
@@ -52,7 +62,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Without STARTTLS capability, AUTHINFO proceeds on plaintext after CAPABILITIES.
+        /// </summary>
+
         [Fact]
+
         public async Task Capabilities_without_starttls_continues_plaintext_authentication()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -73,7 +88,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Non-382 STARTTLS response is ProviderFailure without AUTHINFO.
+        /// </summary>
+
         [Fact]
+
         public async Task Advertised_starttls_non_382_retires_session_without_authentication()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -95,7 +115,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Truncated STARTTLS exchange retires session; AUTHINFO is not attempted.
+        /// </summary>
+
         [Fact]
+
         public async Task Tls_handshake_failure_retires_session_without_authentication()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -117,7 +142,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Bad CAPABILITIES status prevents STARTTLS and AUTHINFO.
+        /// </summary>
+
         [Fact]
+
         public async Task Capabilities_malformed_status_is_a_protocol_failure()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -137,7 +167,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// CAPABILITIES multiline without terminator is ProviderFailure.
+        /// </summary>
+
         [Fact]
+
         public async Task Capabilities_incomplete_list_is_a_protocol_failure()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -158,7 +193,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// 480 STARTTLS response blocks AUTHINFO on the wire.
+        /// </summary>
+
         [Fact]
+
         public async Task Authentication_cannot_occur_before_required_starttls()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -179,8 +219,13 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Case variants of STARTTLS capability still issue STARTTLS before auth.
+        /// </summary>
+
         [Theory]
         [InlineData("starttls")]
+
         public async Task Starttls_capability_matching_is_case_insensitive(string label)
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -201,7 +246,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// COMPRESS is not sent even when advertised alongside STARTTLS.
+        /// </summary>
+
         [Fact]
+
         public async Task Compress_is_never_negotiated_when_advertised()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -223,7 +273,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Production Nntp sources contain no COMPRESS negotiation strings.
+        /// </summary>
+
         [Fact]
+
         public void Production_nntp_code_does_not_mention_compress_negotiation()
         {
             var directory = NntpProviderSessionTests.FindSourceDirectory();
@@ -233,7 +288,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// CapabilityLabelEquals matches STARTTLS token boundaries case-insensitively.
+        /// </summary>
+
         [Fact]
+
         public void Capability_label_equals_is_case_insensitive_and_token_scoped()
         {
             Assert.True(NntpProtocolIo.CapabilityLabelEquals("STARTTLS"u8, NntpProtocolIo.StartTlsCapability));
@@ -242,7 +302,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.False(NntpProtocolIo.CapabilityLabelEquals("COMPRESS DEFLATE"u8, NntpProtocolIo.StartTlsCapability));
         }
 
+        /// <summary>
+        /// Implicit TLS skips STARTTLS command even when capability is advertised.
+        /// </summary>
+
         [Fact]
+
         public async Task Implicit_tls_does_not_issue_starttls_when_advertised()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -259,7 +324,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Unread bytes after 382 response fail connect before AUTHINFO.
+        /// </summary>
+
         [Fact]
+
         public async Task Leftover_bytes_after_382_fail_before_authentication()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -279,6 +349,14 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>Constructs a single-session provider client with configurable TLS, credentials, and certificate policy.</summary>
+        /// <param name="logger">Optional logger; defaults to null logger.</param>
+        /// <param name="host">Remote NNTP host.</param>
+        /// <param name="port">Remote NNTP port.</param>
+        /// <param name="useTls">Whether the provider definition requests implicit TLS.</param>
+        /// <param name="user">Optional AUTHINFO user.</param>
+        /// <param name="password">Optional AUTHINFO password.</param>
+        /// <param name="acceptAnyCertificate">When true, accepts any server certificate during TLS.</param>
         private static NntpProviderSession CreateSession(
             ILogger? logger = null,
             string host = "127.0.0.1",
@@ -300,14 +378,27 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 },
                 logger ?? NullLogger.Instance);
 
+        /// <summary>
+        /// Loopback TCP NNTP server performing STARTTLS upgrade for integration-style connect tests.
+        /// </summary>
+
         private sealed class LoopbackStartTlsNntpServer : IAsyncDisposable
         {
+            /// <summary>Loopback listener bound to an ephemeral port for the duration of the instance.</summary>
             private readonly TcpListener _listener;
+
+            /// <summary>Server certificate presented after STARTTLS; owned for the server lifetime.</summary>
             private readonly X509Certificate2 _certificate;
+            /// <summary>Cancels the accept loop when the server is disposed.</summary>
             private readonly CancellationTokenSource _cts = new();
+
+            /// <summary>Background accept/handshake loop; awaited during <see cref="DisposeAsync"/> with a short timeout.</summary>
             private readonly Task _accept;
+            /// <summary>Command lines received after the TCP (or post-STARTTLS) session is established.</summary>
             private readonly List<string> _commands = [];
 
+            /// <summary>Starts listening on loopback, captures <see cref="Port"/>, and begins <see cref="_accept"/>.</summary>
+            /// <param name="certificate">TLS certificate for the post-STARTTLS server side.</param>
             public LoopbackStartTlsNntpServer(X509Certificate2 certificate)
             {
                 _certificate = certificate;
@@ -317,10 +408,14 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 _accept = AcceptAsync(_cts.Token);
             }
 
+            /// <summary>Ephemeral loopback port chosen when listening starts.</summary>
             public int Port { get; }
 
+            /// <summary>Set after a successful STARTTLS server authentication completes.</summary>
             public bool TlsHandshakeCompleted { get; private set; }
 
+            /// <summary>Client command lines received after TLS, in order; snapshot is thread-safe via lock on the backing list.</summary>
+            /// <value>A copy of accumulated command text without trailing line terminators.</value>
             public IReadOnlyList<string> Commands
             {
                 get
@@ -332,6 +427,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 }
             }
 
+            /// <summary>Cancels acceptance, stops listening, and waits briefly for the accept task.</summary>
             public async ValueTask DisposeAsync()
             {
                 await _cts.CancelAsync().ConfigureAwait(false);
@@ -349,6 +445,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 _cts.Dispose();
             }
 
+            /// <summary>Accepts one client, sends the initial greeting, and processes commands until disconnect.</summary>
+            /// <param name="cancellationToken">Ends acceptance and command handling when canceled.</param>
             private async Task AcceptAsync(CancellationToken cancellationToken)
             {
                 using var tcp = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
@@ -356,6 +454,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 await ReadCommandsAsync(tcp.GetStream(), allowStartTls: true, cancellationToken).ConfigureAwait(false);
             }
 
+            /// <summary>NNTP command loop with CAPABILITIES, optional STARTTLS upgrade, AUTHINFO, and QUIT handling.</summary>
+            /// <param name="stream">Cleartext or TLS stream carrying client commands.</param>
+            /// <param name="allowStartTls">When true, honors STARTTLS and upgrades the connection.</param>
+            /// <param name="cancellationToken">Ends the loop when canceled.</param>
             private async Task ReadCommandsAsync(Stream stream, bool allowStartTls, CancellationToken cancellationToken)
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -426,12 +528,19 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 }
             }
 
+            /// <summary>Writes protocol bytes and flushes the stream.</summary>
+            /// <param name="stream">Destination stream.</param>
+            /// <param name="bytes">Wire payload to send.</param>
+            /// <param name="cancellationToken">Passed through to write and flush.</param>
             private static async Task WriteAsync(Stream stream, byte[] bytes, CancellationToken cancellationToken)
             {
                 await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            /// <summary>Reads a CRLF-terminated command line; returns null on clean EOF before any bytes.</summary>
+            /// <param name="stream">Source stream.</param>
+            /// <param name="cancellationToken">Passed through to reads.</param>
             private static async Task<string?> ReadLineAsync(Stream stream, CancellationToken cancellationToken)
             {
                 var builder = new List<byte>(64);

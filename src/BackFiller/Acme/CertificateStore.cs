@@ -29,12 +29,14 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Renewal window passed to <see cref="CertificateValidator.ValidatePfx"/> on load and save.</summary>
         private readonly TimeSpan _renewalThreshold;
 
-        /// <summary>Initializes a new instance of the <see cref="CertificateStore"/> class.</summary>
+        /// <summary>
+        /// Ensures the FQDN live layout exists and runs startup recovery on the <c>current</c> pointer before any load.
+        /// </summary>
         /// <param name="stateDir">Shared ACME state directory.</param>
         /// <param name="fqdn">Certificate FQDN that owns this live partition.</param>
         /// <param name="pfxPassword">PKCS#12 password (never logged).</param>
-        /// <param name="requiredDomains">Required DNS SANs for round-trip validation.</param>
-        /// <param name="renewalThreshold">Renewal threshold used when assessing reloaded material.</param>
+        /// <param name="requiredDomains">Required DNS SANs for round-trip validation on load and save.</param>
+        /// <param name="renewalThreshold">Renewal threshold passed to <see cref="CertificateValidator.ValidatePfx"/> when reloading PFX bytes.</param>
         internal CertificateStore(
             string stateDir,
             string fqdn,
@@ -61,7 +63,7 @@ namespace VectorNNTP.BackFiller.Acme
             Recover();
         }
 
-        /// <summary>Gets the FQDN this store is scoped to.</summary>
+        /// <summary>Normalized certificate FQDN that owns the live generation directories.</summary>
         private string Fqdn => _fqdn;
 
         /// <summary>Returns paths for the active generation (after recovery).</summary>

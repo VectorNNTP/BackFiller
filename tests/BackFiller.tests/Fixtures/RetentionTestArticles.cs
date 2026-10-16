@@ -7,6 +7,9 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
     /// <summary>Builds CanonicalV1 articles for retention tests.</summary>
     internal static class RetentionTestArticles
     {
+        /// <summary>Parses a destuffed article into a prepared canonical record with a new request id.</summary>
+        /// <param name="messageId">Message-ID written into the article and the prepared record.</param>
+        /// <param name="body">Article body after the header blank line. Defaults to <c>body</c>.</param>
         internal static PreparedCanonical Create(string messageId, string body = "body\r\n")
         {
             var parser = new NntpArticleParser("backfiller.test");
@@ -21,6 +24,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 created.Record.ArtData.ToArray());
         }
 
+        /// <summary>Creates a prepared article and retains it through <paramref name="authority"/>.</summary>
         internal static PreparedCanonical RetainPrepared(
             ArticleRetentionAuthority authority,
             string messageId,
@@ -36,6 +40,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             return prepared;
         }
 
+        /// <summary>ASCII article with Path, Date, Message-ID, Newsgroups, and the supplied body.</summary>
         private static byte[] BuildDestuffed(string messageId, string body) =>
             Encoding.ASCII.GetBytes(
                 "Path: peer.example\r\n"
@@ -47,6 +52,12 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 + "\r\n"
                 + body);
 
+        /// <summary>Canonical materialization inputs ready for retention authority tests.</summary>
+        /// <param name="MessageId">Article message id octets.</param>
+        /// <param name="RequestId">Correlated work request id.</param>
+        /// <param name="Record">Parsed article record.</param>
+        /// <param name="SelectedDateHeaderName">Header chosen for date rewrite.</param>
+        /// <param name="ArtData">Canonical retained payload bytes.</param>
         internal readonly record struct PreparedCanonical(
             string MessageId,
             Guid RequestId,

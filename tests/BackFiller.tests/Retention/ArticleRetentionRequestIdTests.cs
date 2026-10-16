@@ -9,8 +9,12 @@ namespace VectorNNTP.BackFiller.Tests.Retention
     /// </summary>
     public sealed class ArticleRetentionRequestIdTests
     {
+        /// <summary>Fixed UTC anchor shared by concurrent retain/cancel scenarios.</summary>
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
+
+        /// <summary>Upper bound for waiting on background retention work in async tests.</summary>
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+        /// <summary>Two request ids attach; delivery serves first artdata.</summary>
 
         [Fact]
         public void BothRequestIdsRemainAttached_AndDeliveryReturnsTheFirstArticle()
@@ -31,6 +35,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(authority.TryCancelPendingRequest(b.RequestId));
             Assert.Equal(1, authority.RetainedCount);
         }
+        /// <summary>Barrier-synchronized retains yield one winner and both request ids cancel.</summary>
 
         [Fact]
         public async Task ConcurrentArticleWork_SameMessageId_KeepsOneArticleAndBothRequestIds()
@@ -70,6 +75,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(authority.TryCancelPendingRequest(second.RequestId));
             Assert.Equal(winnerArtData.Length, authority.RetainedPayloadBytes);
         }
+        /// <summary>TTL clears all request ids and retention counts.</summary>
 
         [Fact]
         public void TtlExpiry_ClearsAllRequestIdsForEntry()
@@ -89,6 +95,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedCount);
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
+        /// <summary>OpenableRequestIdLimitExceeded leaves attached ids cancelable.</summary>
 
         [Fact]
         public void BoundExceeded_DoesNotRevokeExistingRequestIds()
@@ -130,6 +137,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(first.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
         }
+        /// <summary>AlreadyPresent retains first art size and bytes on claim.</summary>
 
         [Fact]
         public void FirstWinsArtData_Unchanged()
@@ -150,6 +158,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             using var claim = ArticleRetentionAuthorityTests.Claim(authority, a.MessageId, a.ArtData);
             Assert.False(claim.ArticleBytes.Span.SequenceEqual(b.ArtData.AsSpan()));
         }
+        /// <summary>Pipeline requeue on publish failure leaves article claimable.</summary>
 
         [Fact]
         public async Task PublishFailure_Requeue_LeavesTheArticleDeliverable()

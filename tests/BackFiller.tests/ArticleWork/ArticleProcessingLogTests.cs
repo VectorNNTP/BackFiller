@@ -13,10 +13,20 @@ using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Regression coverage for <see cref="ProviderArticleWorkHandler"/> completion logging: one structured information event per handled item,
+    /// without article body or transport detail on the information path.
+    /// </summary>
     public sealed class ArticleProcessingLogTests
     {
+        /// <summary>
+        /// Expected <see cref="Microsoft.Extensions.Logging.EventId"/> for the single article-processed completion log line.
+        /// </summary>
         private const int ArticleProcessedEventId = 5321;
 
+        /// <summary>
+        /// Successful retention emits exactly one information event with message id, backbone, outcome <c>Found</c>, and elapsed time from NNTP command start.
+        /// </summary>
         [Fact]
         public async Task Found_logs_one_information_event_with_identity_outcome_and_elapsed()
         {
@@ -38,6 +48,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("body", entry.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Provider not-found maps to outcome <c>NotFound</c> in one information completion event; no duplicate information logs.
+        /// </summary>
         [Fact]
         public async Task NotFound_logs_one_information_event()
         {
@@ -58,6 +71,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             AssertCompletion(entry, ArticleWorkTestDeliveries.CanonicalMessageId, "Eweka", "NotFound");
         }
 
+        /// <summary>
+        /// Parse/validation failure logs outcome <c>ValidationFailed</c> with the machine reason (not raw wire text) in one information event.
+        /// </summary>
         [Fact]
         public async Task ValidationFailure_logs_one_information_event_with_the_parser_reason()
         {
@@ -81,6 +97,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("malformed-id", entry.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Retryable provider transport failure logs outcome <c>Failed</c> without echoing exception text or validation wording.
+        /// </summary>
         [Fact]
         public async Task TransportFailure_logs_one_information_event_with_failed()
         {
@@ -103,6 +122,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("ValidationFailed", entry.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Blank request identities render as <c>(none)</c> placeholders; elapsed still appears when command timing is absent.
+        /// </summary>
         [Fact]
         public async Task Unresolved_identity_uses_the_existing_none_placeholder()
         {
@@ -125,6 +147,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Matches(@"elapsed=0\.000 (?:s|seconds)", entry.Message);
         }
 
+        /// <summary>
+        /// Live NNTP retrieval keeps TX/RX debug wire logs on the registry logger while completion stays on the handler logger as a single information event without body text.
+        /// </summary>
         [Fact]
         public async Task Live_article_keeps_debug_wire_logging_and_emits_one_completion_event()
         {
@@ -179,6 +204,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("body", entry.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Builds a handler with a fixed local parser identity and the supplied retriever/retention for logging assertions.
+        /// </summary>
+        /// <param name="logger">Collects completion logs from the handler under test.</param>
+        /// <param name="retention">Authority used when a retrieved article is retained.</param>
+        /// <param name="retriever">Scripted or live retrieval seam.</param>
+        /// <returns>A configured <see cref="ProviderArticleWorkHandler"/>.</returns>
         private static ProviderArticleWorkHandler CreateHandler(
             CollectingLogger<ProviderArticleWorkHandler> logger,
             ArticleRetentionAuthority retention,
@@ -193,6 +225,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 logger);
         }
 
+        /// <summary>
+        /// Creates a small in-memory retention authority with production-like listener metadata for handler tests.
+        /// </summary>
+        /// <returns>An <see cref="ArticleRetentionAuthority"/> disposed by callers.</returns>
         private static ArticleRetentionAuthority CreateRetention() =>
             new(
                 new BackFillerArticleRetentionRuntimeOptions(1024 * 1024, TimeSpan.FromHours(1), TimeSpan.FromMinutes(1), 256),
@@ -201,6 +237,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 TimeProvider.System,
                 NullLogger<ArticleRetentionAuthority>.Instance);
 
+        /// <summary>
+        /// Minimal work item with a fake settlement lease; not used to assert RabbitMQ settlement in these tests.
+        /// </summary>
+        /// <param name="messageId">Requested NNTP message-id.</param>
+        /// <param name="backbone">Provider backbone name carried on the request.</param>
+        /// <returns>An <see cref="ArticleWorkItem"/> for handler invocation.</returns>
         private static ArticleWorkItem Item(string messageId, string backbone)
         {
             var channel = new FakeBackFillerRabbitMqChannel(1);
@@ -211,6 +253,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 new ArticleWorkSettlementLease(channel, 1, 1));
         }
 
+        /// <summary>
+        /// Asserts exactly one information log uses <see cref="ArticleProcessedEventId"/> and no other information events were emitted.
+        /// </summary>
+        /// <param name="logger">Logger populated by the handler under test.</param>
+        /// <returns>The sole completion log entry.</returns>
         private static CollectedLog AssertSingleCompletion(CollectingLogger<ProviderArticleWorkHandler> logger)
         {
             var information = logger.Entries.Where(static entry => entry.Level == LogLevel.Information).ToArray();
@@ -222,6 +269,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             return entry;
         }
 
+        /// <summary>
+        /// Asserts structured completion message fields for identity, outcome label, and elapsed suffix pattern.
+        /// </summary>
+        /// <param name="entry">Collected completion log line.</param>
+        /// <param name="messageId">Expected message-id token in the message.</param>
+        /// <param name="backbone">Expected backbone token in the message.</param>
+        /// <param name="outcome">Expected outcome label (for example <c>Found</c> or <c>NotFound</c>).</param>
         private static void AssertCompletion(CollectedLog entry, string messageId, string backbone, string outcome)
         {
             Assert.Contains($"messageId={messageId}", entry.Message, StringComparison.Ordinal);
@@ -230,6 +284,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Matches(ElapsedPattern(), entry.Message);
         }
 
+        /// <summary>
+        /// Parses the <c>elapsed=</c> seconds field from a completion message for range assertions.
+        /// </summary>
+        /// <param name="message">Rendered completion log text.</param>
+        /// <returns>Elapsed seconds from the structured field.</returns>
         private static double ElapsedSeconds(string message)
         {
             var match = ElapsedPattern().Match(message);
@@ -237,14 +296,33 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             return double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
         }
 
+        /// <summary>
+        /// Regex matching the completion log elapsed suffix (<c>s</c> or <c>seconds</c>).
+        /// </summary>
+        /// <returns>A culture-invariant pattern for elapsed extraction and assertion.</returns>
         private static Regex ElapsedPattern() => new(@"elapsed=(\d+\.\d{3}) (?:s|seconds)", RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// Fake retriever that optionally invokes the payload callback once, then returns a fixed <see cref="ArticleRetrievalResult"/>.
+        /// Does not perform NNTP I/O, honor <paramref name="maxArticleBytes"/> limits, or observe cancellation.
+        /// </summary>
         private sealed class ScriptedRetriever : INntpArticleRetriever
         {
+            /// <summary>Destuffed article bytes passed to <c>consumePayload</c> when non-null.</summary>
             private readonly byte[]? _payload;
+
+            /// <summary>Result returned after optional payload consumption; timestamp may be overwritten.</summary>
             private readonly ArticleRetrievalResult _result;
+
+            /// <summary>Stopwatch timestamp applied to the returned result's command-start field.</summary>
             private readonly long _commandStartedTimestamp;
 
+            /// <summary>
+            /// Captures scripted retrieval inputs for elapsed and outcome logging tests.
+            /// </summary>
+            /// <param name="payload">Article bytes for the callback, or null to skip consumption (failures).</param>
+            /// <param name="result">Base retrieval result (kind, code, session reuse).</param>
+            /// <param name="commandStartedTimestamp">Value assigned to <see cref="ArticleRetrievalResult.CommandStartedTimestamp"/> on return.</param>
             public ScriptedRetriever(byte[]? payload, ArticleRetrievalResult result, long commandStartedTimestamp)
             {
                 _payload = payload;
@@ -252,6 +330,14 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 _commandStartedTimestamp = commandStartedTimestamp;
             }
 
+            /// <summary>
+            /// Invokes <paramref name="consumePayload"/> when payload is present, stamps command start time, and completes synchronously.
+            /// </summary>
+            /// <param name="item">Work item (required non-null).</param>
+            /// <param name="maxArticleBytes">Ignored by this fake.</param>
+            /// <param name="consumePayload">Parser/materialization callback (required non-null).</param>
+            /// <param name="cancellationToken">Ignored by this fake.</param>
+            /// <returns>The configured <see cref="ArticleRetrievalResult"/>.</returns>
             public Task<ArticleRetrievalResult> RetrieveAsync(
                 ArticleWorkItem item,
                 int maxArticleBytes,

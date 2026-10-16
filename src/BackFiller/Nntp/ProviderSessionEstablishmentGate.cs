@@ -34,7 +34,7 @@ namespace VectorNNTP.BackFiller.Nntp
             MaxConcurrentEstablishments = maxConcurrentEstablishments;
         }
 
-        /// <summary>Gets the configured permit count.</summary>
+        /// <summary>Maximum concurrent connect-to-Ready establishments allowed process-wide.</summary>
         internal int MaxConcurrentEstablishments { get; }
 
         /// <summary>

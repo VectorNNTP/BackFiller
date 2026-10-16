@@ -31,13 +31,13 @@ namespace VectorNNTP.BackFiller.Cloudflare
             CurrentBudget.Value = this;
         }
 
-        /// <summary>Gets the active budget for the current async flow, if any.</summary>
+        /// <summary>Operation budget published by <see cref="Begin"/> for nested HTTP and reconciler retries on this async flow.</summary>
         internal static CloudflareOperationBudget? Current => CurrentBudget.Value;
 
-        /// <summary>Gets the absolute UTC deadline for this operation.</summary>
+        /// <summary>Absolute UTC instant when this reconcile or clean-up operation must stop waiting and sending.</summary>
         private DateTimeOffset DeadlineUtc { get; }
 
-        /// <summary>Gets the remaining time until <see cref="DeadlineUtc"/> (zero when expired).</summary>
+        /// <summary>Time until <see cref="DeadlineUtc"/> from <see cref="DateTimeOffset.UtcNow"/>; zero when already expired.</summary>
         internal TimeSpan Remaining
         {
             get

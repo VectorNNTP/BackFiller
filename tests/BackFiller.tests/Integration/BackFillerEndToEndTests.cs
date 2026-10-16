@@ -7,9 +7,14 @@ using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Integration
 {
+    /// <summary>
+    /// Article work pipeline outcomes: publish, ack, retention, and response wire contract.
+    /// </summary>
     public sealed class BackFillerEndToEndTests
     {
+        /// <summary>Default successful article payload for end-to-end pipeline tests.</summary>
         private static readonly byte[] CanonicalPayload = ArticleWorkTestArticles.Valid();
+        /// <summary>Happy path publishes v1 JSON response, acks delivery tag, retains artdata claimable for delivery.</summary>
 
         [Fact]
         public async Task Successful_article_work_confirms_then_acks_and_delivery_serves_artdata()
@@ -55,6 +60,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(retained.Length, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
+        /// <summary>ThrowOnPublish and publish nack still ack inbound work after successful retention and handler success.</summary>
 
         [Fact]
         public async Task Publish_failure_and_confirm_failure_ack_successful_work()
@@ -75,6 +81,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.True(Assert.Single(confirmChannel.Settlements).Acknowledge);
             Assert.False(Assert.Single(confirmChannel.Settlements).Requeue);
         }
+        /// <summary>Success processing with stale channel or closed channel leaves settlements empty after confirm.</summary>
 
         [Fact]
         public async Task Stale_generation_or_closed_channel_after_confirm_does_not_ack()
@@ -94,6 +101,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(ArticleWorkOutcome.Success, closedOutcome);
             Assert.Empty(closed.Settlements);
         }
+        /// <summary>Ack exception after successful publish leaves no settlement while retention keeps the article.</summary>
 
         [Fact]
         public async Task Confirm_then_ack_failure_does_not_record_an_ack()
@@ -112,6 +120,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Empty(channel.Settlements);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
+        /// <summary>Second retain for same message id is AlreadyPresent; delivery serves first body bytes.</summary>
 
         [Fact]
         public async Task Same_message_id_first_wins_and_delivery_keeps_original_artdata()
@@ -140,6 +149,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             claimed.Claim.Dispose();
             Assert.Equal(firstLength, harness.Retention.RetainedPayloadBytes);
         }
+        /// <summary>Two prepared retains produce distinct ArtId values and summed byte accounting.</summary>
 
         [Fact]
         public async Task Distinct_message_ids_keep_independent_identities()
@@ -151,6 +161,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(first.Record.ArtSize + second.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(2, harness.Retention.RetainedCount);
         }
+        /// <summary>Parallel RetainCanonical on one message id yields one Retained and fifteen AlreadyPresent.</summary>
 
         [Fact]
         public async Task Concurrent_retention_of_the_same_identity_keeps_one_owner()
@@ -175,6 +186,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             var winner = Assert.Single(results, static result => result.Kind == ArticleRetentionKind.Retained);
             Assert.Equal(winner.RetainedPayloadBytes, harness.Retention.RetainedPayloadBytes);
         }
+        /// <summary>Two request ids on one message id both cancel independently while bytes remain until unpinned.</summary>
 
         [Fact]
         public async Task Multiple_request_ids_for_same_article_remain_independently_openable()
@@ -196,6 +208,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.True(harness.Retention.TryCancelPendingRequest(second.RequestId));
             Assert.Equal(first.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
         }
+        /// <summary>After capacity pressure evicts filler, successful published work artdata remains claimable.</summary>
 
         [Fact]
         public async Task Published_article_work_success_survives_fifo_capacity_pressure()
@@ -238,6 +251,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             claimed.Claim.Dispose();
             Assert.Equal(successBytes + pressure.Record.ArtSize, harness.Retention.RetainedPayloadBytes);
         }
+        /// <summary>Processing one article work message does not increment provider account query count.</summary>
 
         [Fact]
         public async Task Article_work_request_path_does_not_query_mysql()

@@ -25,12 +25,12 @@ Section name: `BackFiller` (`BackFillerOptions.SectionName`).
 | Key | Required | Notes |
 |---|---|---|
 | `ServerId` | Yes | `int?`, range 1–255. Missing and `0` both fail. There is no default. Old key `BackFiller:Id` is not the current key. |
-| `DnsSuffix` | No | Default `usenet.ninja`. |
+| `DnsSuffix` | No | Binder default `usenet.ninja`. A successful `nntpsharedconfig` projection replaces it. Whitespace fails when the runtime snapshot canonicalizes the suffix. |
 | `CloudFlareZoneId` | Shared config | The property remarks say it binds from `BackFiller:CloudFlareZoneId` only. `BackFillerOptionsValidator` does not itself reject an empty value. `NntpSharedConfigurationReader` rejects a blank `cloudflarezoneid` column, and `AcmeCloudflareOptionsValidator` rejects a blank zone id when shared database fields are validated. `ProviderAccountConfigurationService` copies the shared zone id onto `BackFillerOptions`. |
 | `BindAddress` | No | Omitted or empty means all interfaces. Explicit addresses must be locally assigned. Wildcard tokens include `*`, `0.0.0.0`, and `::`. |
 | `BindPortTls` | Yes | `int?`, range 1–65535. BackFiller is TLS-only. There is no `BackFiller:BindPort`. |
-| `AcmeDirectoryUrl` | No | Default Let's Encrypt staging directory URL. |
-| `AcmeRenewalThresholdDays` | No | Default 30. |
+| `AcmeDirectoryUrl` | No | Binder default is the Let's Encrypt staging directory. ACME validation requires an absolute HTTPS URL. A successful `nntpsharedconfig` projection replaces the bound value. |
+| `AcmeRenewalThresholdDays` | No | Binder default 30. ACME validation accepts 1–90. A successful `nntpsharedconfig` projection replaces the bound value before renewal uses it. |
 | `AcmeStateDir` | No | Default `certs/`. Relative paths resolve against the application binary directory and must stay inside it after canonicalization. Rooted paths stay rooted. |
 | `CertificateDirectory` | No | Default `certs`. Old key `DirCerts`. |
 | `BackFillerAccountRefreshIntervalSeconds` | No | Default 60. Range 5–3600. This is the NntpDB account poll. It is not the per-account NNTP `DATE` keepalive. |
@@ -44,7 +44,7 @@ Nested groups:
 - `BackFiller:Logging`
 - `BackFiller:ArticleRetention` — `MaximumRetainedPayloadGigabytes` default 4 (must be > 0 and within the physical-memory ceiling), `RetentionTtlSeconds` default 60 and range 1–60, `MaxOpenableRequestIdsPerArticle` default 16 and range 1–256, `SweepIntervalSeconds` default 1 and range 1–60
 - `BackFiller:Shutdown` — `GracePeriodSeconds` default 30, range 5–600; `DrainQueuedWork` default true; `FinishActiveArticles` default true
-- `BackFiller:Listener` — includes `AwaitingReceiptAckTimeoutSeconds` 1–300 (default 30) and `MaxActiveConnections` default 1024
+- `BackFiller:Listener` — `TlsHandshakeTimeoutSeconds` default 30, range 1–300, copied into the runtime snapshot and used for the handshake. `IoProgressTimeoutSeconds` default 60, range 1–600, copied and used as the per-operation no-progress timeout. `MaxActiveConnections` default 1024, minimum 1, and the listener rejects further accepts at that count. `MaxQueuedFoundPayloadBytes` default 67108864, minimum 1, is copied into the snapshot; the cache listener does not read it. `ParserAccumulationMaxBytes` default 262144, minimum 32768, and `AwaitingReceiptAckTimeoutSeconds` default 30, range 1–300, are validated and are not copied into `BackFillerListenerRuntimeOptions`.
 - `BackFiller:Nntp` — `MaxConcurrentSessionEstablishments` default 8, range 1–1024. Zero is invalid. This does not replace per-provider `MaxSessions` from MySQL
 - `BackFiller:Systemd` — notify and watchdog enablement
 

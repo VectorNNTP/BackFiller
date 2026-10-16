@@ -9,10 +9,19 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// NntpDB connection string key parity with NNTPD and production JSON shape.
+    /// </summary>
+
     public sealed class SharedNntpDbConfigurationTests
     {
+        /// <summary>Representative NNTPD-style connection string used in parity fixtures.</summary>
         private const string SharedConnectionString =
             "Server=198.18.0.70;Port=3306;Database=nntpdb;User ID=nntpd;Pooling=true;MinimumPoolSize=2;MaximumPoolSize=32;ConnectionIdleTimeout=300;";
+
+        /// <summary>
+        /// Contract: BackFiller uses the same nntpdb configuration key as nntpd.
+        /// </summary>
 
         [Fact]
         public void BackFiller_uses_the_same_nntpdb_configuration_key_as_nntpd()
@@ -27,6 +36,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(typeof(BackFillerOptions).Assembly.GetType(
                 "VectorNNTP.BackFiller.Configuration.GrabberDbConnectionString"));
         }
+
+        /// <summary>
+        /// Contract: Same connection strings nntpdb value targets the same catalog.
+        /// </summary>
 
         [Fact]
         public void Same_connection_strings_nntpdb_value_targets_the_same_catalog()
@@ -54,6 +67,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 new MySqlConnector.MySqlConnectionStringBuilder(SharedConnectionString).Database,
                 runtime.NntpDb.Database);
         }
+
+        /// <summary>
+        /// Contract: Host resolves nntpdb and does not bind grabberdb.
+        /// </summary>
 
         [Fact]
         public void Host_resolves_nntpdb_and_does_not_bind_grabberdb()
@@ -84,6 +101,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("203.0.113.10", runtime.NntpDb.ConnectionString, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Contract: Production configuration does not contain connection strings or grabberdb.
+        /// </summary>
+
         [Fact]
         public void Production_configuration_does_not_contain_connection_strings_or_grabberdb()
         {
@@ -95,6 +116,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("Password=", json, StringComparison.Ordinal);
         }
 
+        /// <summary>Walks parents of the test output directory until <c>src/BackFiller/VectorNNTP.BackFiller.json</c> exists.</summary>
+        /// <exception cref="FileNotFoundException">No parent contains that file.</exception>
         private static string FindProductionConfigurationFile()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);

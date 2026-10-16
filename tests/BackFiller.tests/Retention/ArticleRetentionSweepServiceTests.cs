@@ -3,8 +3,10 @@ using VectorNNTP.BackFiller.Retention;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
+    /// <summary>ArticleRetentionSweepService hosted loop: immediate sweep, failure retry, fatal exit.</summary>
     public sealed class ArticleRetentionSweepServiceTests
     {
+        /// <summary>Hosted sweep runs at least once then BeginShutdown on stop.</summary>
         [Fact]
         public async Task Sweep_runs_immediately_then_stops_on_cancellation_and_closes_admission()
         {
@@ -17,6 +19,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(authority.ShutdownStarted);
             Assert.True(authority.SweepCount >= 1);
         }
+        /// <summary>Transient sweep exception is retried; shutdown still runs.</summary>
 
         [Fact]
         public async Task Sweep_continues_after_a_failed_pass()
@@ -31,6 +34,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.True(authority.SweepCount >= 2);
             Assert.True(authority.ShutdownStarted);
         }
+        /// <summary>Fatal sweep exception surfaces on ExecuteTask without retry.</summary>
 
         [Fact]
         public async Task Process_fatal_sweep_failure_leaves_the_hosted_loop()
@@ -46,6 +50,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal("sweep exhausted", thrown.Message);
             Assert.Equal(1, authority.SweepCount);
         }
+        /// <summary>SweepInterval on authority matches configured retention sweep period.</summary>
 
         [Fact]
         public async Task Sweep_interval_is_the_configured_retention_interval()
@@ -58,20 +63,28 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             await sweep.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>Records sweep invocations and signals the first sweep for hosted service tests.</summary>
         private sealed class RecordingRetentionAuthority : IArticleRetentionAuthority
         {
+            /// <summary>Completes when the hosted service invokes the first <see cref="SweepExpired"/>.</summary>
             public TaskCompletionSource Swept { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Number of sweep calls observed.</summary>
             public int SweepCount { get; private set; }
 
+            /// <summary>Whether <see cref="BeginShutdown"/> was invoked.</summary>
             public bool ShutdownStarted { get; private set; }
 
+            /// <inheritdoc />
             public TimeSpan SweepInterval => TimeSpan.FromHours(1);
 
+            /// <inheritdoc />
             public long RetainedPayloadBytes => 0;
 
+            /// <inheritdoc />
             public int RetainedCount => 0;
 
+            /// <inheritdoc />
             public ArticleRetentionResult RetainCanonical(
                 string messageId,
                 Guid requestId,
@@ -80,11 +93,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
+            /// <inheritdoc />
             public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
                 ArticleDeliveryClaimResult.NotFound();
 
+            /// <inheritdoc />
             public bool TryCancelPendingRequest(Guid requestId) => false;
 
+            /// <inheritdoc />
             public long SweepExpired()
             {
                 SweepCount++;
@@ -92,25 +108,35 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 return 0;
             }
 
+            /// <inheritdoc />
             public void BeginShutdown() => ShutdownStarted = true;
         }
 
+        /// <summary>Fails the first SweepExpired call then succeeds to verify retry without stopping the loop.</summary>
         private sealed class ThrowingThenSucceedingAuthority : IArticleRetentionAuthority
         {
+            /// <summary>Completes after the first successful sweep following a failure.</summary>
             public TaskCompletionSource Recovered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Total sweep invocations including the failed pass.</summary>
             public int SweepCount { get; private set; }
 
+            /// <summary>Count of sweeps that threw before succeeding.</summary>
             public int Failures { get; private set; }
 
+            /// <summary>Whether shutdown admission was closed.</summary>
             public bool ShutdownStarted { get; private set; }
 
+            /// <inheritdoc />
             public TimeSpan SweepInterval => TimeSpan.Zero;
 
+            /// <inheritdoc />
             public long RetainedPayloadBytes => 0;
 
+            /// <inheritdoc />
             public int RetainedCount => 0;
 
+            /// <inheritdoc />
             public ArticleRetentionResult RetainCanonical(
                 string messageId,
                 Guid requestId,
@@ -119,11 +145,14 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
+            /// <inheritdoc />
             public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
                 ArticleDeliveryClaimResult.NotFound();
 
+            /// <inheritdoc />
             public bool TryCancelPendingRequest(Guid requestId) => false;
 
+            /// <inheritdoc />
             public long SweepExpired()
             {
                 SweepCount++;
@@ -137,19 +166,26 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 return 0;
             }
 
+            /// <inheritdoc />
             public void BeginShutdown() => ShutdownStarted = true;
         }
 
+        /// <summary>Always throws from SweepExpired to surface fatal errors on ExecuteTask.</summary>
         private sealed class FatalSweepAuthority : IArticleRetentionAuthority
         {
+            /// <summary>Sweep attempts before the hosted loop faults.</summary>
             public int SweepCount { get; private set; }
 
+            /// <inheritdoc />
             public TimeSpan SweepInterval => TimeSpan.FromHours(1);
 
+            /// <inheritdoc />
             public long RetainedPayloadBytes => 0;
 
+            /// <inheritdoc />
             public int RetainedCount => 0;
 
+            /// <inheritdoc />
             public ArticleRetentionResult RetainCanonical(
                 string messageId,
                 Guid requestId,
@@ -158,17 +194,21 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 string? endpointFqdn = null) =>
                 new(ArticleRetentionKind.ShuttingDown, null, null, null, 0, 0);
 
+            /// <inheritdoc />
             public ArticleDeliveryClaimResult TryClaimForDelivery(ReadOnlySpan<byte> messageIdOctets) =>
                 ArticleDeliveryClaimResult.NotFound();
 
+            /// <inheritdoc />
             public bool TryCancelPendingRequest(Guid requestId) => false;
 
+            /// <inheritdoc />
             public long SweepExpired()
             {
                 SweepCount++;
                 throw new OutOfMemoryException("sweep exhausted");
             }
 
+            /// <inheritdoc />
             public void BeginShutdown()
             {
             }

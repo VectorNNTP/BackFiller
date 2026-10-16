@@ -3,9 +3,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Asserts BackFillerRuntimeOptionsFactory snapshots normalized runtime fields and path resolution.
+    /// </summary>
     [Collection("WorkingDirectory")]
     public sealed class BackFillerRuntimeOptionsFactoryTests
     {
+        /// <summary>
+        /// Contract: Create projects normalized identity and paths.
+        /// </summary>
+
         [Fact]
         public void Create_projects_normalized_identity_and_paths()
         {
@@ -47,6 +54,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(TimeSpan.FromSeconds(60), runtime.AccountRefreshInterval);
         }
 
+        /// <summary>
+        /// Contract: Runtime certificate names are only the backfiller fqdn.
+        /// </summary>
+
         [Fact]
         public void Runtime_certificate_names_are_only_the_backfiller_fqdn()
         {
@@ -58,6 +69,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(["backfiller01.usenet.ninja"], runtime.CertificateDomainNames);
             Assert.DoesNotContain("news.usenet.ninja", runtime.CertificateDomainNames);
         }
+
+        /// <summary>
+        /// Contract: Runtime options are immutable records.
+        /// </summary>
 
         [Fact]
         public void Runtime_options_are_immutable_records()
@@ -73,6 +88,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("other.example", withFqdn.Fqdn);
             Assert.Null(runtime.GetType().GetProperty("Name"));
         }
+
+        /// <summary>
+        /// Contract: Shutdown flags are snapshotted independently and do not follow later option mutation.
+        /// </summary>
 
         [Fact]
         public void Shutdown_flags_are_snapshotted_independently_and_do_not_follow_later_option_mutation()
@@ -93,6 +112,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.False(runtime.Shutdown.FinishActiveArticles);
             Assert.Equal(TimeSpan.FromSeconds(45), runtime.Shutdown.GracePeriod);
         }
+
+        /// <summary>
+        /// Contract: Relative directories resolve against the content root not the working directory.
+        /// </summary>
 
         [Fact]
         public void Relative_directories_resolve_against_the_content_root_not_the_working_directory()
@@ -124,6 +147,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Contract: Absolute directories remain absolute.
+        /// </summary>
+
         [Fact]
         public void Absolute_directories_remain_absolute()
         {
@@ -152,6 +179,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>Deletes a temporary directory. An in-use directory is left behind so cleanup cannot fail the test.</summary>
+        /// <param name="path">Directory created by the test.</param>
         private static void TryDelete(string path)
         {
             try

@@ -27,22 +27,22 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             RetryAfter = retryAfter;
         }
 
-        /// <summary>Gets the HTTP status code.</summary>
+        /// <summary>HTTP status from the CA response. Only success responses are returned to callers.</summary>
         private HttpStatusCode StatusCode { get; }
 
-        /// <summary>Gets the deserialized body when present.</summary>
+        /// <summary>JSON body deserialized to <typeparamref name="T"/>. Null when the body was empty or no type info was supplied.</summary>
         internal T? Content { get; }
 
-        /// <summary>Gets the Location header when present.</summary>
+        /// <summary>Location header URL (account, order, authorization). Null when the CA omitted it.</summary>
         internal Uri? Location { get; }
 
-        /// <summary>Gets parsed Link headers.</summary>
+        /// <summary>Parsed Link headers, including relation targets used for alternate certificate chains.</summary>
         internal IReadOnlyList<AcmeLink> Links { get; }
 
-        /// <summary>Gets the raw response body.</summary>
+        /// <summary>Response text before JSON deserialization. Empty when the body was empty.</summary>
         internal string RawBody { get; }
 
-        /// <summary>Gets Retry-After as an absolute UTC time when the authority supplied one.</summary>
+        /// <summary>Retry-After converted to absolute UTC when the authority supplied a delta or HTTP-date.</summary>
         internal DateTimeOffset? RetryAfter { get; }
     }
 

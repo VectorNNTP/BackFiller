@@ -9,8 +9,14 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Proves shutdown follows the captured drain and finish flags, and that a cancelled delivery is requeued instead of acknowledged.
+    /// </summary>
     public sealed class ArticleWorkShutdownPolicyTests
     {
+        /// <summary>
+        /// With both flags true, a queued delivery starts during retirement and both deliveries are acknowledged after they finish.
+        /// </summary>
         [Fact]
         public async Task Drain_true_finish_true_queued_work_starts_and_active_work_finishes()
         {
@@ -41,6 +47,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// Drain allows the queued delivery to start, but finish-false cancels both and requeues them without publishing a response.
+        /// </summary>
         [Fact]
         public async Task Drain_true_finish_false_queued_work_may_start_and_active_work_is_cancelled()
         {
@@ -73,6 +82,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(context.Publisher.Published);
         }
 
+        /// <summary>
+        /// Drain-false requeues the delivery that has not entered processing, then acknowledges the one that was already active.
+        /// </summary>
         [Fact]
         public async Task Drain_false_finish_true_queued_work_is_requeued_while_active_work_finishes()
         {
@@ -111,6 +123,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain(context.Channel.Settlements, static settlement => settlement.DeliveryTag == 8 && settlement.Acknowledge);
         }
 
+        /// <summary>
+        /// Both flags false: the queued delivery never starts, the active one is cancelled, and both are requeued.
+        /// </summary>
         [Fact]
         public async Task Drain_false_finish_false_queued_work_does_not_start_and_active_work_is_cancelled()
         {
@@ -144,6 +159,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// A queued NACK waits until the in-flight NACK leaves the broker operation, so the two settlements do not overlap.
+        /// </summary>
         [Fact]
         public async Task Cancelled_queued_settlement_does_not_overlap_the_active_delivery_nack()
         {
@@ -196,6 +214,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// Cancelling the retirement token stops finish-true work without acknowledging it or waiting for the handler gate.
+        /// </summary>
         [Fact]
         public async Task Grace_expiry_cancels_finish_true_work_and_does_not_block_shutdown()
         {
@@ -221,6 +242,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(context.Publisher.Published);
         }
 
+        /// <summary>
+        /// Retirement while dispatch is held still treats the delivery as queued, so drain-false requeues it before the handler runs.
+        /// </summary>
         [Fact]
         public async Task Shutdown_during_queued_to_active_transition_uses_queued_policy()
         {
@@ -249,6 +273,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(settlement.Requeue);
         }
 
+        /// <summary>
+        /// Retirement during a blocked provider ARTICLE cancels the work and requeues it. The response is not published.
+        /// </summary>
         [Fact]
         public async Task Shutdown_as_provider_retrieval_completes_does_not_ack()
         {
@@ -276,6 +303,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(harness.PublishChannel.Publications);
         }
 
+        /// <summary>
+        /// Retirement after the article is retained but before publish requeues the delivery and leaves the retained article in place.
+        /// </summary>
         [Fact]
         public async Task Shutdown_after_retention_before_publish_keeps_the_article_and_does_not_ack()
         {
@@ -303,6 +333,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
 
+        /// <summary>
+        /// Retirement while the response publish is waiting for a confirm requeues the delivery instead of acknowledging it.
+        /// </summary>
         [Fact]
         public async Task Shutdown_after_publish_before_confirm_does_not_ack()
         {
@@ -326,6 +359,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(context.Channel.Settlements[0].Requeue);
         }
 
+        /// <summary>
+        /// Once the response publish has been confirmed, retirement still acknowledges the current delivery.
+        /// </summary>
         [Fact]
         public async Task Shutdown_after_confirm_before_ack_still_acks_when_the_context_is_current()
         {
@@ -344,6 +380,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.True(Assert.Single(context.Channel.Settlements).Acknowledge);
         }
 
+        /// <summary>
+        /// Retirement that arrives after ACK has started does not cancel the work or record a second settlement.
+        /// </summary>
         [Fact]
         public async Task Shutdown_during_ack_does_not_double_settle()
         {
@@ -364,6 +403,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// Grace cancellation while ACK is blocked does not dispose the channel until the ACK returns, then the delivery is still acknowledged.
+        /// </summary>
         [Fact]
         public async Task Grace_expiry_during_blocked_ack_cancels_work_before_the_gate_is_released()
         {
@@ -402,6 +444,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkConsumerState.Stopped, context.Session.State);
         }
 
+        /// <summary>
+        /// Retirement while the provider connect is blocked requeues the delivery and does not publish a response.
+        /// </summary>
         [Fact]
         public async Task Shutdown_during_provider_session_acquisition_does_not_ack()
         {
@@ -426,6 +471,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Empty(harness.PublishChannel.Publications);
         }
 
+        /// <summary>
+        /// Stopping the consumer does not cancel an account refresh that is already inside its query. The refresh token still does.
+        /// </summary>
         [Fact]
         public async Task Consumer_retirement_does_not_cancel_an_in_flight_mysql_refresh()
         {
@@ -459,6 +507,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await consumer.DisposeAsync();
         }
 
+        /// <summary>
+        /// Finish-false retirement records one requeue and no acknowledgement for the cancelled delivery.
+        /// </summary>
         [Fact]
         public async Task Cancelled_shutdown_work_is_not_acked_and_is_requeued_once()
         {
@@ -480,6 +531,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(settlement.Acknowledge);
         }
 
+        /// <summary>
+        /// A terminal not-found outcome that completes during retirement is still acknowledged and published once.
+        /// </summary>
         [Fact]
         public async Task Terminal_shutdown_settlement_does_not_disappear()
         {
@@ -505,6 +559,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Single(context.Publisher.Published);
         }
 
+        /// <summary>
+        /// Completing one active delivery acknowledges only that delivery tag. The second stays unsettled until its own gate opens.
+        /// </summary>
         [Fact]
         public async Task One_active_completion_does_not_settle_another_delivery()
         {
@@ -532,6 +589,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(2, context.Channel.Settlements.Count);
         }
 
+        /// <summary>
+        /// Retiring the Giganews session requeues only that delivery. The Eweka session keeps running and can still acknowledge.
+        /// </summary>
         [Fact]
         public async Task Retiring_one_session_does_not_cancel_unrelated_active_work()
         {
@@ -598,6 +658,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// Every delivery still queued when drain is false is requeued. The one already active is acknowledged after it finishes.
+        /// </summary>
         [Fact]
         public async Task Multiple_queued_deliveries_obey_drain_queued_work_consistently()
         {
@@ -637,6 +700,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static settlement => Assert.False(settlement.Acknowledge));
         }
 
+        /// <summary>
+        /// Mutating the bindable shutdown options after the session is built does not change the snapshot retirement already captured.
+        /// </summary>
         [Fact]
         public async Task Runtime_shutdown_snapshot_is_used_and_does_not_mutate_during_retirement()
         {
@@ -676,6 +742,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.All(context.Channel.Settlements, static settlement => Assert.False(settlement.Acknowledge));
         }
 
+        /// <summary>
+        /// The hosted consumer stops with the runtime snapshot's finish-false policy, so the in-flight delivery is requeued.
+        /// </summary>
         [Fact]
         public async Task Consumer_service_stop_uses_the_runtime_snapshot()
         {
@@ -721,6 +790,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// The consumer session and service source must not read <c>IOptions</c> or block on <c>Wait</c> or <c>Result</c>.
+        /// </summary>
         [Fact]
         public void Shutdown_policy_is_not_read_from_mutable_options_per_request()
         {
@@ -736,6 +808,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             }
         }
 
+        /// <summary>Handler that reports success with the canonical endpoint and article id, with no gate.</summary>
         private static ControllableArticleWorkHandler SuccessHandler() =>
             new()
             {
@@ -745,17 +818,26 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 ArticleId = CanonicalArtId(),
             };
 
+        /// <summary>Article id parsed from the canonical test hex. Not a live retention key.</summary>
         private static VectorNNTP.BackFiller.Articles.ArticleId CanonicalArtId() =>
             VectorNNTP.BackFiller.Articles.ArticleId.ParseLowerHex(ArticleWorkTestDeliveries.CanonicalArticleIdHex);
 
+        /// <summary>Completion source that runs continuations asynchronously so a test thread cannot deadlock on its own signal.</summary>
         private static TaskCompletionSource NewSource() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>Waits until the session reports exactly these queued and active counts.</summary>
+        /// <param name="session">Session under retirement.</param>
+        /// <param name="queued">Expected deliveries admitted but not yet in the handler.</param>
+        /// <param name="active">Expected deliveries inside the handler.</param>
         private static Task WaitQueuedActiveAsync(ArticleWorkConsumerSession session, int queued, int active) =>
             ArticleWorkTestDeliveries.WaitUntilAsync(
                 () => session.QueuedCount == queued && session.ActiveCount == active,
                 TimeSpan.FromSeconds(2));
 
+        /// <summary>Walks parents of the test output directory until <c>src/BackFiller/ArticleWork</c> exists.</summary>
+        /// <returns>That directory.</returns>
+        /// <exception cref="DirectoryNotFoundException">The repository layout cannot be found.</exception>
         private static string FindArticleWorkSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -773,8 +855,17 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/ArticleWork.");
         }
 
+        /// <summary>
+        /// One consumer session on a fake RabbitMQ channel. It owns the connection only when the test did not supply one.
+        /// </summary>
         private sealed class ShutdownContext : IAsyncDisposable
         {
+            /// <summary>Stores the session, channel, and whether this context must dispose the connection.</summary>
+            /// <param name="connections">Started service, or null when the caller owns it.</param>
+            /// <param name="ownsConnections">Whether <see cref="DisposeAsync"/> disposes <paramref name="connections"/>.</param>
+            /// <param name="session">Consumer session under test.</param>
+            /// <param name="channel">Fake channel the session is consuming.</param>
+            /// <param name="recordingPublisher">Publisher when it is the recording type; otherwise a stand-in that is not the live publisher.</param>
             private ShutdownContext(
                 RabbitMqService? connections,
                 bool ownsConnections,
@@ -789,19 +880,34 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 Publisher = recordingPublisher ?? new RecordingArticleWorkResponsePublisher();
             }
 
+            /// <summary>Fake broker service. Null when this context does not own one.</summary>
             public RabbitMqService? Connections { get; }
 
+            /// <summary>True when <see cref="DisposeAsync"/> must dispose <see cref="Connections"/>.</summary>
             public bool OwnsConnections { get; }
 
+            /// <summary>Giganews consumer session started with the requested shutdown snapshot.</summary>
             public ArticleWorkConsumerSession Session { get; }
 
+            /// <summary>Channel the session is consuming. Tests gate ACK and NACK on it.</summary>
             public FakeBackFillerRabbitMqChannel Channel { get; }
 
+            /// <summary>
+            /// Recording publisher when the session was given one. Otherwise an unused stand-in, not the publisher the pipeline calls.
+            /// </summary>
             public RecordingArticleWorkResponsePublisher Publisher { get; }
 
+            /// <summary>Delivers one canonical article-work payload on <see cref="Channel"/>.</summary>
+            /// <param name="deliveryTag">Broker delivery tag the settlement assertions use.</param>
+            /// <returns>The consume task.</returns>
             public Task Deliver(ulong deliveryTag) =>
                 Channel.DeliverAsync(ArticleWorkTestDeliveries.Canonical(deliveryTag));
 
+            /// <summary>Starts a session that records successful publishes, with a 30-second grace and the given flags.</summary>
+            /// <param name="handler">Article-work handler.</param>
+            /// <param name="drainQueued">Captured drain-queued flag.</param>
+            /// <param name="finishActive">Captured finish-active flag.</param>
+            /// <param name="prefetch">Session prefetch. Default 1.</param>
             public static Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 bool drainQueued,
@@ -813,6 +919,12 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                     new BackFillerShutdownRuntimeOptions(TimeSpan.FromSeconds(30), drainQueued, finishActive),
                     prefetch);
 
+            /// <summary>Starts a session with the caller's publisher and optional already-started connections. Prefetch is 1.</summary>
+            /// <param name="handler">Article-work handler.</param>
+            /// <param name="publisher">Response publisher the pipeline uses.</param>
+            /// <param name="drainQueued">Captured drain-queued flag.</param>
+            /// <param name="finishActive">Captured finish-active flag.</param>
+            /// <param name="connections">Existing broker service. Null creates and owns one.</param>
             public static Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 IArticleWorkResponsePublisher publisher,
@@ -826,6 +938,13 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                     prefetch: 1,
                     connections);
 
+            /// <summary>Starts a Giganews session on a fake channel using the supplied shutdown snapshot.</summary>
+            /// <param name="handler">Article-work handler.</param>
+            /// <param name="publisher">Response publisher the pipeline uses.</param>
+            /// <param name="shutdown">Immutable snapshot the session retires with. Later option mutations do not affect it.</param>
+            /// <param name="prefetch">Session prefetch.</param>
+            /// <param name="connections">Existing broker service. Null creates and owns one.</param>
+            /// <returns>A started context.</returns>
             public static async Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 IArticleWorkResponsePublisher publisher,
@@ -860,6 +979,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 return new ShutdownContext(owned, owned is not null, session, channel, recording);
             }
 
+            /// <summary>Disposes the session, then the owned connection. A caller-supplied connection is left running.</summary>
             public async ValueTask DisposeAsync()
             {
                 await Session.DisposeAsync();

@@ -83,6 +83,10 @@ namespace VectorNNTP.BackFiller.Dns
         /// <summary>
         /// Returns <see langword="true"/> when any TXT RR payload equals <paramref name="expectedTxt"/>.
         /// </summary>
+        /// <param name="buffer">DNS response.</param>
+        /// <param name="expectedId">Transaction id that must match the response.</param>
+        /// <param name="expectedTxt">Concatenated TXT character-string bytes to compare.</param>
+        /// <returns><see langword="false"/> when the header or question section is malformed or no TXT matches.</returns>
         internal static bool ResponseContainsTxt(
             ReadOnlySpan<byte> buffer,
             ushort expectedId,

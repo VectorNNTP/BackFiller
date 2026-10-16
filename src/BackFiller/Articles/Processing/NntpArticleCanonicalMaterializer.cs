@@ -104,10 +104,10 @@ namespace VectorNNTP.BackFiller.Articles.Processing
             CanonicalLength = canonicalLength;
         }
 
-        /// <summary>Gets a value indicating whether materialization produced a canonical article.</summary>
+        /// <summary>True when canonical ArtData was produced and <see cref="ArticleBytes"/> is non-null.</summary>
         internal bool IsAccepted { get; }
 
-        /// <summary>Gets the failure classification when <see cref="IsAccepted"/> is false.</summary>
+        /// <summary>Materializer failure when <see cref="IsAccepted"/> is false; otherwise <see cref="NntpArticleCanonicalFailureCode.None"/>.</summary>
         internal NntpArticleCanonicalFailureCode FailureCode { get; }
 
         /// <summary>
@@ -117,7 +117,7 @@ namespace VectorNNTP.BackFiller.Articles.Processing
         /// </summary>
         internal byte[]? ArticleBytes { get; }
 
-        /// <summary>Gets the number of canonical article bytes when accepted. Zero when rejected.</summary>
+        /// <summary>Valid prefix length of <see cref="ArticleBytes"/> when accepted; zero when rejected.</summary>
         internal int CanonicalLength { get; }
 
         /// <summary>Creates a rejected result with no output buffer.</summary>

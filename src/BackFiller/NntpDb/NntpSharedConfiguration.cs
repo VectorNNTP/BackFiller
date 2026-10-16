@@ -162,7 +162,9 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// <summary>Published <see cref="NntpSharedConfiguration"/> used by one application.</summary>
     internal interface INntpSharedConfigurationCatalogue
     {
-        /// <summary>Gets the last published snapshot.</summary>
+        /// <summary>
+        /// Last successfully published <c>nntpsharedconfig</c> row used for Path/FQDN resolution. Not refreshed on read.
+        /// </summary>
         /// <exception cref="InvalidOperationException">No snapshot has been published.</exception>
         NntpSharedConfiguration Current { get; }
     }

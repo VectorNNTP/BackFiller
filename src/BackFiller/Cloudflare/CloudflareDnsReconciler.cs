@@ -57,7 +57,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsReconciler"/> class.
+        /// Stores the DNS client, operation timeout options, and logger. Does not call Cloudflare until reconcile or cleanup runs.
         /// </summary>
         /// <param name="client">DNS record API client.</param>
         /// <param name="options">Options that supply the default operation timeout.</param>

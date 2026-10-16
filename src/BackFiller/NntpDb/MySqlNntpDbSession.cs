@@ -5,9 +5,12 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// <summary>MySqlConnector-backed logical connection. Dispose returns it to the provider pool.</summary>
     public sealed class MySqlNntpDbSession : INntpDbSession
     {
+        /// <summary>Open provider connection. Dispose returns it to the MySqlConnector pool.</summary>
         private readonly MySqlConnection _connection;
 
-        /// <summary>Initializes a new instance wrapping an already-open connection.</summary>
+        /// <summary>
+        /// Takes ownership of an already-open MySqlConnector connection. <see cref="DisposeAsync"/> returns it to the provider pool.
+        /// </summary>
         /// <param name="connection">Open provider connection. This session owns its disposal.</param>
         public MySqlNntpDbSession(MySqlConnection connection)
         {

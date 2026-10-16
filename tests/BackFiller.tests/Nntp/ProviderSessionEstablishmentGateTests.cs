@@ -4,9 +4,18 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// Global cap on concurrent NNTP session establishment across pools and registry apply.
+    /// </summary>
+
     public sealed class ProviderSessionEstablishmentGateTests
     {
+        /// <summary>
+        /// Shared gate limits concurrent connects across three pools during warm-up.
+        /// </summary>
+
         [Fact]
+
         public async Task Global_bound_limits_concurrent_establishment_across_providers()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -37,7 +46,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(15, factory.ConnectAttempts.Count);
         }
 
+        /// <summary>
+        /// Gate does not raise steady-state sessions above per-provider MaxSessions.
+        /// </summary>
+
         [Fact]
+
         public async Task Per_provider_MaxSessions_still_limits_steady_state_capacity()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -54,7 +68,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(2, factory.ConnectAttempts.Count);
         }
 
+        /// <summary>
+        /// After warm-up, total sessions can exceed gate limit sequentially.
+        /// </summary>
+
         [Fact]
+
         public async Task Steady_state_is_not_globally_capped_after_establishment()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -72,7 +91,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, factory.MaxObservedConcurrentConnects);
         }
 
+        /// <summary>
+        /// Warm-up respects gate concurrency below desired MaxSessions.
+        /// </summary>
+
         [Fact]
+
         public async Task Startup_does_not_establish_everything_simultaneously()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -93,7 +117,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(8, pool.ActiveSessionCount);
         }
 
+        /// <summary>
+        /// On-demand acquire replenishment respects global establishment gate.
+        /// </summary>
+
         [Fact]
+
         public async Task Replacement_acquire_path_is_globally_bounded()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -122,7 +151,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// Canceled warm-up on a waiting pool does not open sessions.
+        /// </summary>
+
         [Fact]
+
         public async Task Cancellation_while_waiting_for_gate_does_not_establish()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -150,7 +184,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, holder.ActiveSessionCount);
         }
 
+        /// <summary>
+        /// Cancel during in-flight connect releases gate permit for a later warm-up.
+        /// </summary>
+
         [Fact]
+
         public async Task Cancellation_while_establishing_releases_the_gate()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -180,7 +219,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(2, factory.ConnectAttempts.Count);
         }
 
+        /// <summary>
+        /// Connect exception releases gate so a later acquire can succeed.
+        /// </summary>
+
         [Fact]
+
         public async Task Exception_while_establishing_releases_the_gate()
         {
             var factory = new ScriptedNntpTransportFactory
@@ -199,7 +243,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, pool.ActiveSessionCount);
         }
 
+        /// <summary>
+        /// NntpProviderRegistry ApplySnapshot warm-up shares one gate across pools.
+        /// </summary>
+
         [Fact]
+
         public async Task Registry_pools_share_one_application_wide_gate()
         {
             var catalog = new ProviderConfigurationCatalog();
@@ -239,6 +288,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(3, poolB.ActiveSessionCount);
         }
 
+
+        /// <summary>Polls until <paramref name="condition"/> is true, or throws <see cref="TimeoutException"/>.</summary>
+        /// <param name="condition">Condition the test is waiting to observe.</param>
+        /// <param name="timeout">How long to wait before failing the test.</param>
         private static async Task WaitForAsync(Func<bool> condition, TimeSpan timeout)
         {
             var deadline = TimeProvider.System.GetUtcNow() + timeout;

@@ -2,8 +2,16 @@ using VectorNNTP.BackFiller.Acme;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
+    /// <summary>
+    /// AcmeProblemDiagnostics redacts PEM and long tokens in problem detail formatting.
+    /// </summary>
+
     public sealed class AcmeProblemDiagnosticsTests
     {
+        /// <summary>
+        /// Contract: FormatProblemFields redacts pem blocks and bounded long tokens.
+        /// </summary>
+
         [Fact]
         public void FormatProblemFields_redacts_pem_blocks_and_bounded_long_tokens()
         {
@@ -23,6 +31,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Equal($"detail=prefix [redacted-token] {shorter} [redacted-pem] tail", text);
         }
 
+        /// <summary>
+        /// Contract: FormatProblemFields shrinks a greedy token until the trailing word boundary holds.
+        /// </summary>
+
         [Fact]
         public void FormatProblemFields_shrinks_a_greedy_token_until_the_trailing_word_boundary_holds()
         {
@@ -32,6 +44,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
             Assert.Equal("detail=[redacted-token]-", text);
         }
+
+        /// <summary>
+        /// Contract: FormatProblemFields includes a trailing hyphen when a word character follows.
+        /// </summary>
 
         [Fact]
         public void FormatProblemFields_includes_a_trailing_hyphen_when_a_word_character_follows()
@@ -43,6 +59,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Equal("detail=[redacted-token]\u00E9", text);
         }
 
+        /// <summary>
+        /// Contract: FormatProblemFields does not redact a run that lacks a word boundary.
+        /// </summary>
+
         [Fact]
         public void FormatProblemFields_does_not_redact_a_run_that_lacks_a_word_boundary()
         {
@@ -53,6 +73,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Equal("detail=\u00E9" + token, text);
         }
 
+        /// <summary>
+        /// Contract: FormatProblemFields does not redact seventy nine token characters.
+        /// </summary>
+
         [Fact]
         public void FormatProblemFields_does_not_redact_seventy_nine_token_characters()
         {
@@ -61,6 +85,8 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             Assert.Equal("detail=" + new string('a', 79), text);
         }
 
+        /// <summary>Formats only the detail field so redaction tests do not depend on the other problem fields.</summary>
+        /// <param name="detail">Detail text passed to <see cref="AcmeProblemDiagnostics.FormatProblemFields"/>.</param>
         private static string Detail(string detail) =>
             AcmeProblemDiagnostics.FormatProblemFields(
                 preface: null,

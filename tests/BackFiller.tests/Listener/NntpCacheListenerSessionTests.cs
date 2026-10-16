@@ -9,13 +9,24 @@ using VectorNNTP.BackFiller.Tests.Retention;
 
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
+    /// <summary>
+    /// Cache listener NNTP subset: ARTICLE framing, 403/430/501 responses, pipelining, and delivery claims.
+    /// </summary>
+
     public sealed class NntpCacheListenerSessionTests
     {
+        /// <summary>Expected 201 posting-prohibited banner emitted at session start.</summary>
         private static ReadOnlySpan<byte> Greeting => "201 NNTP Service Ready, posting prohibited\r\n"u8;
 
+        /// <summary>Expected dot-terminated multiline end marker after ARTICLE payloads.</summary>
         private static ReadOnlySpan<byte> Terminator => ".\r\n"u8;
 
+        /// <summary>
+        /// Successful ARTICLE emits greeting, 220 status, retained bytes, one terminator; claim consumes retention.
+        /// </summary>
+
         [Fact]
+
         public async Task Article_writes_the_status_line_exact_bytes_and_one_terminator()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -33,7 +44,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
+        /// <summary>
+        /// Pre-stuffed retained bytes are sent unchanged with a single trailing terminator.
+        /// </summary>
+
         [Fact]
+
         public async Task Existing_dot_stuffing_is_preserved_and_exactly_one_terminator_is_appended()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -49,9 +65,14 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Articles not ending in CRLF return 403 without mutating retained bytes.
+        /// </summary>
+
         [Theory]
         [InlineData("cr-only\r")]
         [InlineData("lf-only\n")]
+
         public async Task Article_ending_in_cr_or_lf_only_is_refused_without_mutation(string body)
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -70,9 +91,14 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
         }
 
+        /// <summary>
+        /// Interior bare CR/LF in retained payload yields 403 before any 220 body bytes.
+        /// </summary>
+
         [Theory]
         [InlineData("plain\nmid.dot\r\n")]
         [InlineData("plain\rmid.dot\r\n")]
+
         public async Task Interior_bare_cr_or_lf_returns_403_before_any_article_byte(string body)
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -91,7 +117,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
         }
 
+        /// <summary>
+        /// NUL in retained article yields 403; retention and bytes remain unchanged.
+        /// </summary>
+
         [Fact]
+
         public async Task Nul_in_a_retained_article_is_403_before_any_article_byte()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -115,7 +146,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
         }
 
+        /// <summary>
+        /// Not-frameable dot-leading header pattern returns 403 without wire body.
+        /// </summary>
+
         [Fact]
+
         public async Task Dot_leading_line_without_a_separator_is_403_before_any_article_byte()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -140,7 +176,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
         }
 
+        /// <summary>
+        /// Header dot-stuffing is applied on transmit; client destuff matches logical article bytes.
+        /// </summary>
+
         [Fact]
+
         public async Task Dot_leading_header_is_stuffed_on_the_wire_and_the_body_is_decoded_once()
         {
             var logical = Encoding.ASCII.GetBytes(
@@ -200,7 +241,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
 
+        /// <summary>
+        /// Wire bytes read back through NntpStreamReader match expected logical article after stuff/destuff.
+        /// </summary>
+
         [Fact]
+
         public async Task Listener_wire_round_trips_through_nntp_stream_reader()
         {
             var logical = Encoding.ASCII.GetBytes(
@@ -270,7 +316,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// CRLF-terminated retained article is sent once with exactly one terminator line.
+        /// </summary>
+
         [Fact]
+
         public async Task Article_ending_in_crlf_is_transmitted_once_with_one_terminator()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -288,7 +339,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Unterminated retained article returns 403 and preserves retention.
+        /// </summary>
+
         [Fact]
+
         public async Task Non_crlf_terminated_article_is_refused_without_mutation()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -306,7 +362,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(prepared.Record.ArtData.Span.SequenceEqual(before));
         }
 
+        /// <summary>
+        /// Unknown id 430; malformed ARTICLE/QUIT forms return documented 4xx/5xx without leaking bodies.
+        /// </summary>
+
         [Fact]
+
         public async Task Missing_article_is_430_and_invalid_forms_use_501_or_412()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -336,7 +397,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 written);
         }
 
+        /// <summary>
+        /// ARTICLE command matching is case-insensitive with flexible whitespace.
+        /// </summary>
+
         [Fact]
+
         public async Task Keywords_are_case_insensitive_and_spaces_or_tabs_separate_the_argument()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -347,7 +413,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Extra spaces between ARTICLE and message-id are accepted.
+        /// </summary>
+
         [Fact]
+
         public async Task Repeated_spaces_are_accepted()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -358,7 +429,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Line over 512 bytes yields one 501; subsequent command still processed.
+        /// </summary>
+
         [Fact]
+
         public async Task Overlong_line_is_one_501_and_the_following_command_is_preserved()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -372,7 +448,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Exactly 512-byte command line is parsed as a single unknown command.
+        /// </summary>
+
         [Fact]
+
         public async Task A_512_octet_line_is_parsed_as_one_command()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -388,7 +469,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 written);
         }
 
+        /// <summary>
+        /// Multiple ARTICLE commands in one read preserve order and payloads.
+        /// </summary>
+
         [Fact]
+
         public async Task Pipelined_commands_are_processed_in_order()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -405,7 +491,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// QUIT closes session without processing pipelined commands after it.
+        /// </summary>
+
         [Fact]
+
         public async Task Quit_does_not_process_a_following_pipelined_command()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -418,7 +509,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(1, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Partial command with EOF yields greeting only.
+        /// </summary>
+
         [Fact]
+
         public async Task Peer_close_before_a_command_sends_no_further_response()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -427,7 +523,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.True(written.AsSpan().SequenceEqual(Greeting));
         }
 
+        /// <summary>
+        /// IO failures during status/body/terminator writes roll back claim; retention remains for retry.
+        /// </summary>
+
         [Fact]
+
         public async Task Failed_status_body_and_terminator_writes_do_not_consume_the_entry()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -467,7 +568,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Canceled write during ARTICLE leaves entry retained for a later successful delivery.
+        /// </summary>
+
         [Fact]
+
         public async Task Cancellation_during_the_article_write_releases_the_claim_for_a_retry()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -486,7 +592,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// Concurrent claims: second session 403 during in-flight write; after commit next request is 430.
+        /// </summary>
+
         [Fact]
+
         public async Task Two_sessions_cannot_deliver_the_same_entry_and_commit_makes_the_next_request_430()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -509,7 +620,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Contains("430 No Such Article Found\r\n"u8, third);
         }
 
+        /// <summary>
+        /// Successful delivery consumes entry even if client disconnects afterward.
+        /// </summary>
+
         [Fact]
+
         public async Task A_completed_write_stays_consumed_when_the_client_then_disconnects()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -523,7 +639,12 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Contains("430 No Such Article Found\r\n"u8, again);
         }
 
+        /// <summary>
+        /// Failed write rollback allows retry until TTL expiry then 430.
+        /// </summary>
+
         [Fact]
+
         public async Task A_retry_after_rollback_fails_once_ttl_has_expired()
         {
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -541,6 +662,10 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>Runs the cache listener session against a scripted transport and returns wire bytes sent to the client.</summary>
+        /// <param name="authority">Retention store backing article lookup and delivery claims.</param>
+        /// <param name="commands">Inbound client command script (ASCII, CRLF-terminated).</param>
+        /// <param name="maxRead">Maximum bytes copied per transport read to simulate partial socket reads.</param>
         private static async Task<byte[]> RunAsync(ArticleRetentionAuthority authority, string commands, int maxRead = int.MaxValue)
         {
             var transport = new ScriptedTransport(Encoding.ASCII.GetBytes(commands), maxRead);
@@ -548,6 +673,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return transport.Written;
         }
 
+        /// <summary>Counts non-overlapping occurrences of <paramref name="value"/> in <paramref name="source"/>.</summary>
+        /// <param name="source">Buffer to scan.</param>
+        /// <param name="value">Pattern to count.</param>
         private static int Count(ReadOnlySpan<byte> source, ReadOnlySpan<byte> value)
         {
             var count = 0;
@@ -562,6 +690,8 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return count;
         }
 
+        /// <summary>Rebuilds logical article bytes by destuffing the multiline body after the header/body separator.</summary>
+        /// <param name="artData">Retained on-wire article including headers and dot-stuffed body.</param>
         private static byte[] LogicalFromRetained(byte[] artData)
         {
             var separator = artData.AsSpan().IndexOf("\r\n\r\n"u8);
@@ -574,6 +704,8 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return logical;
         }
 
+        /// <summary>Removes NNTP dot-stuffing from a CRLF-delimited multiline block line by line.</summary>
+        /// <param name="block">Multiline body bytes as transmitted on the wire.</param>
         private static byte[] DestuffMultiline(ReadOnlySpan<byte> block)
         {
             var buffer = new byte[block.Length];
@@ -602,6 +734,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return buffer.AsSpan(0, written).ToArray();
         }
 
+        /// <summary>Reads a multiline article payload through <see cref="NntpStreamReader"/> with optional single-byte reads.</summary>
+        /// <param name="multiline">Complete multiline payload including terminators.</param>
+        /// <param name="chunk">When not <see cref="int.MaxValue"/>, wraps the stream to return one byte per read.</param>
         private static async Task<byte[]> ReadWithProductionReaderAsync(byte[] multiline, int chunk)
         {
             Stream stream = chunk == int.MaxValue
@@ -611,30 +746,45 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return await reader.ReadArticlePayloadAsync(1024 * 1024, TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
+        /// <summary>
+        /// Stream that reads one byte at a time to stress incremental payload reading.
+        /// </summary>
+
         private sealed class OneByteStream(byte[] data) : Stream
         {
+            /// <summary>Next byte index in <c>data</c>; single-byte reads advance it until EOF.</summary>
             private int _position;
 
+            /// <inheritdoc />
             public override bool CanRead => true;
 
+            /// <inheritdoc />
             public override bool CanSeek => false;
 
+            /// <inheritdoc />
             public override bool CanWrite => false;
 
+            /// <inheritdoc />
             public override long Length => data.Length;
 
+            /// <inheritdoc />
             public override long Position
             {
                 get => _position;
                 set => throw new NotSupportedException();
             }
 
+            /// <inheritdoc />
             public override void Flush()
             {
             }
 
+            /// <inheritdoc />
             public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
+            /// <summary>Returns one byte per call when the destination span is non-empty.</summary>
+            /// <param name="buffer">Destination span.</param>
+            /// <returns>1 while data remains, otherwise 0.</returns>
             public override int Read(Span<byte> buffer)
             {
                 if (_position >= data.Length || buffer.IsEmpty)
@@ -646,28 +796,41 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 return 1;
             }
 
+            /// <inheritdoc />
             public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return new ValueTask<int>(Read(buffer.Span));
             }
 
+            /// <inheritdoc />
             public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void SetLength(long value) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
+        /// <summary>Builds the 220 article-follows status line for the given Message-ID.</summary>
+        /// <param name="messageId">Message-ID appearing in the status line.</param>
         private static byte[] Status(string messageId) =>
             Encoding.ASCII.GetBytes("220 0 " + messageId + " article follows\r\n");
 
+        /// <summary>Mutates a byte inside retained <see cref="ArticleRecord.ArtData"/> via the exposed array segment.</summary>
+        /// <param name="record">Retained article whose backing array is mutated.</param>
+        /// <param name="index">Zero-based offset within the retained article byte buffer.</param>
+        /// <param name="value">Replacement byte value.</param>
         private static void WriteRetainedByte(ArticleRecord record, int index, byte value)
         {
             Assert.True(MemoryMarshal.TryGetArray(record.ArtData, out ArraySegment<byte> segment));
             segment.Array![segment.Offset + index] = value;
         }
 
+        /// <summary>Returns the first index of <paramref name="pattern"/> in <paramref name="buffer"/>, or -1 if absent.</summary>
+        /// <param name="buffer">Haystack buffer.</param>
+        /// <param name="pattern">Subsequence to locate.</param>
         private static int IndexOf(byte[] buffer, byte[] pattern)
         {
             for (var i = 0; i <= buffer.Length - pattern.Length; i++)
@@ -681,38 +844,60 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             return -1;
         }
 
+        /// <summary>
+        /// ICacheListenerTransport double with scripted read chunking and failing/blocking writes.
+        /// </summary>
+
         private sealed class ScriptedTransport : ICacheListenerTransport
         {
+            /// <summary>Bytes returned sequentially from <see cref="ReadAsync"/> until exhausted.</summary>
             private readonly byte[] _inbound;
 
+            /// <summary>Upper bound on bytes copied per read to simulate partial socket reads.</summary>
             private readonly int _maxRead;
 
+            /// <summary>Accumulates outbound wire bytes accepted by successful writes.</summary>
             private readonly List<byte> _written = [];
 
+            /// <summary>Cursor into <see cref="_inbound"/> for the next read.</summary>
             private int _offset;
 
+            /// <summary>Total payload bytes accepted across successful writes before scripted failure limits.</summary>
             private int _accepted;
 
+            /// <summary>Number of <see cref="WriteAsync"/> calls; drives block and fail thresholds.</summary>
             private int _writeCalls;
 
+            /// <summary>Configures inbound script and optional read chunking for session protocol tests.</summary>
+            /// <param name="inbound">Wire bytes the client would receive from the listener transport.</param>
+            /// <param name="maxRead">Maximum bytes per read; defaults to the full inbound buffer.</param>
             internal ScriptedTransport(byte[] inbound, int maxRead = int.MaxValue)
             {
                 _inbound = inbound;
                 _maxRead = maxRead;
             }
 
+            /// <summary>Snapshot of all bytes written to the simulated client.</summary>
             internal byte[] Written => _written.ToArray();
 
+            /// <summary>When the write call count equals this value, the next write throws <see cref="IOException"/>.</summary>
             internal int FailOnWriteNumber { get; init; }
 
+            /// <summary>After this many payload bytes are accepted cumulatively, further writes fail or truncate.</summary>
             internal int FailAfterAcceptedBytes { get; init; } = int.MaxValue;
 
+            /// <summary>On this write invocation, signals <see cref="Entered"/> and awaits <see cref="Release"/> before continuing.</summary>
             internal int BlockOnWriteNumber { get; init; }
 
+            /// <summary>Completed when a write blocks at <see cref="BlockOnWriteNumber"/>.</summary>
             internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Unblocks a write waiting at <see cref="BlockOnWriteNumber"/>.</summary>
             internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Returns the next chunk of the inbound script, bounded by <see cref="_maxRead"/>; zero at EOF.</summary>
+            /// <param name="buffer">Destination for copied inbound bytes.</param>
+            /// <param name="cancellationToken">Unused; reads are synchronous.</param>
             public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
             {
                 if (_offset >= _inbound.Length || buffer.IsEmpty)
@@ -726,6 +911,9 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 return ValueTask.FromResult(count);
             }
 
+            /// <summary>Records accepted outbound bytes; may block, fail, or truncate per scripted thresholds.</summary>
+            /// <param name="buffer">Outbound payload from the listener session.</param>
+            /// <param name="cancellationToken">Honored while blocked on <see cref="Release"/>.</param>
             public async ValueTask<int> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
             {
                 _writeCalls++;
@@ -750,6 +938,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
                 return count;
             }
 
+            /// <summary>No-op transport teardown.</summary>
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }

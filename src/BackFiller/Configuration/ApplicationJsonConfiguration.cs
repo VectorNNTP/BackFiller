@@ -213,6 +213,12 @@ namespace VectorNNTP.BackFiller.Configuration
             || (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
                 && path.Contains(".settings.", StringComparison.OrdinalIgnoreCase));
 
+        /// <summary>
+        /// Returns whether a file source with <paramref name="path"/> is already registered.
+        /// </summary>
+        /// <param name="configuration">Builder whose sources are scanned. Non-file sources are ignored.</param>
+        /// <param name="path">Source path compared ordinal-ignore-case.</param>
+        /// <returns><see langword="true"/> when a matching <see cref="FileConfigurationSource"/> is present.</returns>
         private static bool ContainsFile(IConfigurationBuilder configuration, string path)
         {
             foreach (var source in configuration.Sources)
@@ -227,6 +233,14 @@ namespace VectorNNTP.BackFiller.Configuration
             return false;
         }
 
+        /// <summary>
+        /// Builds a JSON file source for <paramref name="path"/>, copying optional, reload, provider, and load-exception settings from <paramref name="template"/>.
+        /// </summary>
+        /// <param name="path">JSON file name or path inserted into the builder.</param>
+        /// <param name="template">
+        /// Existing file source to copy. When null, the source is optional and reloads on change, with no file provider until resolve.
+        /// </param>
+        /// <returns>A source whose file provider has been resolved.</returns>
         private static JsonConfigurationSource CreateJsonSource(string path, FileConfigurationSource? template)
         {
             var source = new JsonConfigurationSource

@@ -2,8 +2,13 @@ using VectorNNTP.BackFiller.Articles.Parsing;
 
 namespace VectorNNTP.BackFiller.Tests.Articles
 {
+    /// <summary>
+    /// Unit regressions for <see cref="ArticleCorpusBench.ClassifyArticle"/> and read-failure classification
+    /// without running the full corpus bench.
+    /// </summary>
     public sealed class ArticleCorpusClassificationTests
     {
+        /// <summary>Empty bytes classify as invalid with a parse reason, not as unsupported.</summary>
         [Fact]
         public void Malformed_article_is_invalid_with_a_parse_reason()
         {
@@ -14,6 +19,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal("parse EmptyArticle", reason);
         }
 
+        /// <summary>A minimal well-formed article classifies as valid with an empty reason string.</summary>
         [Fact]
         public void Ordinary_article_is_valid()
         {
@@ -34,6 +40,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal("", reason);
         }
 
+        /// <summary>
+        /// IO and access exceptions map to read reasons; programming errors propagate instead of being swallowed as corpus outcomes.
+        /// </summary>
         [Fact]
         public void Read_failures_are_invalid_and_other_exceptions_are_not_classified()
         {

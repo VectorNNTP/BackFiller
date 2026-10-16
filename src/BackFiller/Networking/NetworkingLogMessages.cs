@@ -1,6 +1,11 @@
 namespace VectorNNTP.BackFiller.Networking
 {
     /// <summary>Source-generated bind-address, TLS certificate, listener, and connection-acceptance log messages.</summary>
+    /// <remarks>
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/> (summaries cite the event id where useful).
+    /// Host log filtering can suppress a call without changing runtime behavior.
+    /// <see cref="Exception"/> parameters are attached to the event and are not thrown by these methods.
+    /// </remarks>
     internal static partial class NetworkingLogMessages
     {
         /// <summary>Logs event 1400 (warning): a bind-address entry was not an IP literal and was skipped.</summary>

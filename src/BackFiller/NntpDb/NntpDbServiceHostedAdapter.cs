@@ -5,6 +5,7 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// </summary>
     internal sealed class NntpDbServiceHostedAdapter : IHostedService
     {
+        /// <summary>Shared database service. Start and stop are forwarded; this adapter does not dispose it.</summary>
         private readonly NntpDbService _service;
 
         /// <summary>Retains the shared database service.</summary>

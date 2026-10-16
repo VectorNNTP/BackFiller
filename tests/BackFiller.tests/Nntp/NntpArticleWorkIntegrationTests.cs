@@ -8,10 +8,22 @@ using VectorNNTP.BackFiller.Tests.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// Article Work delivery pipeline integration: NNTP retrieval, retention, RabbitMQ settlement, and response publication.
+    /// </summary>
+
     public sealed class NntpArticleWorkIntegrationTests
     {
+        /// <summary>
+        /// Scripted NNTP wire response for a valid multiline article used across success-path tests.
+        /// </summary>
+
         private static readonly string ValidArticleResponse =
             ArticleWorkTestArticles.ArticleResponse(ArticleWorkTestArticles.Valid());
+
+        /// <summary>
+        /// Successful retrieval retains bytes and settles with requeue without ACK when no response publisher confirms.
+        /// </summary>
 
         [Fact]
         public async Task Retrieved_article_reaches_success_without_ack()
@@ -44,6 +56,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.False(settlement.Acknowledge);
             Assert.True(settlement.Requeue);
         }
+
+        /// <summary>
+        /// Confirmed publish path ACKs the delivery and emits a Success JSON response with listener metadata.
+        /// </summary>
 
         [Fact]
         public async Task Retrieved_article_publishes_confirmed_success_and_acks()
@@ -90,6 +106,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await connections.DisposeAsync();
         }
 
+        /// <summary>
+        /// 430 from provider maps to ArticleNotFound, publishes terminal outcome, and ACKs without requeue.
+        /// </summary>
+
         [Fact]
         public async Task ArticleNotFound_maps_to_ack_without_requeue()
         {
@@ -114,6 +134,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(settlement.Acknowledge);
             Assert.False(settlement.Requeue);
         }
+
+        /// <summary>
+        /// Connect/auth failures requeue without publishing a terminal Article Work response.
+        /// </summary>
 
         [Fact]
         public async Task Provider_and_auth_failures_requeue_without_terminal_response()
@@ -150,6 +174,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(Assert.Single(authChannel.Settlements).Requeue);
         }
 
+        /// <summary>
+        /// Canceled processing requeues and does not classify as ArticleNotFound.
+        /// </summary>
+
         [Fact]
         public async Task Cancellation_requeues_and_is_not_not_found()
         {
@@ -171,6 +199,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Empty(publisher.Published);
             Assert.True(Assert.Single(channel.Settlements).Requeue);
         }
+
+        /// <summary>
+        /// When generation is stale after retrieval, outcome is Success but no RabbitMQ settlement is recorded.
+        /// </summary>
 
         [Fact]
         public async Task Stale_generation_skips_settlement_after_retrieval()
@@ -194,6 +226,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Empty(publisher.Published);
             Assert.Empty(channel.Settlements);
         }
+
+        /// <summary>
+        /// Retention rejection requeues without ACK and is distinct from ArticleNotFound.
+        /// </summary>
 
         [Fact]
         public async Task Retention_capacity_failure_is_not_article_not_found_and_does_not_ack()
@@ -239,6 +275,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(Assert.Single(channel.Settlements).Requeue);
         }
 
+        /// <summary>
+        /// Unknown backbone name yields ProviderFailure and requeue.
+        /// </summary>
+
         [Fact]
         public async Task Missing_provider_is_provider_failure()
         {
@@ -267,6 +307,11 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(Assert.Single(channel.Settlements).Requeue);
         }
 
+        /// <summary>Wires Giganews on loopback with scripted transport, retention, handler, publisher, and a 1024-byte delivery pipeline.</summary>
+        /// <param name="factory">Supplies NNTP sessions and scripted server responses.</param>
+        /// <param name="user">Optional AUTHINFO user bound into the provider catalog.</param>
+        /// <param name="password">Optional AUTHINFO password bound into the provider catalog.</param>
+        /// <returns>Connected components sharing one handler and retention authority instance.</returns>
         private static (ProviderArticleWorkHandler Handler, RecordingArticleWorkResponsePublisher Publisher, ArticleWorkDeliveryPipeline Pipeline, ArticleRetentionAuthority Retention)
             CreatePipeline(ScriptedNntpTransportFactory factory, string? user = null, string? password = null)
         {
@@ -292,6 +337,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var publisher = new RecordingArticleWorkResponsePublisher();
             return (handler, publisher, new ArticleWorkDeliveryPipeline(handler, publisher, 1024), retention);
         }
+
+        /// <summary>
+        /// Creates ArticleRetentionAuthority with the requested byte capacity for integration tests.
+        /// </summary>
 
         internal static ArticleRetentionAuthority CreateRetention(int maxBytes) =>
             new(

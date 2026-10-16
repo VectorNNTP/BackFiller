@@ -108,6 +108,25 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
                 out containsOrganizationalTracker,
                 out failureCode);
 
+        /// <summary>
+        /// Validates a raw Path value against <paramref name="organizationalTracker"/> and classifies the rewrite.
+        /// </summary>
+        /// <param name="rawPath">Raw Path header value bytes, or empty when the header is absent.</param>
+        /// <param name="localIdentity">Local application FQDN. Analysis reports whether it is leftmost.</param>
+        /// <param name="pathPresent">Whether a Path header was present.</param>
+        /// <param name="organizationalTracker">Tracker host compared as one Path token, case-insensitively.</param>
+        /// <param name="kind">Rewrite classification when validation succeeds.</param>
+        /// <param name="containsOrganizationalTracker">
+        /// Whether a Path token equals <paramref name="organizationalTracker"/>.
+        /// </param>
+        /// <param name="failureCode">
+        /// <see cref="NntpArticleParseFailureCode.InvalidPath"/> when the value is too long or not printable ASCII;
+        /// otherwise <see cref="NntpArticleParseFailureCode.None"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="false"/> only when the Path value is invalid. A missing or empty Path returns
+        /// <see langword="true"/> with <see cref="ArticlePathKind.Missing"/> or <see cref="ArticlePathKind.Empty"/>.
+        /// </returns>
         internal static bool TryAnalyze(
             ReadOnlySpan<byte> rawPath,
             ReadOnlySpan<byte> localIdentity,
@@ -225,6 +244,18 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
                 destination,
                 out bytesWritten);
 
+        /// <summary>
+        /// Writes canonical Path bytes using <paramref name="organizationalTracker"/> as the organizational hop.
+        /// </summary>
+        /// <param name="rawPath">Original Path value bytes when present; ignored when <paramref name="kind"/> is missing or empty.</param>
+        /// <param name="localIdentity">Application hop written only when <paramref name="mode"/> is <see cref="ArticlePathMode.Traverse"/>.</param>
+        /// <param name="kind">Rewrite classification from path analysis.</param>
+        /// <param name="containsOrganizationalTracker">Whether the tracker token is already present.</param>
+        /// <param name="mode">Normalize leaves application hops unchanged. Traverse prepends <paramref name="localIdentity"/>.</param>
+        /// <param name="organizationalTracker">Tracker host inserted when absent, unless <paramref name="localIdentity"/> is that host.</param>
+        /// <param name="destination">Destination receiving ASCII Path bytes.</param>
+        /// <param name="bytesWritten">Bytes written on success; zero when the destination is too small.</param>
+        /// <returns><see langword="true"/> when <paramref name="destination"/> was large enough.</returns>
         internal static bool TryWriteCanonicalPath(
             ReadOnlySpan<byte> rawPath,
             ReadOnlySpan<byte> localIdentity,

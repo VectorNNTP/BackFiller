@@ -6,11 +6,22 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {
+    /// <summary>
+    /// Manual-ack RabbitMQ channel lifecycle gate: consume registration versus disposal and cancellation.
+    /// </summary>
+
     public sealed class RabbitMqClientManualAckChannelTests
     {
+        /// <summary>Maximum wait for lifecycle gates and async completions in these tests.</summary>
+
         private static readonly TimeSpan SafetyBound = TimeSpan.FromSeconds(2);
 
+        /// <summary>
+        /// When consume wins lifecycle gate, consumer registers before close and in-flight delivery completes.
+        /// </summary>
+
         [Fact]
+
         public async Task Setup_that_wins_the_gate_publishes_the_consumer_before_disposal_closes()
         {
             var (channel, broker) = Create();
@@ -47,7 +58,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Dispose winning gate closes before BasicConsume registers; later consume throws ObjectDisposedException.
+        /// </summary>
+
         [Fact]
+
         public async Task Disposal_that_wins_the_gate_rejects_consume_before_registration()
         {
             var (channel, broker) = Create();
@@ -70,7 +86,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(["close", "disposed"], broker.Snapshot());
         }
 
+        /// <summary>
+        /// Failed BasicConsumeAsync leaves no registered consumer and allows retry.
+        /// </summary>
+
         [Fact]
+
         public async Task A_failed_registration_detaches_the_handler_and_does_not_publish_a_consumer()
         {
             var (channel, broker) = Create();
@@ -100,7 +121,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Canceled consume detaches handler without registering consumer.
+        /// </summary>
+
         [Fact]
+
         public async Task Cancellation_during_registration_detaches_the_handler_and_leaves_no_consumer()
         {
             var (channel, broker) = Create();
@@ -131,7 +157,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Second BasicConsumeAsync is rejected while one consumer is active.
+        /// </summary>
+
         [Fact]
+
         public async Task A_second_consume_waits_and_then_rejects_without_registering_another_consumer()
         {
             var (channel, broker) = Create();
@@ -152,7 +183,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Single(broker.Registered);
         }
 
+        /// <summary>
+        /// Concurrent DisposeAsync closes underlying channel exactly once.
+        /// </summary>
+
         [Fact]
+
         public async Task Concurrent_disposal_closes_the_client_channel_once()
         {
             var (channel, broker) = Create();
@@ -177,7 +213,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(["close", "disposed"], broker.Snapshot());
         }
 
+        /// <summary>
+        /// Consume on closed channel fails before broker registration.
+        /// </summary>
+
         [Fact]
+
         public async Task A_closed_channel_is_rejected_before_consumer_registration()
         {
             var (channel, broker) = Create();
@@ -191,11 +232,18 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Empty(broker.Snapshot());
         }
 
+        /// <summary>Creates a manual-ack channel over a dispatch-proxy broker double.</summary>
         private static (RabbitMqClientManualAckChannel Channel, ConsumeChannelDouble Broker) Create()
         {
             var broker = ConsumeChannelDouble.Create();
             return (new RabbitMqClientManualAckChannel(broker.Channel, generation: 3), broker);
         }
+
+        /// <summary>
+        /// Invokes <see cref="AsyncEventingBasicConsumer.HandleBasicDeliverAsync"/> with empty body for lifecycle tests.
+        /// Does not construct a <see cref="RabbitMqManualAckDelivery"/>.
+        /// </summary>
+        /// <param name="consumer">Consumer registered by the channel under test.</param>
 
         private static Task DeliverAsync(IAsyncBasicConsumer consumer)
         {
@@ -210,38 +258,75 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 ReadOnlyMemory<byte>.Empty);
         }
 
+        /// <summary>
+        /// DispatchProxy IChannel double sequencing consume, close, and dispose for lifecycle tests.
+        /// </summary>
+
         private class ConsumeChannelDouble : DispatchProxy
         {
+            /// <summary>Serializes event log and registered-consumer snapshots.</summary>
+
             private readonly object _gate = new();
+            /// <summary>Ordered broker-side lifecycle labels recorded for assertions.</summary>
+
             private readonly List<string> _events = [];
+            /// <summary>Consumers successfully registered through BasicConsumeAsync.</summary>
+
             private readonly List<IAsyncBasicConsumer> _registered = [];
+
+            /// <summary>Dispatch-proxy channel handle passed to the production manual-ack wrapper.</summary>
 
             public IChannel Channel { get; private set; } = null!;
 
+            /// <summary>Signaled when consume registration reaches the post-failure checkpoint.</summary>
+
             public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            /// <summary>Released to unblock a held BasicConsumeAsync.</summary>
 
             public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Signaled when CloseAsync begins while close is held.</summary>
+
             public TaskCompletionSource CloseEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            /// <summary>Released to finish a held CloseAsync.</summary>
 
             public TaskCompletionSource CloseRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>When true, CloseAsync waits on <see cref="CloseRelease"/> after signaling <see cref="CloseEntered"/>.</summary>
+
             public bool HoldClose { get; set; }
+
+            /// <summary>When true, consume signals <see cref="Entered"/> then waits on <see cref="Release"/> with the caller token.</summary>
 
             public bool CancelDuringConsume { get; set; }
 
+            /// <summary>When set, BasicConsumeAsync records consume-failed and rethrows without registering.</summary>
+
             public Exception? ConsumeFailure { get; set; }
+
+            /// <summary>Last consumer instance passed to BasicConsumeAsync.</summary>
 
             public IAsyncBasicConsumer? Captured { get; private set; }
 
+            /// <summary>Count of BasicConsumeAsync invocations observed by the proxy.</summary>
+
             public int ConsumeCalls { get; private set; }
+
+            /// <summary>Count of CloseAsync invocations observed by the proxy.</summary>
 
             public int CloseCalls { get; private set; }
 
+            /// <summary>Count of DisposeAsync invocations observed by the proxy.</summary>
+
             public int DisposeCalls { get; private set; }
+
+            /// <summary>Open flag returned by get_IsOpen; cleared when close runs.</summary>
 
             public bool IsOpen { get; set; } = true;
 
+            /// <summary>Consumers registered through BasicConsumeAsync.</summary>
             public IReadOnlyList<IAsyncBasicConsumer> Registered
             {
                 get
@@ -253,6 +338,8 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 }
             }
 
+            /// <summary>Creates a dispatch-proxy <see cref="IChannel"/> double wired back to this instance.</summary>
+
             public static ConsumeChannelDouble Create()
             {
                 var channel = DispatchProxy.Create<IChannel, ConsumeChannelDouble>();
@@ -260,6 +347,8 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 proxy.Channel = channel;
                 return proxy;
             }
+
+            /// <summary>Returns a copy of recorded lifecycle event labels under the gate lock.</summary>
 
             public string[] Snapshot()
             {
@@ -269,6 +358,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 }
             }
 
+            /// <inheritdoc />
             protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
             {
                 ArgumentNullException.ThrowIfNull(targetMethod);
@@ -299,6 +389,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
                 throw new NotSupportedException(targetMethod.Name);
             }
+
+            /// <summary>
+            /// Simulates BasicConsumeAsync: optional failure or cancel path, then registers the consumer until released.
+            /// Unsupported broker methods are not handled here.
+            /// </summary>
+            /// <param name="args">BasicConsumeAsync argument array; consumer at index 6 and token at index 7.</param>
 
             private async Task<string> ConsumeAsync(object?[] args)
             {
@@ -335,6 +431,10 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 return "ctag-1";
             }
 
+            /// <summary>
+            /// Marks the channel closed, clears registrations, and optionally waits on <see cref="CloseRelease"/>.
+            /// </summary>
+
             private async Task CloseAsync()
             {
                 lock (_gate)
@@ -352,6 +452,8 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 }
             }
 
+            /// <summary>Increments dispose count and appends disposed to the event log.</summary>
+
             private ValueTask DisposeCore()
             {
                 lock (_gate)
@@ -362,6 +464,9 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
                 return ValueTask.CompletedTask;
             }
+
+            /// <summary>Appends a lifecycle label to the event log under the gate lock.</summary>
+            /// <param name="name">Label recorded for Snapshot assertions.</param>
 
             private void Add(string name)
             {

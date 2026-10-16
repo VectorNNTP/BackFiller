@@ -8,9 +8,18 @@ using VectorNNTP.BackFiller.Configuration;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
+    /// <summary>
+    /// DNS cleanup after ACME failures does not mask the original exception.
+    /// </summary>
+
     public sealed class AcmeIssuerDnsCleanupTests
     {
+        /// <summary>ACME directory URL passed to scripted HTTP responses.</summary>
         private const string DirectoryUrl = "http://acme.test/directory";
+
+        /// <summary>
+        /// Contract: Cancelled cleanup does not replace the original acme exception.
+        /// </summary>
 
         [Fact]
         public async Task Cancelled_cleanup_does_not_replace_the_original_acme_exception()
@@ -38,6 +47,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             AssertResponsesDisposed(scope);
         }
 
+        /// <summary>
+        /// Contract: Cleanup failure does not replace the original acme exception.
+        /// </summary>
+
         [Fact]
         public async Task Cleanup_failure_does_not_replace_the_original_acme_exception()
         {
@@ -63,6 +76,10 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             AssertResponsesDisposed(scope);
         }
 
+        /// <summary>
+        /// Contract: Cancelled issuance still throws cancellation after cleanup.
+        /// </summary>
+
         [Fact]
         public async Task Cancelled_issuance_still_throws_cancellation_after_cleanup()
         {
@@ -82,6 +99,12 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             AssertResponsesDisposed(scope);
         }
 
+        /// <summary>
+        /// Provisions a temp account store, scripted ACME HTTP, and an issuer wired to the supplied DNS and TXT doubles.
+        /// </summary>
+        /// <param name="dns">Cloudflare DNS double whose create/delete behavior drives cleanup scenarios.</param>
+        /// <param name="resolver">Authoritative TXT lookup used during DNS-01 propagation.</param>
+        /// <param name="logger">Logger captured for warning assertions.</param>
         private static IssuerScope CreateIssuer(
             RecordingDnsClient dns,
             IAuthoritativeTxtResolver resolver,
@@ -114,40 +137,79 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 logger));
         }
 
+        /// <summary>
+        /// Asserts every scripted ACME HTTP response was disposed after issuance completes or fails.
+        /// </summary>
+        /// <param name="scope">Issuer scope whose HTTP factory recorded responses.</param>
         private static void AssertResponsesDisposed(IssuerScope scope)
         {
             Assert.NotEmpty(scope.Http.Responses);
             Assert.All(scope.Http.Responses, static response => Assert.True(response.WasDisposed));
         }
 
+        /// <summary>Owns a temp ACME state directory and exposes the issuer plus scripted HTTP for disposal checks.</summary>
         private sealed class IssuerScope(string stateDir, ScriptedAcmeHttpFactory http, AcmeIssuer issuer) : IDisposable
         {
+            /// <summary>
+            /// Issuer under test for DNS cleanup behavior.
+            /// </summary>
+
             public AcmeIssuer Issuer { get; } = issuer;
 
+            /// <summary>
+            /// Factory that served ACME HTTP and tracked response disposal.
+            /// </summary>
+
             public ScriptedAcmeHttpFactory Http { get; } = http;
+
+            /// <summary>
+            /// Deletes the temp ACME state directory created for the scope.
+            /// </summary>
 
             public void Dispose() => Directory.Delete(stateDir, recursive: true);
         }
 
+        /// <summary>Returns canned TXT answers from a test delegate for DNS-01 propagation checks.</summary>
         private sealed class ScriptedResolver(Func<CancellationToken, IReadOnlyList<string>> lookup) : IAuthoritativeTxtResolver
         {
+            /// <summary>
+            /// Returns TXT strings from the configured delegate without performing real DNS.
+            /// </summary>
+            /// <param name="name">Queried DNS name (unused by the delegate wiring).</param>
+            /// <param name="cancellationToken">Token forwarded to the lookup delegate.</param>
             public Task<IReadOnlyList<string>> LookupTxtAsync(string name, CancellationToken cancellationToken) =>
                 Task.FromResult(lookup(cancellationToken));
         }
 
+        /// <summary>HttpClientFactory wired to a single in-memory ACME handler that records responses for disposal tests.</summary>
         private sealed class ScriptedAcmeHttpFactory : IHttpClientFactory
         {
+            /// <summary>
+            /// In-memory ACME handler that records each response for disposal checks.
+            /// </summary>
+
             private readonly ScriptedAcmeHandler _handler = new();
 
+            /// <summary>Tracked HTTP responses created by the scripted handler.</summary>
             public IReadOnlyList<ScriptedAcmeHandler.TrackedResponse> Responses => _handler.Responses;
 
+            /// <summary>
+            /// Returns an HTTP client bound to the shared scripted handler without disposing it with the client.
+            /// </summary>
+            /// <param name="name">Named client key (ignored).</param>
             public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
         }
 
+        /// <summary>Minimal ACME directory/order/authz JSON responses; tracks HttpResponseMessage disposal.</summary>
         private sealed class ScriptedAcmeHandler : HttpMessageHandler
         {
+            /// <summary>
+            /// Responses handed to ACME clients; guarded for concurrent SendAsync calls.
+            /// </summary>
+
             private readonly List<TrackedResponse> _responses = [];
 
+            /// <summary>Snapshot of responses returned to ACME clients (thread-safe copy).</summary>
             public IReadOnlyList<TrackedResponse> Responses
             {
                 get
@@ -159,11 +221,16 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 }
             }
 
+            /// <inheritdoc />
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
                 CancellationToken cancellationToken) =>
                 Task.FromResult<HttpResponseMessage>(CreateResponse(request));
 
+            /// <summary>
+            /// Builds canned directory/order/authz JSON (or empty HEAD body) and registers the response for tracking.
+            /// </summary>
+            /// <param name="request">Incoming ACME HTTP request.</param>
             private TrackedResponse CreateResponse(HttpRequestMessage request)
             {
                 var path = request.RequestUri?.AbsolutePath ?? string.Empty;
@@ -203,15 +270,23 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 return response;
             }
 
+            /// <summary>HttpResponseMessage that records whether Dispose was called.</summary>
             internal sealed class TrackedResponse : HttpResponseMessage
             {
+                /// <summary>Creates a tracked response with the given status.</summary>
+                /// <param name="statusCode">Initial HTTP status.</param>
                 public TrackedResponse(HttpStatusCode statusCode)
                     : base(statusCode)
                 {
                 }
 
+                /// <summary>
+                /// Whether <see cref="HttpResponseMessage.Dispose"/> was invoked on this instance.
+                /// </summary>
+
                 public bool WasDisposed { get; private set; }
 
+                /// <inheritdoc />
                 protected override void Dispose(bool disposing)
                 {
                     if (disposing)
@@ -224,14 +299,34 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             }
         }
 
+        /// <summary>Cloudflare DNS client double that counts deletes and can throw or hook create for cleanup tests.</summary>
         private sealed class RecordingDnsClient : ICloudflareDnsClient
         {
+            /// <summary>
+            /// Number of times delete was invoked during issuance cleanup.
+            /// </summary>
+
             public int DeleteCalls { get; private set; }
+
+            /// <summary>
+            /// When set, thrown from delete after incrementing <see cref="DeleteCalls"/>.
+            /// </summary>
 
             public Exception? DeleteException { get; init; }
 
+            /// <summary>
+            /// Optional hook invoked when a DNS record is created (for cancellation during create).
+            /// </summary>
+
             public Action? OnCreate { get; init; }
 
+            /// <summary>
+            /// Always fails because list operations are outside DNS cleanup scenarios under test.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="fqdn">Record name filter (unused).</param>
+            /// <param name="type">DNS record type (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListRecordsAsync(
                 string zoneId,
                 string fqdn,
@@ -239,12 +334,24 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("list is not used by this test");
 
+            /// <summary>
+            /// Always fails because list operations are outside DNS cleanup scenarios under test.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="fqdn">Record name filter (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListAllRecordsForNameAsync(
                 string zoneId,
                 string fqdn,
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("list is not used by this test");
 
+            /// <summary>
+            /// Returns a synthetic record and invokes <see cref="OnCreate"/> when configured.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="request">TXT record payload for DNS-01.</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<CloudflareDnsRecord> CreateRecordAsync(
                 string zoneId,
                 CloudflareDnsRecordWriteRequest request,
@@ -260,6 +367,13 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 });
             }
 
+            /// <summary>
+            /// Always fails because updates are outside DNS cleanup scenarios under test.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="recordId">Existing record identifier (unused).</param>
+            /// <param name="request">Updated record payload (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task<CloudflareDnsRecord> UpdateRecordAsync(
                 string zoneId,
                 string recordId,
@@ -267,6 +381,12 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("update is not used by this test");
 
+            /// <summary>
+            /// Increments the delete counter and optionally throws <see cref="DeleteException"/>.
+            /// </summary>
+            /// <param name="zoneId">Cloudflare zone identifier (unused).</param>
+            /// <param name="recordId">Record to delete (unused).</param>
+            /// <param name="cancellationToken">Cancellation token (unused).</param>
             public Task DeleteRecordAsync(string zoneId, string recordId, CancellationToken cancellationToken)
             {
                 DeleteCalls++;

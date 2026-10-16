@@ -180,8 +180,10 @@ namespace VectorNNTP.BackFiller.Accounts
         /// <summary>
         /// Returns <see langword="true"/> if the string contains any ASCII control characters (0x00–0x1F or 0x7F).
         /// </summary>
-        /// <param name="value"></param>
-        /// <returns></returns>
+        /// <param name="value">Username or password text being validated.</param>
+        /// <returns>
+        /// <see langword="true"/> when <paramref name="value"/> is non-empty and any character is a C0 control or DEL.
+        /// </returns>
         private static bool ContainsAsciiControlCharacters(string? value)
         {
             // C0 controls (0x00–0x1F) and DEL (0x7F).

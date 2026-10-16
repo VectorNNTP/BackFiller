@@ -76,9 +76,12 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Transaction id from the last <see cref="BeginTransaction"/> that has not been completed. <see langword="null"/> otherwise.</summary>
         private string? _activeTransactionId;
 
-        /// <summary>Initializes a new instance of the <see cref="AcmeTransactionJournal"/> class.</summary>
-        /// <param name="stateDir">Shared ACME state root.</param>
-        /// <param name="fqdn">Certificate FQDN that owns this journal file.</param>
+        /// <summary>
+        /// Normalizes <paramref name="fqdn"/>, creates the ACME state layout, and records the journal and lock paths. Does not read or create the journal file.
+        /// </summary>
+        /// <param name="stateDir">Shared ACME state root. Null or white space is rejected.</param>
+        /// <param name="fqdn">Certificate FQDN that owns this journal file. Normalized before the path is chosen.</param>
+        /// <exception cref="ArgumentException"><paramref name="stateDir"/> is null or white space.</exception>
         internal AcmeTransactionJournal(string stateDir, string fqdn)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(stateDir);
@@ -88,16 +91,16 @@ namespace VectorNNTP.BackFiller.Acme
             _journalLockPath = _journalPath + ".lock";
         }
 
-        /// <summary>Gets the FQDN this journal is scoped to.</summary>
+        /// <summary>Normalized certificate FQDN stored in and required by the on-disk journal.</summary>
         private string Fqdn => _fqdn;
 
-        /// <summary>Gets the persistent journal file path.</summary>
+        /// <summary>Path of <c>journal/{fqdn}.json</c> under the ACME state root.</summary>
         internal string FilePath => _journalPath;
 
-        /// <summary>Gets the exclusive lock file used for same-FQDN journal writes.</summary>
+        /// <summary>Exclusive lock path <c>{FilePath}.lock</c> that serializes same-FQDN writers across processes.</summary>
         internal string LockPath => _journalLockPath;
 
-        /// <summary>Gets the transaction id that subsequent events attach to, if any.</summary>
+        /// <summary>Transaction id from the last <see cref="BeginTransaction"/> that has not completed; null when idle.</summary>
         internal string? ActiveTransactionId => _activeTransactionId;
 
         /// <summary>Records a new certificate request and returns its transaction id.</summary>
@@ -754,17 +757,17 @@ namespace VectorNNTP.BackFiller.Acme
     /// <summary>On-disk ACME journal document for one FQDN.</summary>
     internal sealed class AcmeJournalDocument
     {
-        /// <summary>Gets or sets the journal schema version.</summary>
+        /// <summary>Journal schema version. Must equal <see cref="AcmeTransactionJournal.SchemaVersion"/> on read.</summary>
         internal int Version { get; set; }
 
-        /// <summary>Gets or sets the certificate FQDN.</summary>
+        /// <summary>Certificate FQDN that owns this file. Must match the normalized FQDN passed to the journal constructor.</summary>
         internal string Fqdn { get; set; } = string.Empty;
 
-        /// <summary>Gets the historical transactions in write order.</summary>
+        /// <summary>Completed and in-progress transactions appended in write order under JSON <c>transactions</c>.</summary>
         internal List<AcmeJournalTransaction> Transactions { get; } = [];
 
         /// <summary>
-        /// Gets recovery events that could not be attached to an original transaction.
+        /// DNS recovery and other events that could not be attached to an original transaction (<c>unattributed_events</c>).
         /// </summary>
         internal List<AcmeJournalEvent> UnattributedEvents { get; } = [];
     }
@@ -772,86 +775,86 @@ namespace VectorNNTP.BackFiller.Acme
     /// <summary>One ACME request and its lifecycle events.</summary>
     internal sealed class AcmeJournalTransaction
     {
-        /// <summary>Gets or sets the transaction id.</summary>
+        /// <summary>Unique transaction id assigned at <see cref="AcmeTransactionJournal.BeginTransaction"/> (JSON <c>id</c>).</summary>
         internal string Id { get; set; } = string.Empty;
 
-        /// <summary>Gets or sets when the request started.</summary>
+        /// <summary>UTC time the transaction started (JSON <c>started_at</c>).</summary>
         internal DateTimeOffset StartedAt { get; set; }
 
-        /// <summary>Gets or sets when the request finished, if finished.</summary>
+        /// <summary>UTC completion time when status is terminal; null while <see cref="AcmeTransactionJournal.StatusInProgress"/>.</summary>
         internal DateTimeOffset? CompletedAt { get; set; }
 
-        /// <summary>Gets or sets the requested identifiers/SANs.</summary>
+        /// <summary>Requested DNS identifiers/SANs recorded at transaction start.</summary>
         internal IReadOnlyList<string> Identifiers { get; set; } = [];
 
-        /// <summary>Gets or sets the ACME directory URL used for the request.</summary>
+        /// <summary>ACME directory URL used for this request (JSON <c>directory_url</c>).</summary>
         internal string DirectoryUrl { get; set; } = string.Empty;
 
-        /// <summary>Gets or sets the request status.</summary>
+        /// <summary>Lifecycle status: <see cref="AcmeTransactionJournal.StatusInProgress"/>, <see cref="AcmeTransactionJournal.StatusSucceeded"/>, or <see cref="AcmeTransactionJournal.StatusFailed"/>.</summary>
         internal string Status { get; set; } = string.Empty;
 
-        /// <summary>Gets the lifecycle events in write order.</summary>
+        /// <summary>Lifecycle events for this transaction, in append order under JSON <c>events</c>.</summary>
         internal List<AcmeJournalEvent> Events { get; set; } = [];
 
-        /// <summary>Gets or sets the issued certificate serial number when known.</summary>
+        /// <summary>Leaf certificate serial from inspection after issue; null until known.</summary>
         internal string? SerialNumber { get; set; }
 
-        /// <summary>Gets or sets the issued certificate thumbprint when known.</summary>
+        /// <summary>Leaf certificate thumbprint from inspection after issue; null until known.</summary>
         internal string? Thumbprint { get; set; }
 
-        /// <summary>Gets or sets the issued certificate not-before when known.</summary>
+        /// <summary>Certificate not-before (UTC) copied from issued material; null until recorded.</summary>
         internal DateTimeOffset? NotBefore { get; set; }
 
-        /// <summary>Gets or sets the issued certificate not-after when known.</summary>
+        /// <summary>Certificate not-after (UTC) copied from issued material; null until recorded.</summary>
         internal DateTimeOffset? NotAfter { get; set; }
 
-        /// <summary>Gets or sets the live generation id that contains the certificate.</summary>
+        /// <summary>Filesystem generation id (<c>current</c> target) after persist/promote; null until recorded.</summary>
         internal string? GenerationId { get; set; }
 
-        /// <summary>Gets or sets the failure category when issuance failed.</summary>
+        /// <summary>Product failure category (for example <see cref="AcmeChallengeException"/> category) when status is failed.</summary>
         internal string? FailureCategory { get; set; }
 
-        /// <summary>Gets or sets sanitized failure detail when issuance failed.</summary>
+        /// <summary>Sanitized failure detail; never includes PKCS#12 passwords or API secrets.</summary>
         internal string? FailureDetail { get; set; }
     }
 
     /// <summary>One historical ACME lifecycle event.</summary>
     internal sealed class AcmeJournalEvent
     {
-        /// <summary>Gets or sets the event type.</summary>
+        /// <summary>Event type constant (for example <see cref="AcmeTransactionJournal.EventDnsChallengeCreated"/>).</summary>
         internal string Type { get; set; } = string.Empty;
 
-        /// <summary>Gets or sets when the event occurred.</summary>
+        /// <summary>UTC time the event was appended (JSON <c>at</c>).</summary>
         internal DateTimeOffset At { get; set; }
 
-        /// <summary>Gets or sets the DNS-01 record name when applicable.</summary>
+        /// <summary>DNS-01 TXT owner name for challenge events; null for non-DNS events.</summary>
         internal string? RecordName { get; set; }
 
-        /// <summary>Gets or sets the Cloudflare zone id when applicable.</summary>
+        /// <summary>Cloudflare zone id for DNS mutation events; null when not applicable.</summary>
         internal string? ZoneId { get; set; }
 
-        /// <summary>Gets or sets the Cloudflare record id when applicable.</summary>
+        /// <summary>Cloudflare record id for create/remove events; null when unknown or not applicable.</summary>
         internal string? RecordId { get; set; }
 
-        /// <summary>Gets or sets the TXT RDATA when applicable.</summary>
+        /// <summary>Challenge TXT RDATA for DNS events; null when not applicable.</summary>
         internal string? TxtContent { get; set; }
 
-        /// <summary>Gets or sets the live generation id when applicable.</summary>
+        /// <summary>Live generation id for persist/promote events; null when not applicable.</summary>
         internal string? GenerationId { get; set; }
 
-        /// <summary>Gets or sets the certificate not-before when applicable.</summary>
+        /// <summary>Certificate not-before for issue/persist events; null when not applicable.</summary>
         internal DateTimeOffset? NotBefore { get; set; }
 
-        /// <summary>Gets or sets the certificate not-after when applicable.</summary>
+        /// <summary>Certificate not-after for issue/persist events; null when not applicable.</summary>
         internal DateTimeOffset? NotAfter { get; set; }
 
-        /// <summary>Gets or sets the failure category when applicable.</summary>
+        /// <summary>Failure category on issuance-failed events; null when not applicable.</summary>
         internal string? FailureCategory { get; set; }
 
-        /// <summary>Gets or sets sanitized failure detail when applicable.</summary>
+        /// <summary>Sanitized failure detail; null when not applicable.</summary>
         internal string? FailureDetail { get; set; }
 
-        /// <summary>Gets or sets the DNS-01 recovery file id when applicable.</summary>
+        /// <summary>DNS-01 recovery file id (<c>{entryId}.json</c>) for recovered-and-removed events.</summary>
         internal string? RecoveryEntryId { get; set; }
     }
 }

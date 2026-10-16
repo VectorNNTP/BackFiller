@@ -55,6 +55,13 @@ namespace VectorNNTP.BackFiller.NntpDb
             return new MySqlConnection(connectionString);
         }
 
+        /// <summary>
+        /// Returns whether <paramref name="exception"/> is an authentication or privilege failure that must not be retried as unavailable.
+        /// </summary>
+        /// <param name="exception">Failure from opening the provider connection.</param>
+        /// <returns>
+        /// <see langword="true"/> for <see cref="MySqlErrorCode.AccessDenied"/> and server error numbers 1044, 1045, 1698, and 1862.
+        /// </returns>
         private static bool IsAuthenticationFailure(MySqlException exception) =>
             exception.ErrorCode is MySqlErrorCode.AccessDenied
                 or (MySqlErrorCode)1044

@@ -5,8 +5,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>Spawns the real BackFiller executable to regress validation failures, startup smoke, configuration base path, and secret redaction in output.</summary>
     public sealed class BackFillerProcessStartupTests
     {
+        /// <summary>Invalid BindPortTls exits with code 1, names the option in output, and does not leak configured secrets.</summary>
         [Fact]
         public async Task Published_or_built_process_fails_fast_with_a_useful_validation_error()
         {
@@ -64,6 +66,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Startup smoke environment exits 0 and prints bound server id and FQDN without running full hosted services.</summary>
         [Fact]
         public async Task Startup_smoke_binds_configuration_and_exits_before_hosted_services()
         {
@@ -120,6 +123,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>With a foreign working directory and blank env overrides, bundled JSON still supplies identity; validation fails on BindPortTls without requiring secrets from env.</summary>
         [Fact]
         public async Task Process_loads_configuration_from_the_application_base_not_the_working_directory()
         {
@@ -188,6 +192,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Captures byte lengths of existing log files next to the application for delta reads after process exit.</summary>
+        /// <param name="applicationPath">Path to BackFiller exe or dll.</param>
         private static Dictionary<string, long> SnapshotLogs(string applicationPath)
         {
             var snapshot = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -205,6 +211,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return snapshot;
         }
 
+        /// <summary>Reads log file bytes appended since <paramref name="before"/> snapshot.</summary>
         private static string ReadNewLogs(string applicationPath, Dictionary<string, long> before)
         {
             var logDir = Path.Join(Path.GetDirectoryName(applicationPath)!, "logs");
@@ -231,6 +238,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return text.ToString();
         }
 
+        /// <summary>Locates committed <c>startup-smoke.json</c> fixture under tests/BackFiller.tests/Fixtures.</summary>
         private static string FindStartupSmokeFixture()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -253,6 +261,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             throw new InvalidOperationException("startup-smoke.json was not found.");
         }
 
+        /// <summary>Finds VectorNNTP.BackFiller next to VectorNNTP.BackFiller.json for process spawn.</summary>
         private static (string FileName, string[] Arguments) ResolveApplicationStart()
         {
             foreach (var directory in EnumerateApplicationDirectories())
@@ -275,6 +284,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             return ("", []);
         }
 
+        /// <summary>Yields candidate output directories (test host, Debug/Release bin) for the application binary.</summary>
         private static IEnumerable<string> EnumerateApplicationDirectories()
         {
             var assemblyDirectory = Path.GetDirectoryName(typeof(BackFillerServiceCollectionExtensions).Assembly.Location);
@@ -292,6 +302,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Best-effort recursive delete; IO failures must not fail the test.</summary>
         private static void TryDelete(string path)
         {
             try
@@ -308,6 +319,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Best-effort process tree kill when wait times out.</summary>
         private static void TryKill(Process process)
         {
             try

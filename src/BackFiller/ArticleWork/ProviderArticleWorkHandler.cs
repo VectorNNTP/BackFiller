@@ -64,7 +64,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
         {
         }
 
-        /// <summary>Initializes the handler.</summary>
+        /// <summary>
+        /// Creates the handler with an explicit Path identity on the CanonicalV1 parser and no shared-configuration catalogue.
+        /// </summary>
         /// <param name="retriever">NNTP ARTICLE retriever.</param>
         /// <param name="retention">Canonical retention authority.</param>
         /// <param name="parser">CanonicalV1 parser, including the Path host identity it stamps onto accepted articles.</param>
@@ -119,16 +121,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _logger = logger ?? NullLogger<ProviderArticleWorkHandler>.Instance;
         }
 
-        /// <summary>Gets the last retrieval classification (tests).</summary>
+        /// <summary>Last <see cref="INntpArticleRetriever"/> outcome written by <see cref="HandleAsync"/> without synchronization (tests).</summary>
         internal ArticleRetrievalKind? LastKind { get; private set; }
 
-        /// <summary>Gets the last retention classification (tests).</summary>
+        /// <summary>Last <see cref="IArticleRetentionAuthority.RetainCanonical"/> kind from the same call (tests).</summary>
         internal ArticleRetentionKind? LastRetentionKind { get; private set; }
 
-        /// <summary>Gets the last retained BackFiller FQDN (tests).</summary>
+        /// <summary>Last Success FQDN returned by retention for routing metadata (tests).</summary>
         internal string? LastFqdn { get; private set; }
 
-        /// <summary>Gets the last retained listener port (tests).</summary>
+        /// <summary>Last Success TLS listener port returned by retention (tests).</summary>
         internal int? LastListenerPort { get; private set; }
 
         /// <summary>

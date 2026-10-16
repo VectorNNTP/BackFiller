@@ -14,10 +14,17 @@ namespace VectorNNTP.BackFiller.Tests.Audit
     /// </summary>
     public sealed class DestuffOptimizationMeasurementTests
     {
+        /// <summary>Local article corpus. The measurement returns immediately when this directory is not used because the phase variable is unset.</summary>
         private const string CorpusRoot = ".artifacts/Articles";
 
+        /// <summary>Worker counts measured before the separate 1000-worker, 100,000-operation run.</summary>
         private static readonly int[] Levels = [1, 16, 64, 256, 512, 1000, 2000];
 
+        /// <summary>
+        /// Writes a destuff report when <c>BACKFILLER_DESTUFF_OPT</c> is <c>before</c> or <c>after</c>.
+        /// Any other value, including unset, returns without reading the corpus or asserting.
+        /// When enabled, destuff and record mismatches must be zero.
+        /// </summary>
         [Fact]
         public async Task MeasureDestuffOptimization_WhenEnabled()
         {
@@ -81,6 +88,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             await retention.DisposeAsync();
         }
 
+        /// <summary>Forces a collection, then times one destuff of a single framed copy and records bytes allocated by that read.</summary>
         private static ColdMeasure MeasureCold(byte[] article)
         {
             var framed = Frame(article);
@@ -95,6 +103,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return new ColdMeasure(payload.Length, alloc, us, payload.AsSpan().SequenceEqual(article));
         }
 
+        /// <summary>Warms two reads of a 24-copy buffer, then averages allocation and time across 20 more destuffs of the same article.</summary>
         private static WarmMeasure MeasureWarm(byte[] article)
         {
             var framed = Frame(article);
@@ -133,6 +142,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return new WarmMeasure(iterations, output, alloc / iterations, elapsed.TotalMicroseconds / iterations, equal);
         }
 
+        /// <summary>Destuffs every corpus file and compares that payload with a direct parse of the original bytes. Counts mismatches; does not throw on a rejected article.</summary>
         private static CorpusScan ScanCorpus(string[] files, NntpArticleParser parser)
         {
             var scan = new CorpusScan { Files = files.Length };
@@ -187,6 +197,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return scan;
         }
 
+        /// <summary>Discards one warmup pass, then records throughput, latency percentiles, allocation, GC, and CPU for one concurrency level.</summary>
         private static async Task<LevelRow> RunLevelAsync(
             ArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -243,6 +254,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 Monitor.LockContentionCount - locksBefore);
         }
 
+        /// <summary>Runs <paramref name="operations"/> handler calls on <paramref name="concurrency"/> workers. A non-success outcome throws. Each request is cancelled after success so retention does not fill.</summary>
         private static async Task<double[]> ExecuteAsync(
             ArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -297,6 +309,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return latencies;
         }
 
+        /// <summary>Keeps accepted articles with distinct Message-IDs until <paramref name="maxFiles"/> or <paramref name="maxBytes"/> is reached. Files without a Message-ID are skipped.</summary>
         private static List<Sample> LoadSample(string[] files, NntpArticleParser parser, int maxFiles, long maxBytes)
         {
             var sample = new List<Sample>(maxFiles);
@@ -327,6 +340,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return sample;
         }
 
+        /// <summary>Reads the first <c>Message-ID:</c> header. Stops at the header/body blank line. Does not unfold continuations.</summary>
         private static bool TryMessageId(ReadOnlySpan<byte> article, out string messageId)
         {
             messageId = "";
@@ -363,6 +377,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return false;
         }
 
+        /// <summary>Adds one stuffing dot to lines that already start with a dot and appends the NNTP terminating dot line. Does not change the retained article bytes.</summary>
         private static byte[] Frame(byte[] article)
         {
             using var buffer = new MemoryStream(article.Length + 64);
@@ -395,6 +410,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             return buffer.ToArray();
         }
 
+        /// <summary>Builds a one-hour retention authority with a one-minute sweep interval and the given payload cap. It is not started as a hosted service.</summary>
         private static ArticleRetentionAuthority CreateRetention(long maximumBytes) =>
             new(
                 new BackFillerArticleRetentionRuntimeOptions(maximumBytes, TimeSpan.FromHours(1), TimeSpan.FromMinutes(1), 256),
@@ -403,25 +419,31 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 TimeProvider.System,
                 NullLogger<ArticleRetentionAuthority>.Instance);
 
+        /// <summary>Nearest-rank percentile of an already sorted latency array. The index is clamped inside the array.</summary>
         private static double Percentile(double[] sorted, double percentile)
         {
             var index = (int)Math.Ceiling(percentile * sorted.Length) - 1;
             return sorted[Math.Clamp(index, 0, sorted.Length - 1)];
         }
 
+        /// <summary>Size in bytes of GC generation <paramref name="generation"/> after the last collection. Returns -1 when that generation is absent.</summary>
         private static long GenerationSize(GCMemoryInfo info, int generation)
         {
             var generations = info.GenerationInfo;
             return (uint)generation < (uint)generations.Length ? generations[generation].SizeAfterBytes : -1;
         }
 
+        /// <summary>One report line for a concurrency measurement. Values are formatted for the text file, not asserted.</summary>
         private static string Format(LevelRow row) =>
             $"concurrency={row.Concurrency} ops={row.Operations} sec={row.Seconds:F2} articlesPerSec={row.ArticlesPerSecond:F1} miBPerSec={row.MebibytesPerSecond:F1} p50ms={row.P50:F2} p95ms={row.P95:F2} p99ms={row.P99:F2} allocPerArticle={row.AllocPerArticle:F0} allocPerSec={row.AllocPerSecond:F0} gen0={row.Gen0} gen1={row.Gen1} gen2={row.Gen2} pauseMs={row.PauseMilliseconds:F1} cpu={row.Cpu:F2} rss={row.WorkingSet} loh={row.Loh} poh={row.Poh} pending={row.Pending} contentions={row.Contentions}";
 
+        /// <summary>Serves preframed articles through one shared reader. It does not open a socket, and it always reports 220 after the reader returns.</summary>
         private sealed class DestuffRetriever(OnDemandFrameStream stream, NntpStreamReader reader, byte[][] frames, string[] ids) : INntpArticleRetriever
         {
+            /// <summary>Framed NNTP payloads keyed by Message-ID for on-demand destuff measurements.</summary>
             private readonly Dictionary<string, byte[]> _frames = Build(frames, ids);
 
+            /// <summary>Resets the shared stream to this Message-ID's frame and destuffs it. The retrieval result is always 220; rejection is the handler's concern.</summary>
             public async Task<ArticleRetrievalResult> RetrieveAsync(
                 ArticleWorkItem item,
                 int maxArticleBytes,
@@ -439,6 +461,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 return ArticleRetrievalResult.Retrieved(220, "article follows");
             }
 
+            /// <summary>Pairs each Message-ID with the framed bytes at the same index. The two arrays must be the same length.</summary>
             private static Dictionary<string, byte[]> Build(byte[][] framed, string[] messageIds)
             {
                 var map = new Dictionary<string, byte[]>(messageIds.Length, StringComparer.Ordinal);
@@ -451,33 +474,45 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             }
         }
 
+        /// <summary>Read-only stream over one framed article. <see cref="Begin"/> replaces the buffer. Seek, write, and length changes throw.</summary>
         private sealed class OnDemandFrameStream : Stream
         {
+            /// <summary>Framed bytes installed by <see cref="Begin"/>. Empty until the first call.</summary>
             private byte[] _frame = [];
+            /// <summary>Next unread index in <see cref="_frame"/>.</summary>
             private int _offset;
 
+            /// <summary>Installs <paramref name="frame"/> without copying it and rewinds the read cursor.</summary>
             public void Begin(byte[] frame)
             {
                 _frame = frame;
                 _offset = 0;
             }
 
+            /// <inheritdoc />
             public override bool CanRead => true;
 
+            /// <inheritdoc />
             public override bool CanSeek => false;
 
+            /// <inheritdoc />
             public override bool CanWrite => false;
 
+            /// <inheritdoc />
             public override long Length => _frame.Length;
 
+            /// <summary>Read cursor. Setting it throws <see cref="NotSupportedException"/>.</summary>
             public override long Position { get => _offset; set => throw new NotSupportedException(); }
 
+            /// <summary>No-op. The stream has no buffer of its own.</summary>
             public override void Flush()
             {
             }
 
+            /// <summary>Copies the next unread framed bytes into <paramref name="buffer"/> starting at <paramref name="offset"/>. Returns 0 at the end of the frame.</summary>
             public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
+            /// <summary>Copies the next unread framed bytes into <paramref name="buffer"/>. Returns 0 at the end of the frame.</summary>
             public override int Read(Span<byte> buffer)
             {
                 if (_offset >= _frame.Length)
@@ -491,46 +526,64 @@ namespace VectorNNTP.BackFiller.Tests.Audit
                 return n;
             }
 
+            /// <summary>Same bytes as <see cref="Read(Span{byte})"/>, completed synchronously after a cancellation check.</summary>
             public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return new ValueTask<int>(Read(buffer.Span));
             }
 
+            /// <summary>Throws <see cref="NotSupportedException"/>. The frame is only read from the start.</summary>
             public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
+            /// <summary>Throws <see cref="NotSupportedException"/>.</summary>
             public override void SetLength(long value) => throw new NotSupportedException();
 
+            /// <summary>Throws <see cref="NotSupportedException"/>. The frame is supplied by <see cref="Begin"/>.</summary>
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
+        /// <summary>One accepted corpus article kept for the timed runs.</summary>
         private readonly record struct Sample(string MessageId, byte[] Bytes);
 
+        /// <summary>One forced-collection destuff: payload length, bytes allocated, microseconds, and whether the payload matched the article.</summary>
         private readonly record struct ColdMeasure(int Output, long Alloc, double Microseconds, bool Equal);
 
+        /// <summary>Averages from the warm loop: iteration count, last payload length, allocated bytes per call, microseconds per call, and equality.</summary>
         private readonly record struct WarmMeasure(int Iterations, int Output, long AllocPerCall, double Microseconds, bool Equal);
 
+        /// <summary>Counters from one full-corpus destuff and parse comparison.</summary>
         private sealed class CorpusScan
         {
+            /// <summary>Corpus files processed in the destuff scan pass.</summary>
             public int Files { get; set; }
 
+            /// <summary>Destuffed bytes that did not round-trip expected logical content.</summary>
             public int DestuffMismatch { get; set; }
 
+            /// <summary>Built records that disagreed with source identity or size.</summary>
             public int RecordMismatch { get; set; }
 
+            /// <summary>Articles accepted by parse and factory in the scan.</summary>
             public int Accepted { get; set; }
 
+            /// <summary>Files whose parse failure is <see cref="NntpArticleParseFailureCode.YEncDecodingFailed"/>.</summary>
             public int YEnc { get; set; }
 
+            /// <summary>Files whose parse failure is <see cref="NntpArticleParseFailureCode.BodyLineTooLong"/>.</summary>
             public int BodyLine { get; set; }
 
+            /// <summary>Failures outside destuff, record, yEnc, and body-line buckets.</summary>
             public int OtherFail { get; set; }
 
+            /// <summary>Elapsed seconds for the corpus scan.</summary>
             public double Seconds { get; set; }
 
+            /// <summary>First mismatch label recorded for debugging output.</summary>
             public string? FirstMismatch { get; set; }
         }
 
+        /// <summary>One concurrency row written to the measurement report. It is not compared with a baseline in this test.</summary>
         private readonly record struct LevelRow(
             int Concurrency,
             int Operations,

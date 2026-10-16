@@ -8,6 +8,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
     /// </summary>
     internal sealed class ControllableCacheListenerTransport : ICacheListenerTransport
     {
+        /// <summary>Unbounded inbound queue from test-enqueued client bytes to the session reader.</summary>
         private readonly Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -15,23 +16,37 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             AllowSynchronousContinuations = false,
         });
 
+        /// <summary>Protects write-side state, recorded frames, and write gates.</summary>
         private readonly object _writeGate = new();
+        /// <summary>Server-to-client frames captured on successful writes.</summary>
         private readonly List<byte[]> _written = [];
+        /// <summary>When set, blocked writes await this task until released or faulted.</summary>
         private TaskCompletionSource? _blockWrites;
+        /// <summary>Exception surfaced on the next or currently blocked write.</summary>
         private Exception? _writeFault;
+        /// <summary>Successful writes allowed before automatic write blocking begins.</summary>
         private int _successfulWritesAllowed = int.MaxValue;
+        /// <summary>Successful writes completed since the last gate reset.</summary>
         private int _successfulWritesCompleted;
+        /// <summary>1 after <see cref="DisposeAsync"/>; reads and writes throw.</summary>
         private int _disposed;
+        /// <summary>Writes that entered the block path awaiting release.</summary>
         private int _blockedWrites;
+        /// <summary>Total <see cref="WriteAsync"/> invocations.</summary>
         private int _writeCalls;
+        /// <summary>Total <see cref="ReadAsync"/> invocations.</summary>
         private int _readCalls;
 
+        /// <summary>Observed outbound write call count.</summary>
         public int WriteCalls => Volatile.Read(ref _writeCalls);
 
+        /// <summary>Writes that blocked waiting on the write gate.</summary>
         public int BlockedWrites => Volatile.Read(ref _blockedWrites);
 
+        /// <summary>Observed inbound read call count.</summary>
         public int ReadCalls => Volatile.Read(ref _readCalls);
 
+        /// <summary>Copy of captured outbound frames in write order.</summary>
         public IReadOnlyList<byte[]> WrittenFrames
         {
             get
@@ -43,6 +58,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        /// <summary>Queues bytes for the session reader; no-op when empty or disposed.</summary>
+        /// <param name="bytes">Next inbound chunk; copied into the channel.</param>
         public void EnqueueInbound(ReadOnlyMemory<byte> bytes)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
@@ -54,6 +71,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             _ = _inbound.Writer.TryWrite(bytes.ToArray());
         }
 
+        /// <summary>Completes the inbound writer so reads eventually return zero unless faulted.</summary>
         public void CompleteInbound() => _ = _inbound.Writer.TryComplete();
 
         /// <summary>After <paramref name="count"/> successful writes, further writes block until fail/release.</summary>
@@ -87,6 +105,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             _ = _inbound.Writer.TryComplete(exception);
         }
 
+        /// <inheritdoc />
+        /// <remarks>Propagates inner exceptions from a faulted channel; partial frames drop trailing bytes.</remarks>
         public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
@@ -116,6 +136,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             return copy;
         }
 
+        /// <inheritdoc />
+        /// <remarks>Honors write limits, blocking, faults, and records full buffers on success.</remarks>
         public async ValueTask<int> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
@@ -176,6 +198,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        /// <inheritdoc />
+        /// <remarks>Completes inbound and unblocks writes with <see cref="ObjectDisposedException"/>.</remarks>
         public ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1)

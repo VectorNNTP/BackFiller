@@ -10,6 +10,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class ArticleIngestionHotPathProbe
     {
+        /// <summary>
+        /// Prints per-sample factory and pipeline allocation rates for several synthetic sizes; not a timing gate.
+        /// </summary>
         [Fact]
         public async Task Measure_steady_state_allocations()
         {
@@ -83,6 +86,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             MeasureConcurrent(parser, Article("dots", Body(".\r\n", 32 * 1024)), "dot-heavy");
         }
 
+        /// <summary>Times parallel <see cref="ArticleRecordFactory.TryCreate"/> on one logical article for throughput logging.</summary>
+        /// <param name="parser">Shared parser instance.</param>
+        /// <param name="logical">Destuffed logical article bytes.</param>
+        /// <param name="name">Label printed with results.</param>
         private static void MeasureConcurrent(NntpArticleParser parser, byte[] logical, string name)
         {
             const int operations = 1000;
@@ -108,6 +115,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Console.WriteLine($"{name} concurrent={operations} elapsedMs={elapsedMs:F1} articles/s={operations / (elapsedMs / 1000.0):F0}");
         }
 
+        /// <summary>Minimal ASCII headers plus body for probe articles.</summary>
+        /// <param name="id">Message-ID local part.</param>
+        /// <param name="body">Body bytes after the separator.</param>
+        /// <returns>Logical article bytes.</returns>
         private static byte[] Article(string id, string body) =>
             Encoding.ASCII.GetBytes(
                 "Date: Fri, 23 Aug 2024 07:30:10 +0000\r\n"
@@ -119,6 +130,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 + "\r\n"
                 + body);
 
+        /// <summary>Repeats a line until at least <paramref name="minimumBytes"/> of body text exist.</summary>
+        /// <param name="line">Line template including its ending.</param>
+        /// <param name="minimumBytes">Minimum total body size.</param>
+        /// <returns>Expanded body string.</returns>
         private static string Body(string line, int minimumBytes)
         {
             var builder = new StringBuilder(minimumBytes + line.Length);
@@ -130,6 +145,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return builder.ToString();
         }
 
+        /// <summary>NNTP multiline framing with dot stuffing and a terminating <c>.\r\n</c> for reader probes.</summary>
+        /// <param name="logical">Destuffed article bytes.</param>
+        /// <returns>Framed wire bytes suitable for <see cref="NntpStreamReader"/>.</returns>
         private static byte[] Frame(byte[] logical)
         {
             var buffer = new byte[logical.Length * 2 + 8];

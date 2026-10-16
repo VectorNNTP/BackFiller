@@ -23,17 +23,36 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// </remarks>
     public sealed class NntpDbService : IApplicationService, IAsyncDisposable
     {
+        /// <summary>Delay between transient startup attempts, shortened when less than this remains before the deadline.</summary>
         private static readonly TimeSpan StartupRetryDelay = TimeSpan.FromSeconds(1);
 
+        /// <summary>Opens logical connections. This service does not dispose the factory.</summary>
         private readonly INntpDbConnectionFactory _factory;
+
+        /// <summary>Connection string and startup timeout. Read at start and on each <see cref="OpenAsync"/>.</summary>
         private readonly IOptions<NntpDbOptions> _options;
+
+        /// <summary>Lifecycle logger. Events are defined on <see cref="NntpDbLogMessages"/> and can be filtered out.</summary>
         private readonly ILogger<NntpDbService> _logger;
+
+        /// <summary>Clock for the startup deadline and the delay between retries.</summary>
         private readonly TimeProvider _timeProvider;
+
+        /// <summary>
+        /// <c>1</c> while <see cref="StartAsync"/> is in progress or has succeeded. A failed start sets it back to <c>0</c>.
+        /// A second call returns immediately while the value is <c>1</c>.
+        /// </summary>
         private int _started;
+
+        /// <summary><c>1</c> only after <c>SELECT 1</c> succeeds. Dispose and a failed start set it to <c>0</c>, which makes <see cref="OpenAsync"/> throw.</summary>
         private int _accepting;
+
+        /// <summary><c>1</c> after the first <see cref="DisposeAsync"/>. Later calls return immediately.</summary>
         private int _disposed;
 
-        /// <summary>Initializes a new instance of the <see cref="NntpDbService"/> class.</summary>
+        /// <summary>
+        /// Creates the service with the system clock. Startup runs <c>SELECT 1</c> under a configured deadline and fails the host when MySQL is unavailable.
+        /// </summary>
         /// <param name="factory">Opens short-lived logical connections.</param>
         /// <param name="options">Validated NntpDB options.</param>
         /// <param name="logger">Lifecycle logger.</param>
@@ -45,7 +64,9 @@ namespace VectorNNTP.BackFiller.NntpDb
         {
         }
 
-        /// <summary>Initializes a new instance with an explicit clock (tests).</summary>
+        /// <summary>
+        /// Creates the service with an injectable clock for deterministic startup retry tests.
+        /// </summary>
         /// <param name="factory">Opens short-lived logical connections.</param>
         /// <param name="options">Validated NntpDB options.</param>
         /// <param name="logger">Lifecycle logger.</param>
@@ -72,13 +93,17 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <inheritdoc />
         public Task? Execution => null;
 
-        /// <summary>Gets whether <see cref="StartAsync"/> has completed successfully (tests).</summary>
+        /// <summary>
+        /// Whether <see cref="StartAsync"/> entered its critical section and was not rolled back by failure (tests).
+        /// </summary>
         internal bool HasStarted => Volatile.Read(ref _started) == 1;
 
-        /// <summary>Gets whether the service is accepting database work (tests).</summary>
+        /// <summary>
+        /// Whether <see cref="OpenAsync"/> may open sessions after successful startup health check (tests).
+        /// </summary>
         internal bool IsAccepting => Volatile.Read(ref _accepting) == 1;
 
-        /// <summary>Gets how many startup connect attempts ran (tests).</summary>
+        /// <summary>Startup <c>SELECT 1</c> attempts counted across transient retries (tests).</summary>
         internal int StartupConnectAttempts { get; private set; }
 
         /// <inheritdoc />
@@ -149,6 +174,16 @@ namespace VectorNNTP.BackFiller.NntpDb
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>
+        /// Validates the connection string, then opens a session and requires <c>SELECT 1</c> to return 1 before the startup deadline.
+        /// </summary>
+        /// <param name="options">Connection string and <see cref="NntpDbOptions.StartupTimeout"/>.</param>
+        /// <param name="cancellationToken">Cancels the open, the query, and the retry delay. Cancellation is not retried.</param>
+        /// <remarks>
+        /// A malformed connection string, an authentication failure, a <c>SELECT 1</c> result other than 1, and cancellation propagate immediately.
+        /// Transient provider, I/O, and timeout failures wait up to one second, or the time remaining, and try again until the deadline.
+        /// The deadline failure is <see cref="NntpDbUnavailableException"/>.
+        /// </remarks>
         private async Task ConnectWithStartupBudgetAsync(NntpDbOptions options, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -210,6 +245,11 @@ namespace VectorNNTP.BackFiller.NntpDb
             }
         }
 
+        /// <summary>
+        /// Returns whether <paramref name="exception"/> is the wrapped health-query failure that must not be retried.
+        /// </summary>
+        /// <param name="exception">Failure from <see cref="INntpDbSession.SelectOneAsync"/>.</param>
+        /// <returns><see langword="true"/> when the message contains the ordinal text <c>SELECT 1</c>.</returns>
         private static bool IsSelectOneFailure(NntpDbUnavailableException exception) =>
             exception.Message.Contains("SELECT 1", StringComparison.Ordinal);
     }

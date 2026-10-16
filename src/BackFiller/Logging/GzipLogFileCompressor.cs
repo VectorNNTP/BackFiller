@@ -67,6 +67,10 @@ namespace VectorNNTP.BackFiller.Logging
             return File.Exists(destination);
         }
 
+        /// <summary>
+        /// Deletes <paramref name="path"/> when it exists. <see cref="IOException"/> and <see cref="UnauthorizedAccessException"/> are written to Serilog <c>SelfLog</c> and not thrown.
+        /// </summary>
+        /// <param name="path">Source log or <c>.gz.partial</c> path.</param>
         private static void TryDelete(string path)
         {
             try

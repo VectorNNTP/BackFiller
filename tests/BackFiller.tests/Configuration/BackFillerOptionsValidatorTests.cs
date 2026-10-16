@@ -7,8 +7,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Exercises BackFillerOptionsValidator, related validators, and binding edge cases for secrets and legacy keys.
+    /// </summary>
+
     public sealed class BackFillerOptionsValidatorTests
     {
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_succeeds_for_complete_valid_options()
         {
@@ -16,6 +24,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.True(result.Succeeded);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -31,6 +43,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 result.Failures!,
                 static failure => failure.Contains("BackFiller:Logging:LogRetentionDays", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData("Trace")]
@@ -50,6 +66,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                     StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_fails_when_server_id_is_missing()
         {
@@ -59,6 +79,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Failed);
             Assert.Contains(result.Failures!, static f => f.Contains("ServerId", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(-1)]
@@ -73,6 +97,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static f => f.Contains("1–255", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_does_not_require_a_configurable_name()
         {
@@ -82,6 +110,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
             Assert.Equal("backfiller01.usenet.ninja", options.Fqdn);
         }
+
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
 
         [Fact]
         public void Validate_does_not_require_common_cleartext_bind_port()
@@ -97,6 +129,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                             && !f.Contains("BindPortTls", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_fails_when_nested_bind_port_tls_is_missing()
         {
@@ -108,6 +144,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static f => f.Contains("TLS-only", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_does_not_require_application_section_acme_email()
         {
@@ -118,6 +158,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 result.Failures ?? [],
                 static f => f.Contains("AcmeEmail", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Validate_fails_when_drain_timeout_exceeds_grace_period()
@@ -134,6 +178,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                             && f.Contains("GracePeriodSeconds", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// BackFillerOptionsValidator enforces the documented constraint.
+        /// </summary>
+
         [Theory]
         [InlineData(true, true)]
         [InlineData(true, false)]
@@ -147,6 +195,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.False(result.Failed);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -163,6 +215,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 static f => f.Contains("MaxOpenableRequestIdsPerArticle", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_fails_when_retention_exceeds_physical_memory_ceiling()
         {
@@ -174,6 +230,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static f => f.Contains("physical-memory", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_accepts_configured_four_gib_below_the_physical_memory_ceiling()
         {
@@ -184,6 +244,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 .Validate(null, options);
             Assert.True(result.Succeeded);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Validate_fails_when_physical_memory_cannot_be_determined()
@@ -201,6 +265,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 static f => f.Contains("80% physical-memory ceiling", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_fails_when_explicit_bind_address_is_not_local()
         {
@@ -212,6 +280,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static f => f.Contains("BindAddress", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_allows_omitted_bind_address()
         {
@@ -220,6 +292,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.True(result.Succeeded);
         }
+
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
 
         [Theory]
         [InlineData(1)]
@@ -233,6 +309,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_uses_default_max_concurrent_session_establishments_when_omitted()
         {
@@ -243,6 +323,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.True(result.Succeeded);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -260,6 +344,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 static f => f.Contains("BackFiller:Nntp:MaxConcurrentSessionEstablishments", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Contract: Runtime options project max concurrent session establishments.
+        /// </summary>
+
         [Fact]
         public void Runtime_options_project_max_concurrent_session_establishments()
         {
@@ -270,6 +358,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 BackFillerTestOptions.CreateValidNntpDb());
             Assert.Equal(4, runtime.Nntp.MaxConcurrentSessionEstablishments);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(4)]
@@ -285,6 +377,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 static f => f.Contains("BackFillerAccountRefreshIntervalSeconds", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_fails_when_nntp_db_is_missing()
         {
@@ -293,6 +389,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Failed);
             Assert.Contains(result.Failures!, static f => f.Contains("ConnectionStrings:NntpDB", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Validation failure messages must not echo configured secrets.
+        /// </summary>
 
         [Fact]
         public void Validate_failures_do_not_include_secret_values()
@@ -313,6 +413,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                     Assert.DoesNotContain("db-secret-xyz", failure, StringComparison.Ordinal);
                 });
         }
+
+        /// <summary>
+        /// Contract: Bind uses top level rabbitmq path.
+        /// </summary>
 
         [Fact]
         public void Bind_uses_top_level_rabbitmq_path()
@@ -335,6 +439,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(BackFillerTestOptions.SecretPassword, rabbit.Password);
         }
 
+        /// <summary>
+        /// Contract: Bind does not map nested backfiller rabbitmq onto backfiller options.
+        /// </summary>
+
         [Fact]
         public void Bind_does_not_map_nested_backfiller_rabbitmq_onto_backfiller_options()
         {
@@ -349,6 +457,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             configuration.GetSection(BackFillerOptions.SectionName).Bind(options);
             Assert.Null(typeof(BackFillerOptions).GetProperty("RabbitMQ"));
         }
+
+        /// <summary>
+        /// Contract: Bind uses canonical nntp db connection string path.
+        /// </summary>
 
         [Fact]
         public void Bind_uses_canonical_nntp_db_connection_string_path()
@@ -368,6 +480,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(new NntpDbOptionsValidator().Validate(null, options).Succeeded);
         }
 
+        /// <summary>
+        /// Contract: Bind uses server id not legacy id key.
+        /// </summary>
+
         [Fact]
         public void Bind_uses_server_id_not_legacy_id_key()
         {
@@ -383,6 +499,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(3, options.ServerId);
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_ignores_syslog_and_rabbit_fields_while_those_targets_are_disabled()
         {
@@ -396,6 +516,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_rejects_enabled_syslog_without_a_host()
         {
@@ -405,6 +529,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.Contains(result.Failures!, static failure => failure.Contains("Syslog:Host", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -419,6 +547,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static failure => failure.Contains("Syslog:Port", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Theory]
         [InlineData("Tls")]
         [InlineData("")]
@@ -431,6 +563,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.Contains(result.Failures!, static failure => failure.Contains("Syslog:Protocol", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
 
         [Theory]
         [InlineData("Udp")]
@@ -445,6 +581,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_requires_rabbit_exchange_and_routing_key_only_when_enabled()
         {
@@ -457,6 +597,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static failure => failure.Contains("RabbitMQ:RoutingKey", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Validate_accepts_empty_file_log_directory_when_file_logging_is_disabled()
         {
@@ -467,6 +611,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_rejects_empty_file_log_directory_when_file_logging_is_enabled()
         {
@@ -476,6 +624,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.Contains(result.Failures!, static failure => failure.Contains("File:LogDir", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// BackFillerOptionsValidator enforces the documented constraint.
+        /// </summary>
 
         [Fact]
         public void Validate_defaults_file_logging_to_enabled_with_logs()

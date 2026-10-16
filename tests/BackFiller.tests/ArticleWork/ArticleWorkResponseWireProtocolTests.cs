@@ -4,8 +4,14 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// v1 response JSON wire shape: canonical examples, field presence rules, and serializer rejection of non-terminal outcomes.
+    /// </summary>
     public sealed class ArticleWorkResponseWireProtocolTests
     {
+        /// <summary>
+        /// Success serialization matches the canonical protocol bytes and excludes uri/error/payload fields.
+        /// </summary>
         [Fact]
         public void Success_json_matches_the_canonical_protocol_example()
         {
@@ -28,6 +34,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("payload", Encoding.UTF8.GetString(json), StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Terminal failure (not found) matches canonical JSON and omits success-only endpoint properties.
+        /// </summary>
         [Fact]
         public void Terminal_failure_json_matches_the_canonical_protocol_example()
         {
@@ -49,6 +58,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("No article with that message-id", document.RootElement.GetProperty("error").GetString());
         }
 
+        /// <summary>
+        /// InvalidRequest may serialize null request/message/backbone identities and never emits fqdn/listenerPort/uri.
+        /// </summary>
         [Fact]
         public void InvalidRequest_may_emit_null_identities_and_never_includes_endpoint_fields()
         {
@@ -73,6 +85,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("Malformed JSON.", root.GetProperty("error").GetString());
         }
 
+        /// <summary>
+        /// Serialized property order and names match the protocol camelCase field set for success.
+        /// </summary>
         [Fact]
         public void Property_names_are_exact_camelCase_protocol_fields()
         {
@@ -81,6 +96,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(["version", "requestId", "messageId", "backbone", "outcome", "fqdn", "listenerPort", "articleId"], names);
         }
 
+        /// <summary>
+        /// Success serialization rejects fqdn values that are not a plain host label (no URL, wrong case pattern, empty).
+        /// </summary>
+        /// <param name="fqdn">Candidate fqdn field.</param>
         [Theory]
         [InlineData(null)]
         [InlineData("")]
@@ -93,6 +112,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Throws<InvalidOperationException>(() => ArticleWorkResponseWireProtocol.SerializeV1(intent));
         }
 
+        /// <summary>
+        /// Success serialization requires a positive 16-bit listener port.
+        /// </summary>
+        /// <param name="port">Candidate listener port.</param>
         [Theory]
         [InlineData(null)]
         [InlineData(0)]
@@ -104,6 +127,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Throws<InvalidOperationException>(() => ArticleWorkResponseWireProtocol.SerializeV1(intent));
         }
 
+        /// <summary>
+        /// Success intent without article id hex fails at serialize time.
+        /// </summary>
         [Fact]
         public void Success_rejects_missing_article_id()
         {
@@ -111,6 +137,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Throws<InvalidOperationException>(() => ArticleWorkResponseWireProtocol.SerializeV1(intent));
         }
 
+        /// <summary>
+        /// Serialized articleId hex parses back to the same <see cref="VectorNNTP.BackFiller.Articles.ArticleId"/> value.
+        /// </summary>
         [Fact]
         public void Success_article_id_round_trips_exactly()
         {
@@ -124,6 +153,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 parsed);
         }
 
+        /// <summary>
+        /// Retryable/non-terminal outcomes must not produce v1 terminal response JSON (serializer throws).
+        /// </summary>
+        /// <param name="outcomeName">Non-terminal outcome name.</param>
         [Theory]
         [InlineData(nameof(ArticleWorkOutcome.ProviderFailure))]
         [InlineData(nameof(ArticleWorkOutcome.Cancelled))]
@@ -144,6 +177,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Throws<InvalidOperationException>(() => ArticleWorkResponseWireProtocol.SerializeV1(intent));
         }
 
+        /// <summary>
+        /// Canonical success response intent matching protocol documentation fixtures.
+        /// </summary>
+        /// <returns>Intent passed to <see cref="ArticleWorkResponseWireProtocol.SerializeV1"/>.</returns>
         private static ArticleWorkResponseIntent SuccessIntent() =>
             new(
                 ArticleWorkOutcome.Success,

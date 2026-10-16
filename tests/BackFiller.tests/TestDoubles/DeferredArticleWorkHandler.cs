@@ -8,6 +8,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
     /// </summary>
     internal sealed class DeferredArticleWorkHandler : IArticleWorkHandler
     {
+        /// <summary>Stable provider-failure reason returned for every non-cancelled item.</summary>
         private const string DeferredReason = "Upstream provider retrieval is not implemented.";
 
         /// <inheritdoc />

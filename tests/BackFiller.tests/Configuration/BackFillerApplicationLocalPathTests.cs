@@ -15,8 +15,13 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
     /// or an IDE/project content root.
     /// </summary>
     [Collection("WorkingDirectory")]
+
     public sealed class BackFillerApplicationLocalPathTests
     {
+        /// <summary>
+        /// Contract: Relative certs resolves beneath application base.
+        /// </summary>
+
         [Fact]
         public void Relative_certs_resolves_beneath_application_base()
         {
@@ -30,6 +35,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 runtime.CertificateDirectory,
                 StringComparison.OrdinalIgnoreCase);
         }
+
+        /// <summary>
+        /// Contract: Resolved paths are not based on process working directory.
+        /// </summary>
 
         [Fact]
         public void Resolved_paths_are_not_based_on_process_working_directory()
@@ -54,6 +63,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 TryDelete(cwd);
             }
         }
+
+        /// <summary>
+        /// Contract: Changing working directory does not change resolved paths.
+        /// </summary>
 
         [Fact]
         public void Changing_working_directory_does_not_change_resolved_paths()
@@ -82,6 +95,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Contract: Explicit absolute paths remain absolute.
+        /// </summary>
+
         [Fact]
         public void Explicit_absolute_paths_remain_absolute()
         {
@@ -104,6 +121,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Contract: Explicit relative paths resolve beneath application base.
+        /// </summary>
+
         [Fact]
         public void Explicit_relative_paths_resolve_beneath_application_base()
         {
@@ -115,6 +136,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(Expected("nested-certs/"), runtime.CertificateDirectory);
             Assert.Equal(Expected("nested-logs"), runtime.LogDirectory);
         }
+
+        /// <summary>
+        /// Invalid path or argument is rejected before resolution proceeds.
+        /// </summary>
 
         [Fact]
         public void Relative_parent_segments_cannot_leave_the_application_base()
@@ -137,6 +162,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Contract: Relative dot segments that remain inside the base are kept.
+        /// </summary>
+
         [Fact]
         public void Relative_dot_segments_that_remain_inside_the_base_are_kept()
         {
@@ -155,6 +184,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 TryDelete(root);
             }
         }
+
+        /// <summary>
+        /// Contract: Rooted paths may leave the application base.
+        /// </summary>
 
         [Fact]
         public void Rooted_paths_may_leave_the_application_base()
@@ -189,6 +222,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// Contract: Backfiller uses the same common path resolution as nntpd.
+        /// </summary>
+
         [Fact]
         public void Backfiller_uses_the_same_common_path_resolution_as_nntpd()
         {
@@ -217,6 +254,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Contract: Hosting does not create certs or logs in the working directory.
+        /// </summary>
+
         [Fact]
         public void Hosting_does_not_create_certs_or_logs_in_the_working_directory()
         {
@@ -237,12 +278,21 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>Resolves <paramref name="configured"/> against the test output directory, matching production path rules.</summary>
+        /// <param name="configured">Path value from configuration.</param>
         private static string Expected(string configured) =>
             ApplicationLocalPath.ResolveApplicationLocalPath(configured, AppContext.BaseDirectory);
 
+        /// <summary>Full path without a trailing separator, so assertions do not depend on a trailing slash.</summary>
+        /// <param name="path">Path to normalize.</param>
         private static string Normalized(string path) =>
             Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
+        /// <summary>
+        /// Host whose content root can be a decoy. Configuration comes from <paramref name="pairs"/> or the valid fixture pairs.
+        /// </summary>
+        /// <param name="decoyContentRoot">Content root that must not become the certificate or log directory. Null uses the test output directory.</param>
+        /// <param name="pairs">Configuration overlay. Null uses <see cref="BackFillerTestOptions.CreateValidConfigurationPairs"/>.</param>
         private static IHost CreateHost(
             string? decoyContentRoot = null,
             Dictionary<string, string?>? pairs = null)
@@ -261,9 +311,13 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return builder.Build();
         }
 
+        /// <summary>Creates a temporary directory the test must delete.</summary>
+        /// <param name="prefix">Directory name prefix.</param>
         private static string CreateTempDir(string prefix) =>
             Directory.CreateTempSubdirectory(prefix).FullName;
 
+        /// <summary>Deletes a temporary directory. An in-use directory is left behind so cleanup cannot fail the test.</summary>
+        /// <param name="path">Directory created by the test.</param>
         private static void TryDelete(string path)
         {
             try
@@ -276,6 +330,9 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>Walks parents of the test output directory until <paramref name="relativePath"/> exists.</summary>
+        /// <param name="relativePath">Path under the repository root, using separators <c>RelativePath.Under</c> accepts.</param>
+        /// <exception cref="FileNotFoundException">No parent contains that path.</exception>
         private static string FindRepoFile(string relativePath)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);

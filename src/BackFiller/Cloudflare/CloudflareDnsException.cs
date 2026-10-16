@@ -11,47 +11,42 @@ namespace VectorNNTP.BackFiller.Cloudflare
     /// </remarks>
     internal sealed class CloudflareDnsException : Exception
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsException"/> class.
-        /// </summary>
+        /// <summary>Creates a DNS API failure with message only; status and Cloudflare codes remain unset.</summary>
         /// <param name="message">Safe diagnostic message without secrets.</param>
         internal CloudflareDnsException(string message)
             : base(message)
         {
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsException"/> class.
-        /// </summary>
+        /// <summary>Creates a DNS API failure wrapping a transport or parse exception.</summary>
         /// <param name="message">Safe diagnostic message without secrets.</param>
-        /// <param name="innerException">Inner exception.</param>
+        /// <param name="innerException">Transport, timeout, or deserialization failure.</param>
         internal CloudflareDnsException(string message, Exception innerException)
             : base(message, innerException)
         {
         }
 
-        /// <summary>Gets the HTTP status code when the failure originated from an HTTP response.</summary>
+        /// <summary>HTTP status when the failure originated from a Cloudflare response; null for pre-request failures.</summary>
         internal int? StatusCode { get; init; }
 
-        /// <summary>Gets Cloudflare error codes from the response body, when present.</summary>
+        /// <summary>Cloudflare <c>errors[].code</c> values copied from the envelope when present.</summary>
         internal IReadOnlyList<int> CloudflareErrorCodes { get; init; } = [];
 
-        /// <summary>Gets a value indicating whether the failure was an HTTP 429 rate limit.</summary>
+        /// <summary>True when <see cref="StatusCode"/> is 429.</summary>
         private bool IsRateLimited => StatusCode == 429;
 
         /// <summary>
-        /// Gets a value indicating whether the remote side may have applied a mutation despite the local failure
-        /// (for example timeout or transport error during create/update/delete).
+        /// When true, Cloudflare may already have applied a create/update/delete despite the local failure
+        /// (timeout, transport error, or cancel after send).
         /// </summary>
         internal bool IsOutcomeUncertain { get; init; }
 
         /// <summary>
-        /// Gets a value indicating whether the failure is permanent (auth/config/validation) and must not be
-        /// retried as a transient error.
+        /// When true, callers must not retry as transient (auth, config, validation, or explicit 4xx except 429).
         /// </summary>
         internal bool IsPermanentFailure { get; init; }
 
-        /// <summary>Gets a short label for the failed operation (for diagnostics).</summary>
+        /// <summary>Short operation label stored on the exception for logs (for example <c>List</c> or HTTP method plus path).</summary>
         internal string? FailedOperation { get; init; }
 
         /// <summary>

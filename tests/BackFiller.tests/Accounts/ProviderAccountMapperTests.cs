@@ -3,8 +3,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Accounts
 {
+    /// <summary>
+    /// Maps database rows to BackFillerProviderDefinition with expected defaults.
+    /// </summary>
+
     public sealed class ProviderAccountMapperTests
     {
+        /// <summary>
+        /// Contract: Map projects a valid row onto the phase4 provider definition.
+        /// </summary>
+
         [Fact]
         public void Map_projects_a_valid_row_onto_the_phase4_provider_definition()
         {
@@ -23,6 +31,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal(0, provider.KeepAliveSeconds);
         }
 
+        /// <summary>
+        /// Contract: Map preserves mysql keepalive on the provider definition.
+        /// </summary>
+
         [Fact]
         public void Map_preserves_mysql_keepalive_on_the_provider_definition()
         {
@@ -32,6 +44,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal((byte)42, provider.KeepAliveSeconds);
             Assert.True(provider.DateKeepAliveEnabled);
         }
+
+        /// <summary>
+        /// Contract: Map canonicalizes backbone case.
+        /// </summary>
 
         [Theory]
         [InlineData("giganews", "Giganews")]
@@ -43,6 +59,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal(canonical, Assert.Single(mapped.Providers).Backbone);
             Assert.Empty(mapped.Rejected);
         }
+
+        /// <summary>
+        /// Contract: Map rejects unknown backbone without publishing it.
+        /// </summary>
 
         [Fact]
         public void Map_rejects_unknown_backbone_without_publishing_it()
@@ -58,6 +78,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal("UnknownProvider", rejected.Backbone);
             Assert.Equal("Unknown or unsupported backbone.", rejected.Reason);
         }
+
+        /// <summary>
+        /// Contract: Map keeps the first valid row for a duplicate backbone.
+        /// </summary>
 
         [Fact]
         public void Map_keeps_the_first_valid_row_for_a_duplicate_backbone()
@@ -75,6 +99,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Contains("Duplicate", Assert.Single(mapped.Rejected).Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Contract: Map rejects missing hostname.
+        /// </summary>
+
         [Theory]
         [InlineData("", "Hostname is required.")]
         [InlineData("   ", "Hostname is required.")]
@@ -85,6 +113,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Empty(mapped.Providers);
             Assert.Equal(reason, Assert.Single(mapped.Rejected).Reason);
         }
+
+        /// <summary>
+        /// Contract: Map rejects invalid port.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -97,6 +129,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal("Port must be between 1 and 65535.", Assert.Single(mapped.Rejected).Reason);
         }
 
+        /// <summary>
+        /// Contract: Map rejects max connections below one.
+        /// </summary>
+
         [Theory]
         [InlineData(0)]
         [InlineData(-1)]
@@ -108,6 +144,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal("MaxConnections must be at least 1.", Assert.Single(mapped.Rejected).Reason);
         }
 
+        /// <summary>
+        /// Contract: Map rejects missing username.
+        /// </summary>
+
         [Fact]
         public void Map_rejects_missing_username()
         {
@@ -116,6 +156,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Empty(mapped.Providers);
             Assert.Equal("Username is required.", Assert.Single(mapped.Rejected).Reason);
         }
+
+        /// <summary>
+        /// Contract: Map rejects username with control characters.
+        /// </summary>
 
         [Theory]
         [InlineData("user\rname")]
@@ -129,6 +173,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Empty(mapped.Providers);
             Assert.Equal("Username contains invalid control characters.", Assert.Single(mapped.Rejected).Reason);
         }
+
+        /// <summary>
+        /// Contract: Map rejects null password without including it in the reason.
+        /// </summary>
 
         [Fact]
         public void Map_rejects_null_password_without_including_it_in_the_reason()
@@ -144,6 +192,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
                 StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Contract: Map rejects password with control characters.
+        /// </summary>
+
         [Theory]
         [InlineData("pass\rword")]
         [InlineData("pass\nword")]
@@ -157,6 +209,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal("Password contains invalid control characters.", Assert.Single(mapped.Rejected).Reason);
         }
 
+        /// <summary>
+        /// Contract: Map projects usessl onto tls.
+        /// </summary>
+
         [Theory]
         [InlineData("y", true)]
         [InlineData("n", false)]
@@ -166,6 +222,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
 
             Assert.Equal(useTls, Assert.Single(mapped.Providers).UseTls);
         }
+
+        /// <summary>
+        /// Contract: Map rejects invalid usessl.
+        /// </summary>
 
         [Theory]
         [InlineData("Y")]
@@ -180,6 +240,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Equal("UseSsl must be 'y' or 'n'.", Assert.Single(mapped.Rejected).Reason);
         }
 
+        /// <summary>
+        /// Contract: Map allows an empty provider result.
+        /// </summary>
+
         [Fact]
         public void Map_allows_an_empty_provider_result()
         {
@@ -188,6 +252,10 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             Assert.Empty(mapped.Providers);
             Assert.Empty(mapped.Rejected);
         }
+
+        /// <summary>
+        /// Contract: Map rejects a blank backbone.
+        /// </summary>
 
         [Fact]
         public void Map_rejects_a_blank_backbone()

@@ -135,16 +135,16 @@ namespace VectorNNTP.BackFiller.Articles
             SelectedDateHeaderName = selectedDateHeaderName;
         }
 
-        /// <summary>Gets a value indicating whether a CanonicalV1 record was produced.</summary>
+        /// <summary>True when parse and materialization produced a <see cref="ArticleParseStatus.CanonicalV1"/> record.</summary>
         public bool IsAccepted { get; }
 
-        /// <summary>Gets the constructed record when accepted; otherwise default.</summary>
+        /// <summary>Canonical record referencing owned ArtData when accepted; otherwise default.</summary>
         public ArticleRecord Record { get; }
 
-        /// <summary>Gets the parser failure when construction stopped at parse.</summary>
+        /// <summary>Parser rejection when <see cref="IsAccepted"/> is false and failure happened before materialization.</summary>
         public NntpArticleParseFailureCode ParseFailure { get; }
 
-        /// <summary>Gets the materializer or transfer failure when construction stopped after parse.</summary>
+        /// <summary>Materializer rejection when parse succeeded but canonicalization or size limits failed.</summary>
         public NntpArticleCanonicalFailureCode MaterializeFailure { get; }
 
         /// <summary>

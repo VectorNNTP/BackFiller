@@ -90,7 +90,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <summary>Default exchange name.</summary>
         private const string DefaultExchange = "logs";
 
-        /// <summary>Default routing key.</summary>
+        /// <summary>Default AMQP routing key, <c>backfiller</c>, used when the target does not set one.</summary>
         private const string DefaultRoutingKey = "backfiller";
 
         /// <summary>Gets or sets whether RabbitMQ logging is requested. Default is disabled.</summary>

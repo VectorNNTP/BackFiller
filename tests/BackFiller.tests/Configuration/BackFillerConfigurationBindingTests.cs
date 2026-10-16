@@ -7,8 +7,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Proves VECTOR and BackFiller configuration paths bind only canonical keys and reject obsolete prefixes.
+    /// </summary>
+
     public sealed class BackFillerConfigurationBindingTests
     {
+        /// <summary>
+        /// Contract: Shared acme cloudflare environment variables are vector names.
+        /// </summary>
+
         [Fact]
         public void Shared_acme_cloudflare_environment_variables_are_vector_names()
         {
@@ -33,6 +41,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("0123456789abcdef0123456789abcdef", options.CloudFlareZoneId);
         }
 
+        /// <summary>
+        /// Contract: Canonical environment variable names map to root configuration paths.
+        /// </summary>
+
         [Fact]
         public void Canonical_environment_variable_names_map_to_root_configuration_paths()
         {
@@ -52,6 +64,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("RABBITMQ:PASSWORD", ToConfigurationPath(BackFillerOptions.RabbitMqPasswordEnvironmentVariable));
             Assert.True(VectorEnvironment.IsCanonicalName(BackFillerOptions.RabbitMqUsernameEnvironmentVariable));
         }
+
+        /// <summary>
+        /// Contract: Bind populates options from canonical prefixed paths.
+        /// </summary>
 
         [Fact]
         public void Bind_populates_options_from_canonical_prefixed_paths()
@@ -90,6 +106,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("Server=127.0.0.1;Database=nntp;User ID=nntparticles;Password=db-secret-xyz", nntpDb.ConnectionString);
         }
 
+        /// <summary>
+        /// Contract: Bind does not accept obsolete application prefixes.
+        /// </summary>
+
         [Theory]
         [InlineData("nntpd__RabbitMQ__Username", "nntpd__RabbitMQ__Password")]
         [InlineData("backfiller__RabbitMQ__Username", "backfiller__RabbitMQ__Password")]
@@ -114,6 +134,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(string.IsNullOrWhiteSpace(acme.AcmeCertificatePassword));
         }
 
+        /// <summary>
+        /// Contract: Bind does not map legacy id key to server id.
+        /// </summary>
+
         [Fact]
         public void Bind_does_not_map_legacy_id_key_to_server_id()
         {
@@ -128,6 +152,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             configuration.GetSection(BackFillerOptions.SectionName).Bind(options);
             Assert.Null(options.ServerId);
         }
+
+        /// <summary>
+        /// Validation failure messages must not echo configured secrets.
+        /// </summary>
 
         [Fact]
         public void Nntp_db_validation_failures_do_not_include_the_connection_string()
@@ -148,6 +176,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                     Assert.DoesNotContain(raw, failure, StringComparison.Ordinal);
                 });
         }
+
+        /// <summary>
+        /// Contract: Prefixed environment variables reach runtime options.
+        /// </summary>
 
         [Fact]
         public void Prefixed_environment_variables_reach_runtime_options()
@@ -183,6 +215,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("Server=127.0.0.1;Database=nntp;User ID=nntparticles;Password=db-secret-xyz", nntpDb.ConnectionString);
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Fact]
         public void Leftover_name_environment_variable_does_not_bind_or_change_fqdn()
         {
@@ -198,6 +234,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var result = BackFillerTestOptions.CreateValidator().Validate(null, options);
             Assert.True(result.Succeeded);
         }
+
+        /// <summary>
+        /// The operation throws InvalidOperationException with the expected contract.
+        /// </summary>
 
         [Fact]
         public void Malformed_server_id_from_the_section_fails_at_bind()
@@ -215,6 +255,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain(BackFillerTestOptions.SecretPassword, ex.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Contract: Obsolete prefixes do not bind through the vector provider.
+        /// </summary>
+
         [Fact]
         public void Obsolete_prefixes_do_not_bind_through_the_vector_provider()
         {
@@ -228,6 +272,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.NotEqual("obsolete-user", configuration["BackFiller:RabbitMQ:Username"]);
             Assert.NotEqual(BackFillerTestOptions.SecretPassword, configuration["BackFiller:RabbitMQ:Password"]);
         }
+
+        /// <summary>
+        /// Contract: Vector prefix does not bind application identity.
+        /// </summary>
 
         [Fact]
         public void Vector_prefix_does_not_bind_application_identity()
@@ -243,6 +291,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(options.ServerId);
         }
 
+        /// <summary>Builds in-memory configuration from canonical environment variable names and values.</summary>
+        /// <param name="variables">Environment variable name/value pairs to map into configuration keys.</param>
         private static IConfiguration ConfigurationFromEnvironmentVariables(params (string Name, string Value)[] variables)
         {
             var pairs = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -256,6 +306,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 .Build();
         }
 
+        /// <summary>Maps a VECTOR-prefixed environment variable to a colon-separated configuration path.</summary>
+        /// <param name="environmentVariable">Canonical VECTOR name (asserted before mapping).</param>
         private static string ToConfigurationPath(string environmentVariable)
         {
             Assert.True(VectorEnvironment.IsCanonicalName(environmentVariable));
@@ -263,6 +315,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 .Replace("__", ":", StringComparison.Ordinal);
         }
 
+        /// <summary>Maps a BACKFILLER__ variable to a BackFiller: configuration path for negative binding tests.</summary>
+        /// <param name="environmentVariable">Must start with BACKFILLER__.</param>
         private static string ToApplicationConfigurationPath(string environmentVariable)
         {
             Assert.StartsWith("BACKFILLER__", environmentVariable, StringComparison.Ordinal);
@@ -270,6 +324,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return "BackFiller:" + remainder;
         }
 
+        /// <summary>Resolves <see cref="NntpDbOptions"/> the same way the host registers them.</summary>
+        /// <param name="configuration">Configuration root containing ConnectionStrings:NntpDB.</param>
         private static NntpDbOptions BindNntpDb(IConfiguration configuration)
         {
             var services = new ServiceCollection();
@@ -279,6 +335,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return provider.GetRequiredService<IOptions<NntpDbOptions>>().Value;
         }
 
+        /// <summary>Maps VECTOR, ConnectionStrings__NntpDB, or BACKFILLER__ names into configuration keys.</summary>
+        /// <param name="environmentVariable">Source environment variable name.</param>
         private static string ToAnyConfigurationPath(string environmentVariable)
         {
             if (VectorEnvironment.IsCanonicalName(environmentVariable))
@@ -297,13 +355,21 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return ToApplicationConfigurationPath(environmentVariable);
         }
 
+        /// <summary>Strips the VECTOR prefix and returns the configuration path used by binding tests.</summary>
+        /// <param name="environmentVariable">Canonical VECTOR environment variable.</param>
         private static string StripVectorPrefix(string environmentVariable) =>
             ToConfigurationPath(environmentVariable);
 
+        /// <summary>
+        /// Temporarily sets process environment variables and restores previous values on dispose.
+        /// </summary>
         private sealed class IsolatedEnvironment : IDisposable
         {
+            /// <summary>Environment values restored on dispose.</summary>
             private readonly (string Name, string? Previous)[] _previous;
 
+            /// <summary>Captures prior values and applies <paramref name="variables"/> to the process environment.</summary>
+            /// <param name="variables">Variables to set for the duration of the test.</param>
             public IsolatedEnvironment(params (string Name, string Value)[] variables)
             {
                 _previous = variables
@@ -315,17 +381,20 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 }
             }
 
+            /// <summary>Configuration with only <see cref="VectorEnvironment"/> variables loaded.</summary>
             public IConfiguration BuildPrefixedConfiguration() =>
                 new ConfigurationBuilder()
                     .AddVectorEnvironmentVariables()
                     .Build();
 
+            /// <summary>Configuration matching host order: environment variables then VECTOR overlay.</summary>
             public IConfiguration BuildHostConfiguration() =>
                 new ConfigurationBuilder()
                     .AddEnvironmentVariables()
                     .AddVectorEnvironmentVariables()
                     .Build();
 
+            /// <summary>Restores each environment variable to its captured previous value.</summary>
             public void Dispose()
             {
                 foreach (var (name, previous) in _previous)

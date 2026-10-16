@@ -35,7 +35,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         {
         }
 
-        /// <summary>Initializes a new instance of the <see cref="AcmeCaException"/> class.</summary>
+        /// <summary>Creates a CA failure with parsed problem metadata from an ACME problem document or transport layer.</summary>
         /// <param name="message">Operator-safe summary (no key material).</param>
         /// <param name="errorType">ACME problem type URN when present.</param>
         /// <param name="detail">CA-supplied detail when present.</param>
@@ -48,13 +48,13 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             StatusCode = statusCode;
         }
 
-        /// <summary>Gets the ACME problem type URN when the authority supplied one.</summary>
+        /// <summary>Problem <c>type</c> URN from the CA JSON body, when deserialized.</summary>
         internal string? ErrorType { get; }
 
-        /// <summary>Gets the human-readable detail when the authority supplied one.</summary>
+        /// <summary>Problem <c>detail</c> text from the CA, when present. Not logged with key material.</summary>
         internal string? Detail { get; }
 
-        /// <summary>Gets the HTTP status code when applicable.</summary>
+        /// <summary>HTTP status associated with the failure, when the transport recorded one.</summary>
         internal int? StatusCode { get; }
     }
 

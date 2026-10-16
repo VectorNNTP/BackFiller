@@ -5,9 +5,14 @@ using VectorNNTP.BackFiller.Tests.Retention;
 
 namespace VectorNNTP.BackFiller.Tests.Integration
 {
+    /// <summary>
+    /// Pipeline concurrency: settlement, provider refresh, RabbitMQ generation, retention TTL, and shutdown ordering.
+    /// </summary>
     public sealed class BackFillerConcurrencyIntegrationTests
     {
+        /// <summary>Canonical valid article bytes used across concurrency scenarios.</summary>
         private static readonly byte[] Payload = ArticleWorkTestArticles.Valid();
+        /// <summary>Provider connect failure requeues without ack; successful redelivery acks only the second delivery tag.</summary>
 
         [Fact]
         public async Task Retryable_failures_then_redelivery_acks_only_the_second_attempt()
@@ -45,6 +50,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(7UL, channel.Settlements[0].DeliveryTag);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
+        /// <summary>Oversized retention requeues; publish confirm failure after successful ingest still acks the message.</summary>
 
         [Fact]
         public async Task Retention_rejection_requeues_and_publish_failure_after_success_acks()
@@ -73,6 +79,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(ArticleWorkOutcome.Success, await recovered.ProcessCanonicalAsync(ok, deliveryTag: 9));
             Assert.True(Assert.Single(ok.Settlements).Acknowledge);
         }
+        /// <summary>In-flight NNTP work keeps the original pool lease while catalog refresh replaces the provider for later work.</summary>
 
         [Fact]
         public async Task Active_article_work_keeps_its_lease_when_the_provider_is_replaced()
@@ -106,6 +113,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(second, deliveryTag: 8));
             Assert.Contains(harness.Nntp.ConnectAttempts, static attempt => attempt.Host == "replaced.example.test");
         }
+        /// <summary>Empty account refresh during article fetch completes successfully and acks without corrupting the in-flight lease.</summary>
 
         [Fact]
         public async Task Provider_removal_during_active_work_does_not_corrupt_the_lease()
@@ -136,6 +144,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
                 ArticleWorkOutcome.Success,
                 await harness.ProcessCanonicalAsync(new FakeBackFillerRabbitMqChannel(1), deliveryTag: 8));
         }
+        /// <summary>Failed account refresh during active retrieval retains last-known provider catalog entry until work completes.</summary>
 
         [Fact]
         public async Task Mysql_outage_during_active_work_keeps_last_known_good_provider()
@@ -156,6 +165,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(ArticleWorkOutcome.Success, await processing.WaitAsync(TimeSpan.FromSeconds(2)));
             Assert.True(Assert.Single(channel.Settlements).Acknowledge);
         }
+        /// <summary>After RabbitMQ generation advances, stale channelStillCurrent prevents ack while retention retains the article once.</summary>
 
         [Fact]
         public async Task Stale_consumer_generation_cannot_ack_after_a_connection_replacement()
@@ -200,6 +210,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.True(Assert.Single(retry.Settlements).Acknowledge);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
+        /// <summary>Claim succeeds before TTL expiry; at expiry the message id is not found and byte accounting is zero.</summary>
 
         [Fact]
         public async Task Claim_before_and_after_expiry_follows_retention_ttl()
@@ -224,6 +235,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(0, harness.Retention.RetainedCount);
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
         }
+        /// <summary>Sweep during an open delivery claim zeroes authority bytes but captured claim bytes remain valid until release.</summary>
 
         [Fact]
         public async Task Sweep_while_a_delivery_claim_is_held_drops_authority_bytes_and_keeps_captured_bytes()
@@ -249,6 +261,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(0, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(0, harness.Retention.RetainedCount);
         }
+        /// <summary>Cancel during NNTP article retrieval yields Cancelled outcome with requeue and no publish.</summary>
 
         [Fact]
         public async Task Shutdown_during_article_retrieval_does_not_ack()
@@ -269,6 +282,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.True(channel.Settlements[0].Requeue);
             Assert.Empty(harness.PublishChannel.Publications);
         }
+        /// <summary>Cancelled account refresh aborts without removing the last-known-good provider from the catalog.</summary>
 
         [Fact]
         public async Task Shutdown_during_mysql_query_and_pool_replacement_is_cancellation_aware()
@@ -286,6 +300,7 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             harness.Accounts.Block.TrySetResult();
             Assert.True(harness.Catalog.TryGetProvider("Giganews", out _));
         }
+        /// <summary>Updating an unrelated backbone hostname reuses the existing Giganews pool instance.</summary>
 
         [Fact]
         public async Task Unrelated_provider_change_does_not_churn_the_active_backbone()

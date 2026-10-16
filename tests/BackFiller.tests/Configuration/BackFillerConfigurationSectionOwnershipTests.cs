@@ -15,6 +15,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
     /// </summary>
     public sealed class BackFillerConfigurationSectionOwnershipTests
     {
+        /// <summary>
+        /// Contract: Bind populates acme bind and dns settings from the backfiller section.
+        /// </summary>
+
         [Fact]
         public void Bind_populates_acme_bind_and_dns_settings_from_the_backfiller_section()
         {
@@ -34,6 +38,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("certs/", options.AcmeStateDir);
             Assert.Equal("backfiller01.usenet.ninja", options.Fqdn);
         }
+
+        /// <summary>
+        /// Contract: Production configuration declares bind address and tls port without bind port.
+        /// </summary>
 
         [Fact]
         public void Production_configuration_declares_bind_address_and_tls_port_without_bind_port()
@@ -71,6 +79,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.False(section.TryGetProperty("Name", out _));
         }
 
+        /// <summary>
+        /// Contract: Root level cloudflare zone id is not used by backfiller.
+        /// </summary>
+
         [Fact]
         public void Root_level_cloudflare_zone_id_is_not_used_by_backfiller()
         {
@@ -84,6 +96,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("0123456789abcdef0123456789abcdef", acme.CloudFlareZoneId);
             Assert.NotEqual("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", acme.CloudFlareZoneId);
         }
+
+        /// <summary>
+        /// Contract: Adapter does not copy or require cleartext bind port.
+        /// </summary>
 
         [Fact]
         public void Adapter_does_not_copy_or_require_cleartext_bind_port()
@@ -103,6 +119,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.NotEqual(acme.BindPort, runtime.BindPortTls);
         }
 
+        /// <summary>
+        /// Contract: Root level acme directory url is not used by backfiller.
+        /// </summary>
+
         [Fact]
         public void Root_level_acme_directory_url_is_not_used_by_backfiller()
         {
@@ -113,6 +133,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 nestedValue: "https://acme-staging-v02.api.letsencrypt.org/directory",
                 actual: static (identity, acme, _) => acme.AcmeDirectoryUrl);
         }
+
+        /// <summary>
+        /// Contract: Root level bind address is not used by backfiller.
+        /// </summary>
 
         [Fact]
         public void Root_level_bind_address_is_not_used_by_backfiller()
@@ -129,6 +153,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("203.0.113.88", acme.BindAddress);
         }
 
+        /// <summary>
+        /// Contract: Root level bind port tls is not used by backfiller.
+        /// </summary>
+
         [Fact]
         public void Root_level_bind_port_tls_is_not_used_by_backfiller()
         {
@@ -140,6 +168,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 actual: static (_, acme, runtime) => acme.BindPortTls.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 runtimeActual: static runtime => runtime.BindPortTls.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
+
+        /// <summary>
+        /// Contract: Root level dns suffix is not used by backfiller.
+        /// </summary>
 
         [Fact]
         public void Root_level_dns_suffix_is_not_used_by_backfiller()
@@ -158,6 +190,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("backfiller01.usenet.ninja", runtime.Fqdn);
             Assert.NotEqual("root-must-not-bind.example", acme.DnsSuffix);
         }
+
+        /// <summary>
+        /// Contract: Nested backfiller values drive runtime and common options.
+        /// </summary>
 
         [Fact]
         public void Nested_backfiller_values_drive_runtime_and_common_options()
@@ -203,6 +239,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("news.usenet.ninja", runtime.CertificateDomainNames);
         }
 
+        /// <summary>
+        /// Contract: Host runtime options use nested backfiller values not root duplicates.
+        /// </summary>
+
         [Fact]
         public void Host_runtime_options_use_nested_backfiller_values_not_root_duplicates()
         {
@@ -230,6 +270,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("198.51.100.10", acme.BindAddress);
         }
 
+        /// <summary>
+        /// Host build or options resolution fails validation before the process runs.
+        /// </summary>
+
         [Fact]
         public void Host_validate_on_start_fails_when_nested_bind_port_tls_is_zero()
         {
@@ -244,6 +288,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains("BindPortTls", ex.Message, StringComparison.Ordinal);
             Assert.Contains("TLS-only", ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: Nested tls only validation fails when bind port tls is zero.
+        /// </summary>
 
         [Fact]
         public void Nested_tls_only_validation_fails_when_bind_port_tls_is_zero()
@@ -260,6 +308,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(tlsOnly.Failed);
             Assert.Contains("TLS-only", tlsOnly.Failures!.Single(), StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Nested_bind_address_validation_still_rejects_unassigned_addresses()
@@ -283,6 +335,15 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static f => f.Contains("198.51.100.10", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Binds both a root key and the nested key, then asserts the nested value is the one that survives.
+        /// </summary>
+        /// <param name="rootKey">Unprefixed key that must not win.</param>
+        /// <param name="rootValue">Value placed on <paramref name="rootKey"/>.</param>
+        /// <param name="nestedKey">Section key that must win.</param>
+        /// <param name="nestedValue">Expected bound value.</param>
+        /// <param name="actual">Reads the bound value from identity, ACME, or runtime options.</param>
+        /// <param name="runtimeActual">Optional second read of the runtime snapshot.</param>
         private static void AssertIgnoredRootValue(
             string rootKey,
             string rootValue,
@@ -303,6 +364,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>Binds identity, ACME adapter output, and runtime options from in-memory pairs.</summary>
+        /// <param name="pairs">Configuration keys and values under test.</param>
         private static (BackFillerOptions Identity, AcmeCloudflareOptions Acme, BackFillerRuntimeOptions Runtime) BindThroughAdapter(
             Dictionary<string, string?> pairs)
         {
@@ -320,6 +383,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return (identity, acme, runtime);
         }
 
+        /// <summary>Copies <c>ConnectionStrings:NntpDB</c> into options. An absent key becomes an empty string.</summary>
+        /// <param name="configuration">Configuration under test.</param>
         private static NntpDbOptions BindNntpDb(IConfiguration configuration)
         {
             var nntpDb = new NntpDbOptions();
@@ -327,6 +392,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return nntpDb;
         }
 
+        /// <summary>
+        /// Builds a host from <paramref name="pairs"/> with assign-all addresses, a no-op DNS reconciler, 64 GiB of memory, and fake RabbitMQ and provider accounts.
+        /// </summary>
+        /// <param name="pairs">In-memory configuration. This host does not read the production JSON file.</param>
         private static IHost CreateHost(Dictionary<string, string?> pairs)
         {
             var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings
@@ -349,6 +418,8 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return builder.Build();
         }
 
+        /// <summary>Walks parents of the test output directory until <c>src/BackFiller/VectorNNTP.BackFiller.json</c> exists.</summary>
+        /// <exception cref="FileNotFoundException">No parent contains that file.</exception>
         private static string FindProductionConfigurationFile()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
