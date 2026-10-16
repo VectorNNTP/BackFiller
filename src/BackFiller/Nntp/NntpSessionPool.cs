@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Nntp
@@ -97,11 +98,24 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         private Task? _replenishTask;
 
+        /// <summary>No caller is inside <see cref="NotifyActiveSessionCountChanged"/>.</summary>
+        private const int CapacityNotificationIdle = 0;
+
+        /// <summary>One caller is invoking <see cref="ActiveSessionCountChanged"/>.</summary>
+        private const int CapacityNotificationActive = 1;
+
         /// <summary>
-        /// One while <see cref="NotifyActiveSessionCountChanged"/> is invoking subscribers.
-        /// A reentrant call returns without invoking them again, so a subscriber cannot recurse into retirement.
+        /// A notification is in progress and a later state change has requested another delivery.
+        /// The active caller replays after the current callback returns.
         /// </summary>
-        private int _notifyingActiveCount;
+        private const int CapacityNotificationPending = 2;
+
+        /// <summary>
+        /// <see cref="CapacityNotificationIdle"/>, <see cref="CapacityNotificationActive"/>, or
+        /// <see cref="CapacityNotificationPending"/>. Coordinated with <see cref="Interlocked"/> so a callback
+        /// does not run nested, and a state change during that callback is still delivered afterward.
+        /// </summary>
+        private int _capacityNotification;
 
         /// <summary>
         /// Completes when no lease is outstanding. Replaced with a new incomplete source when <see cref="Issue"/> raises the count from zero.
@@ -197,10 +211,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Raised after the active session count may have changed.</summary>
         /// <remarks>
         /// Invoked synchronously on the caller that changed membership or finished a successful connect.
+        /// Subscribers read <see cref="ActiveSessionCount"/> themselves. A callback is not nested inside another
+        /// callback. A state change that requests notification while a callback is running is delivered again
+        /// after that callback returns, so a retirement callback cannot hide a replacement session that became ready.
         /// A subscriber exception during successful publication fails that publication: the pool retires the session
         /// and the caller does not receive it. A subscriber exception during retirement is contained after the
         /// reservation is released, so disposal still runs and the reservation is not released twice.
-        /// A reentrant invocation from a subscriber is ignored.
         /// </remarks>
         internal event Action? ActiveSessionCountChanged;
 
@@ -937,8 +953,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="session">Session already removed from <see cref="_live"/>. Its connection number is used only in a diagnostic.</param>
         /// <param name="reason">Text passed to <see cref="NntpLogMessages.SessionRetired"/>.</param>
         /// <remarks>
-        /// Both calls are observers and may throw any exception. The exceptions are contained here so
-        /// <see cref="RetireSessionAsync"/> still disposes the session once and does not enter retirement again.
+        /// Both calls are observers. Ordinary failures are contained so <see cref="RetireSessionAsync"/> still disposes
+        /// the session once and does not enter retirement again. Process-integrity failures propagate.
         /// A logger that fails is not asked to record its own failure. A subscriber failure is recorded when the logger still works.
         /// </remarks>
         private void SignalSessionRetired(NntpProviderSession session, string reason)
@@ -947,18 +963,16 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 NntpLogMessages.SessionRetired(_logger, _provider.Backbone, reason);
             }
-            // codeql[cs/catch-of-all-exceptions] Retirement accounting is already committed. A logger failure must not skip disposal or replace the caller's exception.
-            catch (Exception)
+            catch (Exception diagnostic) when (!IsProcessIntegrityFailure(diagnostic))
             {
-                // The failing logger cannot record this diagnostic. Disposal still runs.
+                // Accounting is already committed. The failing logger cannot record this diagnostic. Disposal still runs.
             }
 
             try
             {
                 NotifyActiveSessionCountChanged();
             }
-            // codeql[cs/catch-of-all-exceptions] Subscribers are an open set. Containing this call prevents recursive retirement and a second decrement.
-            catch (Exception observer)
+            catch (Exception observer) when (!IsProcessIntegrityFailure(observer))
             {
                 TryLogSessionEstablishmentFailed(session.ConnectionNumber, observer.GetType().Name);
             }
@@ -1054,11 +1068,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>
         /// <see cref="NntpProviderConnectException"/> and <see cref="SocketException"/> do not escape
         /// <see cref="FillDeficitAsync"/>: the session classifies a socket failure, and
-        /// <see cref="TryCreateIdleSessionAsync"/> consumes the resulting connect exception. Catching them here would
-        /// not run. An exception that does escape is an open set. It is logged at warning and the next pass begins
-        /// with another <see cref="ReplenishInterval"/> wait inside <see cref="RunReplenishAsync"/>, so the retry is
-        /// not immediate. Shutdown returns without that wait. <see cref="DisposeCoreAsync"/> still observes this task
-        /// if the supervisor itself fails.
+        /// <see cref="TryCreateIdleSessionAsync"/> consumes the resulting connect exception and
+        /// <see cref="InvalidOperationException"/>. Catching those types here would not run.
+        /// Any other non-process-integrity exception is an open set. It is logged at warning and the next pass
+        /// begins with another <see cref="ReplenishInterval"/> wait inside <see cref="RunReplenishAsync"/>, so the
+        /// retry is not immediate and the pool is not left underfilled. Process-integrity failures fault this task.
+        /// <see cref="DisposeCoreAsync"/> logs that fault and still retires sessions. Shutdown returns without another pass.
         /// </remarks>
         private async Task SuperviseReplenishAsync(CancellationToken cancellationToken)
         {
@@ -1074,8 +1089,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     ShutdownObservations.Canceled(_logger, "session fill");
                     return;
                 }
-                // codeql[cs/catch-of-all-exceptions] Unexpected fill failures are an open set. This supervisor logs each one and waits one replenish interval before the next pass. Shutdown does not retry.
-                catch (Exception ex)
+                catch (Exception ex) when (!IsProcessIntegrityFailure(ex))
                 {
                     NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
                 }
@@ -1087,9 +1101,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <param name="cancellationToken">Shutdown token forwarded to the fill.</param>
         /// <remarks>
-        /// Nothing awaits this task, so every exception is contained here. Cancellation of
-        /// <paramref name="cancellationToken"/> is logged as shutdown and is not a replenishment failure.
-        /// Any other exception is logged and does not replace an exception already thrown to an awaited caller.
+        /// Nothing awaits this task. Shutdown cancellation is logged and is not a replenishment failure.
+        /// Any other non-process-integrity exception is logged and does not replace an exception already thrown to an
+        /// awaited caller. Process-integrity failures fault this unawaited task instead of being discarded.
         /// </remarks>
         private async Task FillDeficitObservedAsync(CancellationToken cancellationToken)
         {
@@ -1101,8 +1115,8 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 ShutdownObservations.Canceled(_logger, "observed session fill");
             }
-            // codeql[cs/catch-of-all-exceptions] Keepalive and replenishment failures must retire or log the session and must not escape the background task.
-            catch (Exception ex)
+            // codeql[cs/catch-of-all-exceptions] This unawaited fill has no caller. Non-process-integrity failures are logged so the task does not become unobserved. Process-integrity failures are excluded by the filter.
+            catch (Exception ex) when (!IsProcessIntegrityFailure(ex))
             {
                 NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
             }
@@ -1179,35 +1193,112 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
-        /// Invokes <see cref="ActiveSessionCountChanged"/> synchronously.
-        /// A call made while a subscriber is already running returns without invoking subscribers again.
+        /// Invokes <see cref="ActiveSessionCountChanged"/> synchronously for the latest pool state.
         /// </summary>
         /// <remarks>
-        /// The guard is cleared when the invocation returns or throws. A later retirement notification still runs.
-        /// The guard only blocks a nested invocation, so a subscriber cannot re-enter cleanup through this method.
+        /// One callback runs at a time, so a subscriber cannot re-enter notification on the same stack.
+        /// A caller that arrives during that callback records a pending delivery and returns. The active caller
+        /// checks for that pending delivery after the callback returns, including when the callback throws, and
+        /// invokes subscribers again. The pending flag is cleared only by the active caller, and the idle transition
+        /// loses to a concurrent pending mark, so an update that arrives as the callback finishes is replayed or
+        /// starts a new delivery. Subscribers are not invoked while this method holds a pool lock.
+        /// An ordinary subscriber exception is replayed past, then rethrown, so publication can still retire the
+        /// session. Process-integrity failures propagate without a replay.
         /// </remarks>
+        /// <exception cref="Exception">The first ordinary subscriber exception from this delivery, after any pending replay.</exception>
         private void NotifyActiveSessionCountChanged()
         {
-            if (Interlocked.CompareExchange(ref _notifyingActiveCount, 1, 0) != 0)
+            if (!TryBecomeCapacityNotifier())
             {
                 return;
             }
 
+            Exception? firstObserverFailure = null;
+            var released = false;
             try
             {
-                ActiveSessionCountChanged?.Invoke();
+                while (true)
+                {
+                    try
+                    {
+                        ActiveSessionCountChanged?.Invoke();
+                    }
+                    catch (Exception observer) when (!IsProcessIntegrityFailure(observer))
+                    {
+                        firstObserverFailure ??= observer;
+                    }
+
+                    if (Interlocked.CompareExchange(
+                            ref _capacityNotification,
+                            CapacityNotificationActive,
+                            CapacityNotificationPending) == CapacityNotificationPending)
+                    {
+                        continue;
+                    }
+
+                    if (Interlocked.CompareExchange(
+                            ref _capacityNotification,
+                            CapacityNotificationIdle,
+                            CapacityNotificationActive) == CapacityNotificationActive)
+                    {
+                        released = true;
+                        break;
+                    }
+                }
             }
             finally
             {
-                Interlocked.Exchange(ref _notifyingActiveCount, 0);
+                if (!released)
+                {
+                    Interlocked.Exchange(ref _capacityNotification, CapacityNotificationIdle);
+                }
+            }
+
+            if (firstObserverFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(firstObserverFailure).Throw();
+            }
+        }
+
+        /// <summary>
+        /// Becomes the single caller running <see cref="NotifyActiveSessionCountChanged"/>, or records a pending delivery.
+        /// </summary>
+        /// <returns><see langword="true"/> when the caller must invoke subscribers. <see langword="false"/> when another caller will deliver this update.</returns>
+        private bool TryBecomeCapacityNotifier()
+        {
+            while (true)
+            {
+                var state = Volatile.Read(ref _capacityNotification);
+                if (state == CapacityNotificationIdle
+                    && Interlocked.CompareExchange(
+                        ref _capacityNotification,
+                        CapacityNotificationActive,
+                        CapacityNotificationIdle) == CapacityNotificationIdle)
+                {
+                    return true;
+                }
+
+                if (state == CapacityNotificationPending)
+                {
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(
+                        ref _capacityNotification,
+                        CapacityNotificationPending,
+                        CapacityNotificationActive) == CapacityNotificationActive)
+                {
+                    return false;
+                }
             }
         }
 
         /// <summary>Writes a cancelled-establishment diagnostic. A logger failure is ignored.</summary>
         /// <param name="connectionNumber">Connection number for the attempt being abandoned.</param>
         /// <remarks>
-        /// Called before reservation release. Swallowing the logger failure lets that release run and preserves the
-        /// original creation exception. A second log would call the same failing logger.
+        /// Called before reservation release. <see cref="ILogger.Log{TState}"/> has no closed exception set.
+        /// Ordinary logger failures are ignored so they cannot skip that release or replace the creation exception.
+        /// Process-integrity failures propagate. A second log would call the same failing logger.
         /// </remarks>
         private void TryLogSessionEstablishmentCancelled(int connectionNumber)
         {
@@ -1215,8 +1306,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
             }
-            // codeql[cs/catch-of-all-exceptions] The logger is an observer. Its failure must not skip reservation release or replace the creation exception.
-            catch (Exception)
+            catch (Exception diagnostic) when (!IsProcessIntegrityFailure(diagnostic))
             {
                 // The failing logger cannot record this diagnostic.
             }
@@ -1226,8 +1316,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="connectionNumber">Connection number for the attempt. Already released when this records cleanup.</param>
         /// <param name="reason">Exception type name or connect-failure text. No credentials or socket message.</param>
         /// <remarks>
-        /// Used both before rollback and after accounting is committed. Swallowing the logger failure keeps the
-        /// original exception and lets disposal continue. A second log would call the same failing logger.
+        /// Used both before rollback and after accounting is committed. <see cref="ILogger.Log{TState}"/> has no closed
+        /// exception set. Ordinary logger failures are ignored so the original establishment outcome is preserved and
+        /// disposal can continue. Process-integrity failures propagate. A second log would call the same failing logger.
         /// </remarks>
         private void TryLogSessionEstablishmentFailed(int connectionNumber, string reason)
         {
@@ -1235,12 +1326,31 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 NntpLogMessages.SessionEstablishmentFailed(_logger, _provider.Backbone, connectionNumber, reason);
             }
-            // codeql[cs/catch-of-all-exceptions] The logger is an observer. Its failure must not skip reservation release or replace the creation exception.
-            catch (Exception)
+            catch (Exception diagnostic) when (!IsProcessIntegrityFailure(diagnostic))
             {
                 // The failing logger cannot record this diagnostic.
             }
         }
+
+        /// <summary>Reports whether <paramref name="exception"/> must leave an observer or supervisor boundary.</summary>
+        /// <param name="exception">Failure from a subscriber, logger, or replenishment pass.</param>
+        /// <returns>
+        /// <see langword="true"/> for <see cref="OutOfMemoryException"/>, <see cref="StackOverflowException"/>,
+        /// <see cref="AccessViolationException"/>, <see cref="AppDomainUnloadedException"/>,
+        /// <see cref="BadImageFormatException"/>, and <see cref="CannotUnloadAppDomainException"/>.
+        /// </returns>
+        /// <remarks>
+        /// Subscriber and logger failures are an open set, so the contained failures are every other exception.
+        /// These six are the process-integrity failures that must not be logged and continued.
+        /// <see cref="StackOverflowException"/> is not reliably catchable; the check documents the policy when a runtime surfaces it.
+        /// </remarks>
+        private static bool IsProcessIntegrityFailure(Exception exception) =>
+            exception is OutOfMemoryException
+                or StackOverflowException
+                or AccessViolationException
+                or AppDomainUnloadedException
+                or BadImageFormatException
+                or CannotUnloadAppDomainException;
 
         /// <summary>Reserves the lowest unused connection number from 1 through the current max.</summary>
         /// <returns>The reserved one-based slot.</returns>

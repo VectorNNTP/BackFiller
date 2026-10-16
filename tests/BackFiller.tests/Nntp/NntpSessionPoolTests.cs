@@ -477,6 +477,102 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// A retirement callback that blocks cannot drop a replacement session's capacity notification.
+        /// The subscriber throws after the replacement is published, and a later callback still reports that session.
+        /// </summary>
+
+        [Fact]
+
+        public async Task Capacity_notification_during_a_blocked_retirement_callback_is_delivered()
+        {
+            var delays = new ReplenishDelaySource();
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            await using var pool = CreatePool(factory, max: 1, time: delays);
+            var retirementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var recoveredCapacity = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var observations = new ConcurrentQueue<int>();
+            pool.ActiveSessionCountChanged += () =>
+            {
+                var count = pool.ActiveSessionCount;
+                observations.Enqueue(count);
+                if (count == 0 && retirementEntered.TrySetResult())
+                {
+                    if (!releaseRetirement.Task.Wait(TimeSpan.FromSeconds(5)))
+                    {
+                        throw new TimeoutException("Retirement callback was not released.");
+                    }
+
+                    throw new InvalidOperationException("retirement subscriber");
+                }
+
+                if (count > 0 && retirementEntered.Task.IsCompleted)
+                {
+                    recoveredCapacity.TrySetResult();
+                }
+            };
+
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+            Assert.Equal(1, pool.ActiveSessionCount);
+
+            var retirement = Task.Run(async () =>
+            {
+                await using var lease = await pool.AcquireAsync(CancellationToken.None);
+                lease.Retire();
+            });
+
+            await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+            releaseRetirement.TrySetResult();
+            await recoveredCapacity.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(1, pool.ActiveSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(0, pool.ActiveLeaseCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+            Assert.Contains(observations, static count => count == 1);
+            Assert.Equal(pool.ActiveSessionCount, observations.Last());
+
+            await using var recovered = await pool.AcquireAsync(CancellationToken.None);
+            Assert.Equal(1, recovered.Session.ConnectionNumber);
+            Assert.Equal(NntpSessionState.Ready, recovered.Session.State);
+        }
+
+        /// <summary>
+        /// A logger that fails while a connect failure is recorded does not replace that failure or keep the reservation.
+        /// </summary>
+
+        [Fact]
+
+        public async Task Logger_failure_during_connect_failure_preserves_the_connect_exception_and_releases_capacity()
+        {
+            var factory = new ScriptedNntpTransportFactory
+            {
+                ConnectException = new SocketException((int)SocketError.ConnectionRefused),
+            };
+            using var gate = CreateEstablishmentGate(1);
+            await using var pool = CreatePool(factory, max: 1, establishment: gate, logger: new ThrowingEstablishmentLogger());
+
+            var failure = await Assert.ThrowsAsync<NntpProviderConnectException>(
+                () => pool.AcquireAsync(CancellationToken.None));
+            Assert.Equal(ArticleRetrievalKind.ProviderFailure, failure.Kind);
+            Assert.Equal(nameof(SocketException), failure.Message);
+            AssertNoReservedCapacity(pool);
+
+            factory.ConnectException = null;
+            EnqueueReadyServers(factory, count: 1);
+            await using var recovered = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, recovered.Session.ConnectionNumber);
+            Assert.Equal(NntpSessionState.Ready, recovered.Session.State);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+        }
+
+        /// <summary>
         /// Cancelling while the new session is registered but still waiting for the establishment gate
         /// removes that registration once. The same connection number can be acquired afterward.
         /// </summary>
@@ -965,6 +1061,53 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 {
                     Dispose();
                     return ValueTask.CompletedTask;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Logger that throws from establishment and retirement diagnostics and accepts every other message.
+        /// </summary>
+        private sealed class ThrowingEstablishmentLogger : ILogger
+        {
+            /// <inheritdoc />
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => EmptyScope.Instance;
+
+            /// <inheritdoc />
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            /// <summary>
+            /// Throws <see cref="InvalidOperationException"/> for establishment-failure, establishment-cancellation,
+            /// and session-retirement messages. Other messages are ignored so transport disposal can finish.
+            /// </summary>
+            /// <inheritdoc />
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                ArgumentNullException.ThrowIfNull(formatter);
+                var message = formatter(state, exception);
+                if (message.Contains("establishment failed", StringComparison.Ordinal)
+                    || message.Contains("establishment cancelled", StringComparison.Ordinal)
+                    || message.Contains("session retired", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("logger failed");
+                }
+            }
+
+            /// <summary>Scope returned by <see cref="BeginScope{TState}"/>. Disposal does nothing.</summary>
+            private sealed class EmptyScope : IDisposable
+            {
+                /// <summary>Shared scope instance.</summary>
+                internal static EmptyScope Instance { get; } = new();
+
+                /// <inheritdoc />
+                public void Dispose()
+                {
                 }
             }
         }
