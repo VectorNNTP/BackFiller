@@ -4,6 +4,7 @@ using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Networking;
 using VectorNNTP.BackFiller.Networking.Certificates;
 using VectorNNTP.BackFiller.Configuration;
+using VectorNNTP.BackFiller.Hosting.Systemd;
 
 namespace VectorNNTP.BackFiller.Hosting
 {
@@ -73,7 +74,9 @@ namespace VectorNNTP.BackFiller.Hosting
                     sp.GetRequiredService<AcmeComponentFactory>(),
                     sp.GetRequiredService<IAcmeCertificatePublisher>(),
                     sp.GetRequiredService<IAcmeCertificateReadiness>(),
-                    sp.GetRequiredService<ILogger<AcmeCertificateService>>()));
+                    sp.GetRequiredService<ILogger<AcmeCertificateService>>(),
+                    sp.GetService<TimeProvider>() ?? TimeProvider.System,
+                    sp.GetRequiredService<IApplicationHealth>()));
 
             return services;
         }

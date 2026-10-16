@@ -3,8 +3,10 @@ using VectorNNTP.BackFiller.Hosting.Systemd;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {
+    /// <summary>SystemdRuntime watchdog parsing and safe behavior when env configuration is missing or invalid.</summary>
     public sealed class SystemdRuntimeDetectionTests
     {
+        /// <summary>On non-Linux, watchdog env vars do not enable IsWatchdogConfigured (Linux CI skips the early return path).</summary>
         [Fact]
         public void NonLinux_DisablesWatchdogEvenIfEnvironmentLooksConfigured()
         {
@@ -25,6 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(runtime.IsWatchdogConfigured);
             Assert.Null(runtime.WatchdogTimeout);
         }
+        /// <summary>Absent WATCHDOG_USEC yields no timeout and TryParseWatchdogTimeout reports the documented reason.</summary>
 
         [Fact]
         public void MissingWatchdogConfiguration_IsSafe()
@@ -46,6 +49,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Null(parsed);
             Assert.Equal("WATCHDOG_USEC not set", reason);
         }
+        /// <summary>Invalid WATCHDOG_USEC is ignored with parse reason and warning log regardless of OS detection path.</summary>
 
         [Theory]
         [InlineData("not-a-number")]
@@ -74,6 +78,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 logs.Messages,
                 message => message.Contains("WATCHDOG_USEC is not a positive integer", StringComparison.Ordinal));
         }
+        /// <summary>Positive WATCHDOG_USEC microseconds map to the expected TimeSpan in TryParseWatchdogTimeout.</summary>
 
         [Fact]
         public void ValidWatchdogUsec_IsAccepted_ByTheLinuxParser()
@@ -87,6 +92,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(TimeSpan.FromSeconds(5), parsed);
             Assert.Equal("WATCHDOG_USEC accepted", reason);
         }
+        /// <summary>Fake runtime factory profiles distinguish systemd service, Linux console, and non-Linux hosts.</summary>
 
         [Fact]
         public void FakeDetection_DistinguishesSystemdFromConsoleAndNonLinux()
@@ -99,29 +105,34 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.True(console.IsLinux && !console.IsSystemdService && !console.IsWatchdogConfigured);
             Assert.True(!windows.IsLinux && !windows.IsSystemdService && !windows.IsWatchdogConfigured);
         }
-    }
 
-    internal sealed class EnvironmentVariableScope : IDisposable
-    {
-        private readonly (string Name, string? Previous)[] _previous;
-
-        public EnvironmentVariableScope(params (string Name, string? Value)[] values)
+        /// <summary>Temporarily sets process environment variables and restores prior values on dispose.</summary>
+        private sealed class EnvironmentVariableScope : IDisposable
         {
-            _previous = values
-                .Select(v => (v.Name, Environment.GetEnvironmentVariable(v.Name)))
-                .ToArray();
+            /// <summary>Captured values to restore in <see cref="Dispose"/>.</summary>
+            private readonly (string Name, string? Previous)[] _previous;
 
-            foreach (var (name, value) in values)
+            /// <summary>Applies <paramref name="values"/> for the scope lifetime.</summary>
+            /// <param name="values">Variables to set; previous values are saved.</param>
+            internal EnvironmentVariableScope(params (string Name, string? Value)[] values)
             {
-                Environment.SetEnvironmentVariable(name, value);
+                _previous = values
+                    .Select(v => (v.Name, Environment.GetEnvironmentVariable(v.Name)))
+                    .ToArray();
+
+                foreach (var (name, value) in values)
+                {
+                    Environment.SetEnvironmentVariable(name, value);
+                }
             }
-        }
 
-        public void Dispose()
-        {
-            foreach (var (name, previous) in _previous)
+            /// <inheritdoc />
+            public void Dispose()
             {
-                Environment.SetEnvironmentVariable(name, previous);
+                foreach (var (name, previous) in _previous)
+                {
+                    Environment.SetEnvironmentVariable(name, previous);
+                }
             }
         }
     }

@@ -6,13 +6,13 @@ namespace VectorNNTP.BackFiller.Cloudflare
     internal static class CloudflareDnsRecordTypes
     {
         /// <summary>IPv4 address record.</summary>
-        public const string A = "A";
+        internal const string A = "A";
 
         /// <summary>IPv6 address record.</summary>
-        public const string AAAA = "AAAA";
+        internal const string AAAA = "AAAA";
 
         /// <summary>Text record (used for ACME DNS-01 challenges).</summary>
-        public const string TXT = "TXT";
+        internal const string TXT = "TXT";
     }
 
     /// <summary>A DNS record returned by the Cloudflare API.</summary>

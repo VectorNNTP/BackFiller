@@ -4,6 +4,8 @@ namespace VectorNNTP.BackFiller.Logging
     /// Source-generated structured log messages for systemd notify and watchdog events.
     /// </summary>
     /// <remarks>
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/>.
+    /// Host log filtering can suppress a call without changing runtime behavior.
     /// An <see cref="Exception"/> parameter is stored on the event and is not thrown by the log method.
     /// Call sites live under <c>VectorNNTP.BackFiller.Hosting.Systemd</c>.
     /// </remarks>

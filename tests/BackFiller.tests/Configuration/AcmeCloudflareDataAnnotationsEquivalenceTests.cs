@@ -16,6 +16,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
     /// </summary>
     public sealed class AcmeCloudflareDataAnnotationsEquivalenceTests
     {
+        /// <summary>
+        /// Contract: Host validate on start succeeds for valid configuration.
+        /// </summary>
+
         [Fact]
         public void Host_validate_on_start_succeeds_for_valid_configuration()
         {
@@ -28,6 +32,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.InRange(acme.AcmeRenewalThresholdDays, 1, 90);
             Assert.InRange(acme.BindPortTls, 1, 65535);
         }
+
+        /// <summary>
+        /// Contract: Host validate on start does not require the shared api key.
+        /// </summary>
 
         [Fact]
         public void Host_validate_on_start_does_not_require_the_shared_api_key()
@@ -47,6 +55,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(rabbit.Password);
         }
 
+        /// <summary>
+        /// Contract: Host validate on start does not require the shared zone id.
+        /// </summary>
+
         [Fact]
         public void Host_validate_on_start_does_not_require_the_shared_zone_id()
         {
@@ -57,6 +69,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var options = host.Services.GetRequiredService<IOptions<BackFillerOptions>>().Value;
             Assert.Equal(" ", options.CloudFlareZoneId);
         }
+
+        /// <summary>
+        /// Contract: Host validate on start does not reject shared renewal days.
+        /// </summary>
 
         [Theory]
         [InlineData(0)]
@@ -70,6 +86,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             var options = host.Services.GetRequiredService<IOptions<BackFillerOptions>>().Value;
             Assert.Equal(days, options.AcmeRenewalThresholdDays);
         }
+
+        /// <summary>
+        /// Host build or options resolution fails validation before the process runs.
+        /// </summary>
 
         [Theory]
         [InlineData(-1)]
@@ -85,6 +105,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             });
             Assert.Contains(nameof(AcmeCloudflareOptions.BindPortTls), ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: Explicit validator rejects each former data annotation failure.
+        /// </summary>
 
         [Fact]
         public void Explicit_validator_rejects_each_former_data_annotation_failure()
@@ -113,6 +137,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(new TlsOnlyAcmeCloudflareOptionsValidator().Validate(null, valid).Succeeded);
         }
 
+        /// <summary>
+        /// Builds a BackFiller host with in-memory configuration and infrastructure fakes for validate-on-start assertions.
+        /// </summary>
+        /// <param name="pairs">Configuration key/value pairs merged before hosting is added.</param>
         private static IHost CreateHost(Dictionary<string, string?> pairs)
         {
             var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings

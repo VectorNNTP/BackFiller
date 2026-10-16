@@ -16,29 +16,72 @@ namespace VectorNNTP.BackFiller.Logging
     /// When the interval rolls, this sink closes the active file, compresses that path, then opens the next file.
     /// The active path is never compressed or deleted. One lock covers roll, compression, and retention.
     /// </remarks>
-    public sealed class GzipRollingFileSink : ILogEventSink, IFlushableFileSink, IDisposable, ISetLoggingFailureListener
+    internal sealed class GzipRollingFileSink : ILogEventSink, IFlushableFileSink, IDisposable, ISetLoggingFailureListener
     {
+        /// <summary>Serializes roll, compression, retention, emit, and dispose. Callers outside this lock are not synchronized.</summary>
         private readonly object _sync = new();
+
+        /// <summary>Absolute directory that receives active and archived logs.</summary>
         private readonly string _directory;
+
+        /// <summary>File name without extension, taken from the configured rolling path.</summary>
         private readonly string _filenamePrefix;
+
+        /// <summary>Extension of the active file, including the leading dot.</summary>
         private readonly string _filenameSuffix;
+
+        /// <summary>Matches one period and optional sequence in a file name under <see cref="_directory"/>.</summary>
         private readonly Regex _filenameMatcher;
+
+        /// <summary>How <see cref="Checkpoint"/> and <see cref="NextCheckpoint"/> truncate the clock.</summary>
         private readonly RollingInterval _interval;
+
+        /// <summary>Invariant format used for the period token. Empty when the interval is infinite.</summary>
         private readonly string _periodFormat;
+
+        /// <summary>Formatter for the active file only.</summary>
         private readonly ITextFormatter _textFormatter;
+
+        /// <summary>Active-file size cap. Null is unlimited.</summary>
         private readonly long? _fileSizeLimitBytes;
+
+        /// <summary>Maximum retained period/sequence slots, including the active file. Null keeps every slot.</summary>
         private readonly int? _retainedFileCountLimit;
+
+        /// <summary>Whether the active writer buffers until flush.</summary>
         private readonly bool _buffered;
+
+        /// <summary>Whether a full active file rolls to the next sequence inside the same period.</summary>
         private readonly bool _rollOnFileSizeLimit;
+
+        /// <summary>Text encoding passed to the active writer. Null selects UTF-8 without a BOM.</summary>
         private readonly Encoding? _encoding;
+
+        /// <summary>Compression used when a file becomes inactive. The active path is never compressed.</summary>
         private readonly ILogFileCompressor _compressor;
+
+        /// <summary>Called with the uncompressed path after it is closed and before compression. Exceptions are logged and do not skip compression.</summary>
         private readonly Action<string>? _onCompletedFile;
+
+        /// <summary>Clock for roll checkpoints.</summary>
         private readonly TimeProvider _time;
+
+        /// <summary>Serilog failure listener. Assigned under <see cref="_sync"/> and may be null.</summary>
         private ILoggingFailureListener? _failureListener;
+
+        /// <summary>Open active file. Null before the first emit and after dispose.</summary>
         private ActiveLogFileWriter? _current;
+
+        /// <summary>Path of <see cref="_current"/>. Compared ordinal-ignore-case so the active file is not archived or deleted.</summary>
         private string? _currentPath;
+
+        /// <summary>Instant at which the current period ends. Null when the interval is infinite or no file is open.</summary>
         private DateTime? _nextCheckpoint;
+
+        /// <summary>Size-roll sequence of the active file. Null is the unsequenced file for the period.</summary>
         private int? _currentSequence;
+
+        /// <summary>True after the first <see cref="Dispose"/>. Later calls return immediately.</summary>
         private bool _disposed;
 
         /// <summary>Initializes a rolling gzip file sink.</summary>
@@ -59,7 +102,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// Exceptions are logged and do not skip compression.
         /// </param>
         /// <param name="timeProvider">Clock for roll checkpoints. Defaults to <see cref="TimeProvider.System"/>.</param>
-        public GzipRollingFileSink(
+        internal GzipRollingFileSink(
             string path,
             ITextFormatter textFormatter,
             long? fileSizeLimitBytes,
@@ -176,6 +219,11 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>
+        /// Opens the file for <paramref name="now"/> when none is open, the period has elapsed, or <paramref name="nextSequence"/> requests the next size-roll file.
+        /// </summary>
+        /// <param name="now">Clock reading used for the period checkpoint.</param>
+        /// <param name="nextSequence">When true, increments the sequence instead of waiting for the period boundary.</param>
         private void Align(DateTime now, bool nextSequence)
         {
             if (_current is null || nextSequence || (_nextCheckpoint.HasValue && now >= _nextCheckpoint.Value))
@@ -195,6 +243,7 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>Disposes the active writer and clears its path, checkpoint, and writer. Does not clear the sequence.</summary>
         private void CloseCurrent()
         {
             _current?.Dispose();
@@ -203,6 +252,11 @@ namespace VectorNNTP.BackFiller.Logging
             _nextCheckpoint = null;
         }
 
+        /// <summary>
+        /// Creates the directory, opens the active file for <paramref name="now"/> and <paramref name="sequence"/>, then archives inactive logs and applies retention.
+        /// </summary>
+        /// <param name="now">Clock reading truncated to the rolling interval.</param>
+        /// <param name="sequence">Size-roll sequence, or null for the unsequenced period file.</param>
         private void Open(DateTime now, int? sequence)
         {
             Directory.CreateDirectory(_directory);
@@ -215,6 +269,10 @@ namespace VectorNNTP.BackFiller.Logging
             ApplyRetention();
         }
 
+        /// <summary>
+        /// Deletes leftover <c>.gz.partial</c> files, compresses other <c>.log</c> files, and leaves the active path untouched.
+        /// A <c>.log</c> whose <c>.gz</c> already exists is deleted instead of compressed again. Compression failure keeps the uncompressed file.
+        /// </summary>
         private void ArchiveInactive()
         {
             if (Directory.Exists(_directory))
@@ -265,6 +323,10 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>
+        /// Deletes files outside the newest <see cref="_retainedFileCountLimit"/> period/sequence slots.
+        /// A <c>.log</c> and <c>.log.gz</c> for the same slot count as one. The active path is never deleted. A null limit keeps every slot.
+        /// </summary>
         private void ApplyRetention()
         {
             if (_retainedFileCountLimit is null)
@@ -321,6 +383,9 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>Returns directory files whose names match the rolling pattern and end with <paramref name="suffix"/>.</summary>
+        /// <param name="suffix">Extension filter such as <c>.log</c> or <c>.log.gz</c>.</param>
+        /// <returns>An empty sequence when the directory does not exist.</returns>
         private IEnumerable<string> MatchingFiles(string suffix)
         {
             if (!Directory.Exists(_directory))
@@ -332,6 +397,10 @@ namespace VectorNNTP.BackFiller.Logging
                 .Where(path => _filenameMatcher.IsMatch(Path.GetFileName(path)));
         }
 
+        /// <summary>Builds the active path from the period token and an optional <c>_NNN</c> sequence.</summary>
+        /// <param name="checkpoint">Period start. Null omits the period token.</param>
+        /// <param name="sequence">Size-roll sequence formatted as three digits, or null when unsequenced.</param>
+        /// <returns>Full path under <see cref="_directory"/>.</returns>
         private string LogPath(DateTime? checkpoint, int? sequence)
         {
             var token = checkpoint?.ToString(_periodFormat, CultureInfo.InvariantCulture) ?? string.Empty;
@@ -343,9 +412,16 @@ namespace VectorNNTP.BackFiller.Logging
             return Path.Join(_directory, _filenamePrefix + token + _filenameSuffix);
         }
 
+        /// <summary>Returns whether <paramref name="path"/> is the open active file, compared ordinal-ignore-case.</summary>
+        /// <param name="path">Candidate log path.</param>
+        /// <returns><see langword="false"/> when no file is open.</returns>
         private bool IsCurrent(string path) =>
             _currentPath is not null && string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Truncates <paramref name="instant"/> to the start of the rolling period, preserving <see cref="DateTime.Kind"/>.</summary>
+        /// <param name="instant">Clock reading.</param>
+        /// <returns>Null when the interval is <see cref="RollingInterval.Infinite"/>.</returns>
+        /// <exception cref="InvalidOperationException">The interval is not year, month, day, hour, minute, or infinite.</exception>
         internal DateTime? Checkpoint(DateTime instant) => _interval switch
         {
             RollingInterval.Infinite => null,
@@ -364,6 +440,10 @@ namespace VectorNNTP.BackFiller.Logging
             _ => throw new InvalidOperationException($"Unsupported rolling interval {_interval}."),
         };
 
+        /// <summary>Returns the exclusive end of the period that contains <paramref name="instant"/>.</summary>
+        /// <param name="instant">Clock reading.</param>
+        /// <returns>Null when the interval is <see cref="RollingInterval.Infinite"/>.</returns>
+        /// <exception cref="InvalidOperationException">The interval is not year, month, day, hour, minute, or infinite.</exception>
         internal DateTime? NextCheckpoint(DateTime instant) => _interval switch
         {
             RollingInterval.Infinite => null,
@@ -382,6 +462,8 @@ namespace VectorNNTP.BackFiller.Logging
             _ => throw new InvalidOperationException($"Unsupported rolling interval {_interval}."),
         };
 
+        /// <summary>Writes <paramref name="message"/> to Serilog <c>SelfLog</c> and the failure listener as a permanent failure.</summary>
+        /// <param name="message">Failure text. It is not an exception and is not thrown.</param>
         private void Report(string message)
         {
             SelfLog.WriteLine(message);
@@ -393,6 +475,10 @@ namespace VectorNNTP.BackFiller.Logging
                 exception: null!);
         }
 
+        /// <summary>
+        /// Deletes <paramref name="path"/> when it exists. <see cref="IOException"/> and <see cref="UnauthorizedAccessException"/> are written to <c>SelfLog</c> and not thrown.
+        /// </summary>
+        /// <param name="path">Log, archive, or partial path.</param>
         private static void TryDelete(string path)
         {
             try
@@ -408,6 +494,10 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>Returns the invariant period format for <paramref name="interval"/>.</summary>
+        /// <param name="interval">Configured rolling interval.</param>
+        /// <returns>An empty string for <see cref="RollingInterval.Infinite"/>.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval"/> is not a supported rolling interval.</exception>
         private static string PeriodFormat(RollingInterval interval) => interval switch
         {
             RollingInterval.Infinite => string.Empty,
@@ -419,13 +509,19 @@ namespace VectorNNTP.BackFiller.Logging
             _ => throw new ArgumentOutOfRangeException(nameof(interval)),
         };
 
+        /// <summary>One retained period and sequence, with every <c>.log</c> and <c>.log.gz</c> path that belongs to it.</summary>
+        /// <param name="period">Period token from the file name.</param>
+        /// <param name="sequence">Size-roll sequence, or <c>-1</c> when the file name has no sequence.</param>
         private sealed class Slot(string period, int sequence)
         {
-            public string Period { get; } = period;
+            /// <summary>Period token used to rank newer files first.</summary>
+            internal string Period { get; } = period;
 
-            public int Sequence { get; } = sequence;
+            /// <summary>Sequence used to rank files inside one period. <c>-1</c> is the unsequenced file.</summary>
+            internal int Sequence { get; } = sequence;
 
-            public List<string> Paths { get; } = [];
+            /// <summary>Paths in this slot. A log and its gzip archive share one slot.</summary>
+            internal List<string> Paths { get; } = [];
         }
     }
 }

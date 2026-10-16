@@ -116,7 +116,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// A <see cref="ulong"/> table value is rejected by RabbitMQ.Client 7.2.2 wire formatting.
         /// </param>
         /// <returns>Properties passed to <c>BasicPublishAsync</c>. Mandatory routing is set by the caller, not here.</returns>
-        internal static BasicProperties CreateHandoffProperties(
+        private static BasicProperties CreateHandoffProperties(
             string messageId,
             string appId,
             string expiration,
@@ -149,7 +149,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// RabbitMQ.Client 7.2.2 wire formatting; invariant decimal digits are lossless for
         /// the full <see cref="ulong"/> range and parseable on Basic.Return.
         /// </remarks>
-        internal static string FormatPublishSequenceNumberHeader(ulong publishSequenceNumber) =>
+        private static string FormatPublishSequenceNumberHeader(ulong publishSequenceNumber) =>
             publishSequenceNumber.ToString(CultureInfo.InvariantCulture);
     }
 }

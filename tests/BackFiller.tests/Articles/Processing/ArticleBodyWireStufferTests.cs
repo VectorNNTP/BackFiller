@@ -2,8 +2,10 @@ using VectorNNTP.BackFiller.Articles.Processing;
 
 namespace VectorNNTP.BackFiller.Tests.Articles.Processing
 {
+    /// <summary>Body dot-stuffing invariants: headers untouched, one extra dot per dot-leading body line, no spurious terminator.</summary>
     public sealed class ArticleBodyWireStufferTests
     {
+        /// <summary>Each body line that begins with a dot receives exactly one additional leading dot; headers stay unstuffed.</summary>
         [Fact]
         public void Body_lines_starting_with_a_dot_gain_exactly_one_dot()
         {
@@ -18,6 +20,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles.Processing
             Assert.False(wire.AsSpan().EndsWith(".\r\n.\r\n"u8));
         }
 
+        /// <summary>When the body needs no stuffing, the stuffer returns the original array instance.</summary>
         [Fact]
         public void Header_dot_is_not_stuffed_and_an_unstuffed_body_is_the_same_array()
         {
@@ -27,6 +30,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles.Processing
             Assert.Same(logical, wire);
         }
 
+        /// <summary>Parameterized body fragments keep the one-dot-per-line-start rule across CRLF, LF, and mixed endings.</summary>
+        /// <param name="body">Logical body bytes after the header separator.</param>
+        /// <param name="stuffed">Expected stuffed body including any added dots.</param>
         [Theory]
         [InlineData("", "")]
         [InlineData("\n", "\n")]
@@ -47,6 +53,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles.Processing
             Assert.Equal(Encoding.ASCII.GetBytes("From: a@b.test\r\n\r\n" + stuffed), wire);
         }
 
+        /// <summary>LF header separators and mixed line endings affect only the body region after the first blank line.</summary>
         [Fact]
         public void Lf_separator_and_mixed_endings_stuff_only_the_body()
         {

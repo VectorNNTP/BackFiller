@@ -3,8 +3,16 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// RabbitMqOptions validation and ToRuntimeOptions host normalization.
+    /// </summary>
+
     public sealed class RabbitMqOptionsTests
     {
+        /// <summary>
+        /// Contract: ToRuntimeOptions trims and deduplicates hosts.
+        /// </summary>
+
         [Fact]
         public void ToRuntimeOptions_trims_and_deduplicates_hosts()
         {
@@ -15,6 +23,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
 
             Assert.Equal(["127.0.0.1", "localhost"], runtime.Hosts);
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Validate_rejects_null_rabbitmq_hosts()
@@ -28,6 +40,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains(result.Failures!, static failure => failure.Contains("RabbitMQ:Hosts", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Fact]
         public void Validate_rejects_empty_rabbitmq_hosts()
         {
@@ -39,6 +55,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Failed);
             Assert.Contains(result.Failures!, static failure => failure.Contains("RabbitMQ:Hosts", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Validate_rejects_blank_rabbitmq_hosts()

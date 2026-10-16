@@ -3,16 +3,15 @@ using VectorNNTP.BackFiller.Articles;
 namespace VectorNNTP.BackFiller.Retention
 {
     /// <summary>
-    /// Message-ID plus its canonical <see cref="ArticleId"/> hex used in Article Work Success
-    /// metadata and retention collision checks.
-    /// Message-ID identity. NNTP delivery looks up this Message-ID. RequestIds are separate Article Work capabilities.
+    /// Exact Message-ID string paired with the lowercase hexadecimal <see cref="ArticleId"/> used in Article Work Success
+    /// metadata and retention ArticleId collision checks. NNTP delivery looks up by Message-ID; RequestIds are separate capabilities.
     /// </summary>
     /// <param name="MessageId">Exact Message-ID string. Not normalized.</param>
     /// <param name="ArticleIdHex">64-character lowercase hexadecimal <see cref="ArticleId"/>.</param>
     internal readonly record struct ArticleIdentity(string MessageId, string ArticleIdHex)
     {
         /// <summary>Length of <see cref="ArticleIdHex"/>. Equals <see cref="ArticleId.HexLength"/>.</summary>
-        internal const int ArticleIdHexLength = ArticleId.HexLength;
+        private const int ArticleIdHexLength = ArticleId.HexLength;
 
         /// <summary>
         /// Creates an identity from the exact Message-ID and an already-computed <see cref="ArticleId"/>.

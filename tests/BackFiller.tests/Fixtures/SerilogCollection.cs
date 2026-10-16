@@ -6,6 +6,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
     [CollectionDefinition(Name, DisableParallelization = true)]
     public sealed class SerilogCollection
     {
-        public const string Name = "Serilog";
+        /// <summary>Collection name passed to <see cref="CollectionDefinitionAttribute"/>.</summary>
+        internal const string Name = "Serilog";
     }
 }

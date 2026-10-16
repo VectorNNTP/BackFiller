@@ -11,8 +11,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class ArticleWireFormatRetentionTests
     {
+        /// <summary>Message-ID shared by the dot-heavy logical fixture and retention admission.</summary>
         private const string MessageId = "<dot-wire@example.test>";
 
+        /// <summary>Logical article with dot-leading header and body lines used for end-to-end wire/retention proof.</summary>
         private static readonly byte[] LogicalArticle = Encoding.ASCII.GetBytes(
             "Date: Fri, 23 Aug 2024 07:30:10 +0000\r\n" +
             "Message-ID: <dot-wire@example.test>\r\n" +
@@ -30,6 +32,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             "\r\n" +
             ".last\r\n");
 
+        /// <summary>
+        /// Destuffed NNTP payload, canonical record, and retention admission keep a single stuffed body image without listener framing.
+        /// </summary>
         [Fact]
         public async Task Retrieval_canonicalization_and_retention_keep_one_stuffed_body()
         {
@@ -117,6 +122,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return buffer.AsSpan(0, written).ToArray();
         }
 
+        /// <summary>Regression matrix for multiline stuffing edge cases used when building wire responses.</summary>
         [Fact]
         public void Stuffed_multiline_framing_covers_empty_final_and_dot_leading_lines()
         {
@@ -129,6 +135,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal("a\r\nb\n..\r\n.\r\n"u8.ToArray(), FrameStuffedMultiline("a\r\nb\n.\r\n"u8.ToArray()));
         }
 
+        /// <summary>Destuffs an NNTP multiline response through the production stream reader.</summary>
+        /// <param name="response">Framed article bytes including terminator.</param>
+        /// <returns>Logical article bytes after unstuffing.</returns>
         private static async Task<byte[]> ReadPayloadAsync(byte[] response)
         {
             var reader = new NntpStreamReader(new MemoryStream(response, writable: false), 64);

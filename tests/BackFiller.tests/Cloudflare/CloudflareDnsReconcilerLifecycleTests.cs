@@ -7,8 +7,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Cloudflare
 {
+    /// <summary>
+    /// Cloudflare DNS reconciler start/stop and cancellation with recording double.
+    /// </summary>
+
     public sealed class CloudflareDnsReconcilerLifecycleTests
     {
+        /// <summary>
+        /// Contract: Dispose then operations throw object disposed exception.
+        /// </summary>
+
         [Fact]
         public async Task Dispose_then_operations_throw_object_disposed_exception()
         {
@@ -27,6 +35,10 @@ namespace VectorNNTP.BackFiller.Tests.Cloudflare
                 reconciler.RemoveAllRecordsForFqdnAsync("zone", "news.example.test", CancellationToken.None));
         }
 
+        /// <summary>
+        /// Contract: Dispose is idempotent.
+        /// </summary>
+
         [Fact]
         public void Dispose_is_idempotent()
         {
@@ -40,8 +52,15 @@ namespace VectorNNTP.BackFiller.Tests.Cloudflare
             reconciler.Dispose();
         }
 
+        /// <summary>Cloudflare DNS client that completes all API calls without network I/O for lifecycle-only tests.</summary>
         private sealed class NoOpDnsClient : ICloudflareDnsClient
         {
+
+            /// <summary>Returns an empty list. Lifecycle tests never inspect listed records.</summary>
+            /// <param name="zoneId">Ignored.</param>
+            /// <param name="fqdn">Ignored.</param>
+            /// <param name="type">Ignored.</param>
+            /// <param name="cancellationToken">Ignored.</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListRecordsAsync(
                 string zoneId,
                 string fqdn,
@@ -49,18 +68,34 @@ namespace VectorNNTP.BackFiller.Tests.Cloudflare
                 CancellationToken cancellationToken) =>
                 Task.FromResult<IReadOnlyList<CloudflareDnsRecord>>([]);
 
+
+            /// <summary>Returns an empty list. Lifecycle tests never inspect listed records.</summary>
+            /// <param name="zoneId">Ignored.</param>
+            /// <param name="fqdn">Ignored.</param>
+            /// <param name="cancellationToken">Ignored.</param>
             public Task<IReadOnlyList<CloudflareDnsRecord>> ListAllRecordsForNameAsync(
                 string zoneId,
                 string fqdn,
                 CancellationToken cancellationToken) =>
                 Task.FromResult<IReadOnlyList<CloudflareDnsRecord>>([]);
 
+
+            /// <summary>Throws. Dispose tests must not create records.</summary>
+            /// <param name="zoneId">Ignored.</param>
+            /// <param name="request">Ignored.</param>
+            /// <param name="cancellationToken">Ignored.</param>
             public Task<CloudflareDnsRecord> CreateRecordAsync(
                 string zoneId,
                 CloudflareDnsRecordWriteRequest request,
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Not used in lifecycle tests.");
 
+
+            /// <summary>Throws. Dispose tests must not update records.</summary>
+            /// <param name="zoneId">Ignored.</param>
+            /// <param name="recordId">Ignored.</param>
+            /// <param name="request">Ignored.</param>
+            /// <param name="cancellationToken">Ignored.</param>
             public Task<CloudflareDnsRecord> UpdateRecordAsync(
                 string zoneId,
                 string recordId,
@@ -68,6 +103,11 @@ namespace VectorNNTP.BackFiller.Tests.Cloudflare
                 CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Not used in lifecycle tests.");
 
+
+            /// <summary>Throws. Dispose tests must not delete records.</summary>
+            /// <param name="zoneId">Ignored.</param>
+            /// <param name="recordId">Ignored.</param>
+            /// <param name="cancellationToken">Ignored.</param>
             public Task DeleteRecordAsync(string zoneId, string recordId, CancellationToken cancellationToken) =>
                 throw new InvalidOperationException("Not used in lifecycle tests.");
         }

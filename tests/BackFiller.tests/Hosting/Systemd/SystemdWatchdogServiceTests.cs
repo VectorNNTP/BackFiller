@@ -8,8 +8,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {
+    /// <summary>Watchdog loop activation gates and heartbeat behavior under health, stopping, and notify failure.</summary>
     public sealed class SystemdWatchdogServiceTests
     {
+        /// <summary>No watchdog timeout configuration leaves the service inactive with zero heartbeats.</summary>
         [Fact]
         public async Task Watchdog_DisabledWhenNotConfigured()
         {
@@ -24,6 +26,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(0, notify.WatchdogCount);
             await service.StopAsync(CancellationToken.None);
         }
+        /// <summary>Systemd.EnableWatchdog false disables the loop even when runtime watchdog is configured.</summary>
 
         [Fact]
         public async Task Watchdog_DisabledWhenOptionFalse()
@@ -39,6 +42,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(service.IsActive);
             await service.StopAsync(CancellationToken.None);
         }
+        /// <summary>Non-Linux runtime profile keeps watchdog inactive.</summary>
 
         [Fact]
         public async Task Watchdog_DisabledOnNonLinux()
@@ -53,6 +57,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(service.IsActive);
             await service.StopAsync(CancellationToken.None);
         }
+        /// <summary>Disabled notify bridge prevents activating the watchdog loop.</summary>
 
         [Fact]
         public async Task Watchdog_DisabledWhenNotifyDisabled()
@@ -67,6 +72,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(service.IsActive);
             await service.StopAsync(CancellationToken.None);
         }
+        /// <summary>Healthy app emits WATCHDOG on interval less than timeout; stop prevents further increments.</summary>
 
         [Fact]
         public async Task Watchdog_SendsHeartbeatsWhileHealthy_AndStopsOnShutdown()
@@ -95,6 +101,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(countAfterStop, notify.WatchdogCount);
             Assert.False(service.IsActive);
         }
+        /// <summary>Unhealthy health skips WATCHDOG until healthy again.</summary>
 
         [Fact]
         public async Task Watchdog_DoesNotReportHealthyDuringUnhealthyPeriods()
@@ -125,6 +132,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 await service.StopAsync(CancellationToken.None);
             }
         }
+        /// <summary>After MarkUnexpectedTermination, watchdog skips further WATCHDOG notifications.</summary>
 
         [Fact]
         public async Task Watchdog_StopsHeartbeatsAfterUnexpectedTermination()
@@ -163,6 +171,41 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 await watchdog.StopAsync(CancellationToken.None);
             }
         }
+        /// <summary>An unavailable certificate suppresses WATCHDOG until a replacement clears the condition.</summary>
+        [Fact]
+        public async Task Watchdog_SkipsKeepAliveWhileCertificateIsUnavailable()
+        {
+            var health = new BackFillerApplicationHealth();
+            health.MarkStarted();
+            health.MarkCertificateUnavailable();
+            Assert.False(health.IsHealthyForWatchdog);
+
+            var notify = new FakeSystemdNotifyBridge();
+            var skipped = new WatchdogEventLogger("Skipping systemd watchdog keep-alive");
+            using var service = CreateWatchdog(
+                notify,
+                runtime: RecordingSystemdRuntimeFactory.LinuxUnderSystemd(TimeSpan.FromMilliseconds(80)),
+                health: health,
+                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5,
+                logger: skipped);
+            try
+            {
+                await service.StartAsync(CancellationToken.None);
+                await skipped.Seen.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(0, notify.WatchdogCount);
+
+                health.MarkCertificateAvailable();
+                await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(notify.WatchdogCount >= 1);
+                Assert.True(health.IsHealthyForWatchdog);
+            }
+            finally
+            {
+                await service.StopAsync(CancellationToken.None);
+            }
+        }
+
+        /// <summary>ApplicationStopping stops additional heartbeats after the in-flight tick completes.</summary>
 
         [Fact]
         public async Task Watchdog_CancelsOnApplicationStopping()
@@ -197,6 +240,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 await service.StopAsync(CancellationToken.None);
             }
         }
+        /// <summary>Repeated notify failures do not call StopApplication; service stays active until explicit stop.</summary>
 
         [Theory]
         [InlineData(typeof(InvalidOperationException))]
@@ -229,6 +273,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(service.IsActive);
         }
 
+        /// <summary>Builds a watchdog service with fake systemd/health dependencies and optional option overrides.</summary>
         private static SystemdWatchdogService CreateWatchdog(
             FakeSystemdNotifyBridge notify,
             ISystemdRuntime runtime,
@@ -249,23 +294,33 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 logger ?? NullLogger<SystemdWatchdogService>.Instance);
         }
 
+        /// <summary>Logger that completes a task when a formatted message contains a substring.</summary>
         private sealed class WatchdogEventLogger : ILogger<SystemdWatchdogService>
         {
+            /// <summary>Substring that must appear in the formatted message.</summary>
             private readonly string _fragment;
+            /// <summary>Completion source armed by matching log lines.</summary>
             private TaskCompletionSource _seen = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            public WatchdogEventLogger(string fragment) => _fragment = fragment;
+            /// <summary>Arms logging synchronization on messages containing <paramref name="fragment"/>.</summary>
+            /// <param name="fragment">Required substring in formatted log text.</param>
+            internal WatchdogEventLogger(string fragment) => _fragment = fragment;
 
-            public Task Seen => Volatile.Read(ref _seen).Task;
+            /// <summary>Completes when a log line contains the configured fragment.</summary>
+            internal Task Seen => Volatile.Read(ref _seen).Task;
 
-            public void Arm() =>
+            /// <summary>Replaces <see cref="Seen"/> with a fresh incomplete task.</summary>
+            internal void Arm() =>
                 Volatile.Write(ref _seen, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
+            /// <inheritdoc />
             public IDisposable BeginScope<TState>(TState state)
                 where TState : notnull => NullScope.Instance;
 
+            /// <inheritdoc />
             public bool IsEnabled(LogLevel logLevel) => true;
 
+            /// <inheritdoc />
             public void Log<TState>(
                 LogLevel logLevel,
                 EventId eventId,
@@ -281,10 +336,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 }
             }
 
+            /// <summary>No-op logging scope for the watchdog event logger double.</summary>
             private sealed class NullScope : IDisposable
             {
+                /// <summary>Shared no-op scope.</summary>
                 public static NullScope Instance { get; } = new();
 
+                /// <inheritdoc />
                 public void Dispose()
                 {
                 }

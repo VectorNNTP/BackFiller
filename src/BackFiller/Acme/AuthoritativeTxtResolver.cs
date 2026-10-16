@@ -48,7 +48,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <param name="zoneApex">DNS apex. Still normalized, even when endpoints are injected.</param>
         /// <param name="logger">Logger for skipped queries.</param>
         /// <param name="nameserverProvider">Endpoint source. <see langword="null"/> uses live discovery.</param>
-        internal AuthoritativeTxtResolver(
+        private AuthoritativeTxtResolver(
             string zoneApex,
             ILogger<AuthoritativeTxtResolver> logger,
             Func<CancellationToken, Task<IReadOnlyList<IPEndPoint>>>? nameserverProvider)
@@ -61,7 +61,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <param name="logger">Logger for skipped queries.</param>
         /// <param name="nameserverProvider">Endpoint source. <see langword="null"/> uses live discovery.</param>
         /// <param name="txtQuery">TXT answer source. <see langword="null"/> uses live UDP/TCP queries.</param>
-        internal AuthoritativeTxtResolver(
+        private AuthoritativeTxtResolver(
             string zoneApex,
             ILogger<AuthoritativeTxtResolver> logger,
             Func<CancellationToken, Task<IReadOnlyList<IPEndPoint>>>? nameserverProvider,
@@ -129,7 +129,7 @@ namespace VectorNNTP.BackFiller.Acme
                 return [];
             }
 
-            return intersection.ToArray();
+            return [.. intersection];
         }
 
         /// <summary>Resolves apex NS addresses and returns them as port-53 endpoints. An empty set throws category <c>ns_discovery_failed</c>.</summary>

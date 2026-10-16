@@ -36,12 +36,12 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// Maximum duration for a single HTTP attempt (headers). Further bounded by remaining
         /// <see cref="CloudflareOperationBudget"/> when an operation scope is active.
         /// </summary>
-        internal static readonly TimeSpan PerRequestTimeout = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan PerRequestTimeout = TimeSpan.FromSeconds(30);
 
         /// <summary>
         /// Hard ceiling on list pages (matches Cloudflare's practical upper bound for a single hostname listing).
         /// </summary>
-        internal const int MaxListPages = 20;
+        private const int MaxListPages = 20;
 
         /// <summary>
         /// Default Cloudflare API v4 base URI, applied only when the injected <see cref="HttpClient"/> has no base address.
@@ -60,11 +60,11 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <summary>
         /// Gets or sets the delay function used for HTTP 429 backoff (tests may replace this).
         /// </summary>
-        internal Func<TimeSpan, CancellationToken, Task> DelayAsync { get; set; } =
+        private Func<TimeSpan, CancellationToken, Task> DelayAsync { get; set; } =
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsClient"/> class.
+        /// Captures the HTTP client, options, and logger. Sets <see cref="ApiBaseAddress"/> when the client has no base address.
         /// </summary>
         /// <param name="httpClient">Client for the Cloudflare API. A missing base address is set to the v4 API root.</param>
         /// <param name="options">Options that supply the API token. The token is read per request and is not logged.</param>
@@ -496,7 +496,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// shorter, it only links the operation token so budget expiry surfaces as operation cancellation
         /// rather than a per-request timeout (which would wrap List into <see cref="CloudflareDnsException"/>).
         /// </remarks>
-        internal static CancellationTokenSource CreateRequestTimeoutCts(
+        private static CancellationTokenSource CreateRequestTimeoutCts(
             CancellationToken operationToken,
             out CancellationToken sendToken)
         {
@@ -743,7 +743,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <summary>
         /// Validates a listed A/AAAA record for reconcile safety (no deserialization-default compliance).
         /// </summary>
-        internal static void EnsureListedAddressRecordValid(CloudflareDnsRecord record, string expectedType)
+        private static void EnsureListedAddressRecordValid(CloudflareDnsRecord record, string expectedType)
         {
             ArgumentNullException.ThrowIfNull(record);
             ArgumentException.ThrowIfNullOrWhiteSpace(expectedType);
@@ -784,7 +784,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <summary>
         /// Validates a clean-up listing record: identity fields required; type-specific TTL/proxy not enforced.
         /// </summary>
-        internal static void EnsureListedCleanupRecordValid(CloudflareDnsRecord record)
+        private static void EnsureListedCleanupRecordValid(CloudflareDnsRecord record)
         {
             ArgumentNullException.ThrowIfNull(record);
 
@@ -810,7 +810,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <remarks>
         /// Missing or unusable pagination metadata must not be treated as a successful single-page listing.
         /// </remarks>
-        internal static int RequireTotalPages(CloudflareResultInfo? info, int expectedPage)
+        private static int RequireTotalPages(CloudflareResultInfo? info, int expectedPage)
         {
             if (info is null)
             {
@@ -853,7 +853,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// when present, it must be a non-empty string exactly matching the requested zone.
         /// </para>
         /// </remarks>
-        internal static void EnsureRecordZoneMatches(CloudflareDnsRecord record, string expectedZoneId, string operation)
+        private static void EnsureRecordZoneMatches(CloudflareDnsRecord record, string expectedZoneId, string operation)
         {
             ArgumentNullException.ThrowIfNull(record);
             ArgumentException.ThrowIfNullOrWhiteSpace(expectedZoneId);

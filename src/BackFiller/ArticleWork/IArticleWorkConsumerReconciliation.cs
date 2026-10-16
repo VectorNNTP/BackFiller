@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// </summary>
     internal interface IArticleWorkConsumerReconciliation
     {
-        /// <summary>Gets whether the consumer host has started and is not shutting down.</summary>
+        /// <summary>True when the consumer service has started reconcile loops and has not entered disposal.</summary>
         bool IsRunning { get; }
 
         /// <summary>Creates, keeps, or retires consume sessions to match desired membership.</summary>

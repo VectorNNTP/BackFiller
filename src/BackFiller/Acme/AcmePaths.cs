@@ -110,7 +110,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <summary>Common ACME journal root containing one <c>{fqdn}.json</c> file per identity.</summary>
         /// <param name="stateDir">Shared ACME state root.</param>
         /// <returns>The journal directory.</returns>
-        internal static string JournalRoot(string stateDir) => Path.Join(stateDir, Journal);
+        private static string JournalRoot(string stateDir) => Path.Join(stateDir, Journal);
 
         /// <summary>Persistent ACME transaction journal file for one FQDN.</summary>
         /// <param name="stateDir">Shared ACME state root.</param>

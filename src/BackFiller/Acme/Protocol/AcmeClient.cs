@@ -41,11 +41,9 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             _time = time;
         }
 
-        /// <summary>Gets the account key used for JWS.</summary>
-        private AcmeAccountKey AccountKey => _accountKey;
-
-        /// <summary>Gets the bound account URL (kid), or throws if not registered/bound.</summary>
-        internal string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
+        /// <summary>Account Location URL used as JWS <c>kid</c> after registration or <see cref="BindExistingAccount"/>.</summary>
+        /// <exception cref="InvalidOperationException">No account URL is bound yet.</exception>
+        private string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
 
         /// <summary>
         /// Binds a previously persisted ACME account URL (kid) without calling newAccount.
@@ -56,12 +54,6 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
             ArgumentException.ThrowIfNullOrWhiteSpace(accountUrl);
             _keyId = accountUrl.Trim();
         }
-
-        /// <summary>Fetches the ACME directory.</summary>
-        /// <param name="cancellationToken">Passed to the transport directory cache.</param>
-        /// <returns>The cached or newly fetched directory.</returns>
-        private Task<AcmeDirectoryResource> GetDirectoryAsync(CancellationToken cancellationToken) =>
-            _http.GetDirectoryAsync(cancellationToken);
 
         /// <summary>POST-as-GET for an order resource.</summary>
         /// <param name="orderUrl">Order Location URL.</param>
@@ -82,20 +74,18 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// </summary>
         /// <param name="contacts">Contact URIs. An empty list omits the <c>contact</c> field.</param>
         /// <param name="termsOfServiceAgreed">Value of <c>termsOfServiceAgreed</c>.</param>
-        /// <param name="externalAccountBinding">Optional EAB. <see langword="null"/> omits <c>externalAccountBinding</c>.</param>
         /// <param name="cancellationToken">Cancels the directory fetch and the POST.</param>
         /// <returns>The account Location URL.</returns>
         internal async Task<string> RegisterAccountAsync(
             IReadOnlyList<string> contacts,
             bool termsOfServiceAgreed,
-            ExternalAccountBinding? externalAccountBinding,
             CancellationToken cancellationToken)
         {
             AcmeDirectoryResource directory = await _http.GetDirectoryAsync(cancellationToken).ConfigureAwait(false);
             Uri newAccount = directory.NewAccount
                 ?? throw new AcmeCaException("The ACME directory does not advertise a newAccount endpoint.");
 
-            string payload = BuildAccountPayload(_accountKey, contacts, termsOfServiceAgreed, externalAccountBinding, newAccount);
+            string payload = BuildAccountPayload(contacts, termsOfServiceAgreed);
 
             AcmeResponse<AcmeAccountResource> response = await _http.PostAsync(
                 _accountKey,
@@ -273,20 +263,14 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         }
 
         /// <summary>
-        /// Builds the <c>newAccount</c> JSON. When <paramref name="externalAccountBinding"/> is set, appends an HS256 <c>externalAccountBinding</c> JWS over the account JWK.
+        /// Builds the <c>newAccount</c> JSON with <c>termsOfServiceAgreed</c> and an optional <c>contact</c> array.
         /// </summary>
-        /// <param name="accountKey">Key whose JWK is the EAB payload.</param>
         /// <param name="contacts">Contact URIs. Empty omits <c>contact</c>.</param>
         /// <param name="termsOfServiceAgreed">Written as <c>termsOfServiceAgreed</c>.</param>
-        /// <param name="externalAccountBinding">Optional binding. <see langword="null"/> leaves the field out.</param>
-        /// <param name="newAccountUrl">URL placed in the EAB protected header.</param>
         /// <returns>The JSON payload string.</returns>
         private static string BuildAccountPayload(
-            AcmeAccountKey accountKey,
             IReadOnlyList<string> contacts,
-            bool termsOfServiceAgreed,
-            ExternalAccountBinding? externalAccountBinding,
-            Uri newAccountUrl)
+            bool termsOfServiceAgreed)
         {
             using var stream = new MemoryStream();
             using (var writer = new Utf8JsonWriter(stream))
@@ -308,19 +292,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
                 writer.WriteEndObject();
             }
 
-            if (externalAccountBinding is null)
-            {
-                return Encoding.UTF8.GetString(stream.ToArray());
-            }
-
-            string body = Encoding.UTF8.GetString(stream.ToArray());
-            string binding = JsonWebSignature.EncodeHmac(
-                externalAccountBinding.GetHmacKey(),
-                externalAccountBinding.KeyId,
-                newAccountUrl,
-                accountKey.Jwk);
-
-            return body[..^1] + ",\"externalAccountBinding\":" + binding + "}";
+            return Encoding.UTF8.GetString(stream.ToArray());
         }
 
         /// <summary>Writes <c>{"identifiers":[{"type","value"}, ...]}</c>.</summary>

@@ -3,8 +3,10 @@ using VectorNNTP.BackFiller.Articles;
 
 namespace VectorNNTP.BackFiller.Tests.Retention
 {
+    /// <summary>Regression for <see cref="ArticleIdentity"/> mapping from message id and precomputed <see cref="ArticleId"/>.</summary>
     public sealed class ArticleIdentityTests
     {
+        /// <summary>Uses the supplied article id hex from <see cref="ArticleId.FromMessageId"/> rather than re-deriving from the message id string alone.</summary>
         [Fact]
         public void From_uses_existing_ArticleId_without_message_id_hash()
         {
@@ -17,6 +19,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal("dcab316ba0e91c6abbad8d5759bff207932dbe9168c88954c6dd9240b4a6da14", identity.ArticleIdHex);
         }
 
+        /// <summary>Different message ids must not collapse to the same lower-hex article id.</summary>
         [Fact]
         public void Distinct_message_ids_produce_distinct_article_id_hex()
         {

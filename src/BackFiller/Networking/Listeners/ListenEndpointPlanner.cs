@@ -9,7 +9,7 @@ namespace VectorNNTP.BackFiller.Networking.Listeners
     /// When <see langword="true"/> and <see cref="Address"/> is IPv6, the socket also accepts IPv4
     /// (mapped) connections (<c>IPV6_V6ONLY = 0</c> / <see cref="Socket.DualMode"/>).
     /// </param>
-    public readonly record struct ListenBinding(IPAddress Address, int Port, bool DualMode)
+    internal readonly record struct ListenBinding(IPAddress Address, int Port, bool DualMode)
     {
         /// <summary>Gets the endpoint for bind/listen.</summary>
         internal IPEndPoint EndPoint => new(Address, Port);

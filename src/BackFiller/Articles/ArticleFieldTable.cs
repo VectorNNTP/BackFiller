@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// answered later by tokenizing <see cref="Newsgroups"/> against peer patterns.
     /// <see cref="Date"/> is the winning Date-family header value after canonical rewrite.
     /// </remarks>
-    public readonly struct ArticleFieldTable : IEquatable<ArticleFieldTable>
+    internal readonly struct ArticleFieldTable : IEquatable<ArticleFieldTable>
     {
         /// <summary>
         /// Initializes a field table.
@@ -23,7 +23,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <param name="date">Winning Date-family header value range.</param>
         /// <param name="references">References header value range.</param>
         /// <param name="path">Path header value range.</param>
-        internal ArticleFieldTable(
+        private ArticleFieldTable(
             ArticleByteRange messageId,
             ArticleByteRange newsgroups,
             ArticleByteRange subject,
@@ -42,10 +42,10 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Gets the Message-ID header value range.</summary>
-        public ArticleByteRange MessageId { get; }
+        internal ArticleByteRange MessageId { get; }
 
         /// <summary>Gets the Newsgroups header value range used as ArtGroups.</summary>
-        public ArticleByteRange Newsgroups { get; }
+        internal ArticleByteRange Newsgroups { get; }
 
         /// <summary>Gets the Subject header value range.</summary>
         internal ArticleByteRange Subject { get; }
@@ -54,7 +54,7 @@ namespace VectorNNTP.BackFiller.Articles
         internal ArticleByteRange From { get; }
 
         /// <summary>Gets the winning Date-family header value range.</summary>
-        public ArticleByteRange Date { get; }
+        internal ArticleByteRange Date { get; }
 
         /// <summary>Gets the References header value range.</summary>
         internal ArticleByteRange References { get; }
@@ -79,10 +79,10 @@ namespace VectorNNTP.BackFiller.Articles
         public override int GetHashCode() =>
             HashCode.Combine(MessageId, Newsgroups, Subject, From, Date, References, Path);
 
-        /// <summary>Equality operator.</summary>
+        /// <summary>True when every header range matches.</summary>
         public static bool operator ==(ArticleFieldTable left, ArticleFieldTable right) => left.Equals(right);
 
-        /// <summary>Inequality operator.</summary>
+        /// <summary>True when any header range differs.</summary>
         public static bool operator !=(ArticleFieldTable left, ArticleFieldTable right) => !left.Equals(right);
 
         /// <summary>

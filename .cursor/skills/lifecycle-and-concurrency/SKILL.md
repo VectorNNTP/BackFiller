@@ -2,7 +2,7 @@
 name: lifecycle-and-concurrency
 description: >-
   Protects VectorNNTP application lifecycle, service orchestration, cancellation,
-  disposal, and concurrency safety around ApplicationLifecycle and hosted services.
+  disposal, and concurrency safety around ApplicationServiceManager and hosted services.
   Use when changing startup/shutdown, IApplicationService, systemd notify/watchdog,
   async ownership, or diagnosing races, abandoned tasks, or shutdown bugs.
 ---
@@ -15,7 +15,7 @@ Keep startup, running, and shutdown correct under concurrency and failure.
 
 ## When to use
 
-- Changes to `ApplicationLifecycle`, `ApplicationServiceManager`, hosted services, systemd integration
+- Changes to `ApplicationServiceManager`, hosted services, systemd integration
 - Cancellation, disposal, or concurrent stop/start work
 - Lifecycle or concurrency bugs and their tests
 
@@ -27,7 +27,6 @@ Inspect before changing:
 - `ApplicationServiceManager` start order / reverse stop / rollback
 - `BackFillerApplicationHostedService` (Generic Host adapter; unexpected execution end stops the host)
 - `SystemdLifecycleNotifier`, `SystemdWatchdogService`, `BackFillerApplicationHealth` / `IApplicationHealth`
-- `ApplicationLifecycle` only when the change is to that type. The host does not construct it
 
 Do **not** invent readiness or ordering guarantees. Prefer verified code comments and tests.
 
@@ -47,8 +46,8 @@ Do **not** invent readiness or ordering guarantees. Prefer verified code comment
 - Startup failure rolls back partially started services
 - Repeated stop is safe (await in-flight stop)
 - Concurrent lifecycle ops are serialized where the implementation requires it
-- Unexpected `IApplicationService.Execution` completion marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`. `StopHostOnUnexpectedServiceTermination` is not read
-- systemd `READY=1` is sent at most once from Generic Host `ApplicationStarted`, not from `ApplicationLifecycle`
+- Unexpected `IApplicationService.Execution` completion marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`
+- systemd `READY=1` is sent at most once from Generic Host `ApplicationStarted`
 - No custom competing SIGTERM/SIGINT handlers unless architecture changes intentionally
 
 ## Avoid

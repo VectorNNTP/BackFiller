@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// are removed and are not a fallback. The RabbitMQ file is
     /// <c>VectorNNTP.RabbitMQ.json</c> and stays a separate document.
     /// </remarks>
-    public static class ApplicationJsonConfiguration
+    internal static class ApplicationJsonConfiguration
     {
         /// <summary>Gets the entry assembly's short name.</summary>
         /// <returns>The <see cref="AssemblyName.Name"/> of the entry assembly.</returns>
@@ -36,7 +36,7 @@ namespace VectorNNTP.BackFiller.Configuration
 
         /// <summary>Gets <c>{entry assembly name}.json</c>.</summary>
         /// <returns>The primary application JSON configuration filename.</returns>
-        public static string PrimaryJsonFileName() => EntryAssemblyName + ".json";
+        internal static string PrimaryJsonFileName() => EntryAssemblyName + ".json";
 
         /// <summary>Gets <c>{entry assembly name}.{environment}.json</c>.</summary>
         /// <param name="environmentName">Host environment name, for example <c>Development</c>.</param>
@@ -213,6 +213,12 @@ namespace VectorNNTP.BackFiller.Configuration
             || (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
                 && path.Contains(".settings.", StringComparison.OrdinalIgnoreCase));
 
+        /// <summary>
+        /// Returns whether a file source with <paramref name="path"/> is already registered.
+        /// </summary>
+        /// <param name="configuration">Builder whose sources are scanned. Non-file sources are ignored.</param>
+        /// <param name="path">Source path compared ordinal-ignore-case.</param>
+        /// <returns><see langword="true"/> when a matching <see cref="FileConfigurationSource"/> is present.</returns>
         private static bool ContainsFile(IConfigurationBuilder configuration, string path)
         {
             foreach (var source in configuration.Sources)
@@ -227,6 +233,14 @@ namespace VectorNNTP.BackFiller.Configuration
             return false;
         }
 
+        /// <summary>
+        /// Builds a JSON file source for <paramref name="path"/>, copying optional, reload, provider, and load-exception settings from <paramref name="template"/>.
+        /// </summary>
+        /// <param name="path">JSON file name or path inserted into the builder.</param>
+        /// <param name="template">
+        /// Existing file source to copy. When null, the source is optional and reloads on change, with no file provider until resolve.
+        /// </param>
+        /// <returns>A source whose file provider has been resolved.</returns>
         private static JsonConfigurationSource CreateJsonSource(string path, FileConfigurationSource? template)
         {
             var source = new JsonConfigurationSource

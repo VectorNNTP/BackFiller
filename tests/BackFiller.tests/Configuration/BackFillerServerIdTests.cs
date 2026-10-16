@@ -14,6 +14,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
     /// </summary>
     public sealed class BackFillerServerIdTests
     {
+        /// <summary>
+        /// Contract: MissingServerId FailsValidationAndIsDistinctFromZero.
+        /// </summary>
+
         [Fact]
         public void MissingServerId_FailsValidationAndIsDistinctFromZero()
         {
@@ -33,6 +37,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(0, zero.ServerId);
         }
 
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
+
         [Theory]
         [InlineData(1)]
         [InlineData(99)]
@@ -46,6 +54,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Succeeded);
         }
 
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
+
         [Theory]
         [InlineData(-1)]
         [InlineData(0)]
@@ -58,6 +70,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Failed);
             Assert.Contains(result.Failures!, static f => f.Contains("1–255", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Valid baseline configuration passes validation.
+        /// </summary>
 
         [Theory]
         [InlineData(1, "backfiller01.usenet.ninja")]
@@ -92,6 +108,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(expected, runtime.Fqdn);
         }
 
+        /// <summary>
+        /// Contract: Bind ConsumesBackFillerServerId NotRootOrEnvironmentAlias.
+        /// </summary>
+
         [Fact]
         public void Bind_ConsumesBackFillerServerId_NotRootOrEnvironmentAlias()
         {
@@ -110,6 +130,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("backfiller08.usenet.ninja", options.Fqdn);
         }
 
+        /// <summary>
+        /// Host build or options resolution fails validation before the process runs.
+        /// </summary>
+
         [Fact]
         public void MissingServerId_FromConfiguration_FailsStartup()
         {
@@ -126,6 +150,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.DoesNotContain("BACKFILLER__SERVERID", ex.Message, StringComparison.Ordinal);
             Assert.DoesNotContain("VECTOR__SERVERID", ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Host build or options resolution fails validation before the process runs.
+        /// </summary>
 
         [Fact]
         public void ServerId_NullFromConfiguration_FailsStartup()
@@ -173,6 +201,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains("required", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Contract: Host runtime uses section server id for fqdn.
+        /// </summary>
+
         [Fact]
         public void Host_runtime_uses_section_server_id_for_fqdn()
         {
@@ -191,6 +223,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(12, runtime.ServerId);
             Assert.Equal("backfiller12.usenet.ninja", runtime.Fqdn);
         }
+
+        /// <summary>
+        /// Contract: Production configuration declares server id under backfiller.
+        /// </summary>
 
         [Fact]
         public void Production_configuration_declares_server_id_under_backfiller()
@@ -219,6 +255,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.False(section.TryGetProperty("Name", out _));
         }
 
+        /// <summary>
+        /// Contract: Shared rules match nntpd bounds.
+        /// </summary>
+
         [Fact]
         public void Shared_rules_match_nntpd_bounds()
         {
@@ -235,9 +275,17 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal(ServerIdValidationStatus.OutOfRange, ServerIdRules.Classify(256));
         }
 
+        /// <summary>
+        /// Builds a hosted BackFiller instance from in-memory configuration pairs with test infrastructure fakes registered.
+        /// </summary>
+        /// <param name="pairs">Configuration key/value pairs (including secrets when required).</param>
         private static IHost CreateHost(Dictionary<string, string?> pairs) =>
             CreateIsolatedHost(pairs);
 
+        /// <summary>
+        /// Creates an empty application builder, binds configuration, registers fakes, and returns a built host.
+        /// </summary>
+        /// <param name="pairs">Configuration key/value pairs merged into the host configuration.</param>
         private static IHost CreateIsolatedHost(Dictionary<string, string?> pairs)
         {
             var builder = CreateIsolatedBuilder();
@@ -247,6 +295,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             return builder.Build();
         }
 
+        /// <summary>
+        /// Empty Generic Host builder named for the test assembly in the Development environment.
+        /// </summary>
+
         private static HostApplicationBuilder CreateIsolatedBuilder() =>
             Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings
             {
@@ -254,6 +306,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 EnvironmentName = Environments.Development,
             });
 
+        /// <summary>
+        /// Registers no-op or deterministic doubles for external dependencies so host startup tests avoid real infrastructure.
+        /// </summary>
+        /// <param name="builder">Host builder whose service collection receives the fakes.</param>
         private static void RegisterHostFakes(HostApplicationBuilder builder)
         {
             builder.Services.AddSingleton<ILocalIpAddressAssignee>(new FakeLocalIpAddressAssignee(assignAll: true));

@@ -10,6 +10,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class InnArticleFixtureTests
     {
+        /// <summary>Imported INN logical fixture names exercised by theory data and stuffing tests.</summary>
         private static readonly string[] LogicalArticles =
         [
             "1", "2", "3", "4", "5", "6", "7", "xref",
@@ -18,6 +19,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             "bad-nul-body", "bad-nul-header", "bad-subj",
         ];
 
+        /// <summary>Theory rows naming each logical INN fixture under <c>tests/fixtures/articles</c>.</summary>
+        /// <returns>Single-element object arrays containing fixture names.</returns>
         public static IEnumerable<object[]> LogicalArticleNames()
         {
             foreach (var name in LogicalArticles)
@@ -26,6 +29,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             }
         }
 
+        /// <summary>NNTP framing and reader destuffing round-trip each logical fixture to identical bytes.</summary>
+        /// <param name="name">Fixture file name without path.</param>
         [Theory]
         [MemberData(nameof(LogicalArticleNames))]
         public async Task Framed_fixture_round_trips_through_the_reader(string name)
@@ -37,6 +42,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(logical, read);
         }
 
+        /// <summary>Body stuffer adds one dot per dot-leading body line for every logical INN fixture.</summary>
+        /// <param name="name">Fixture file name without path.</param>
         [Theory]
         [MemberData(nameof(LogicalArticleNames))]
         public void Stuffer_adds_one_dot_only_on_body_lines_that_begin_with_a_dot(string name)
@@ -46,6 +53,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             AssertStuffedBody(logical, stuffed);
         }
 
+        /// <summary>Pre-framed <c>wire-7</c> destuffs to CRLF-normalized native <c>7</c> and matches stuffer expectations.</summary>
         [Fact]
         public async Task Wire7_destuffs_to_the_crlf_form_of_native_7()
         {
@@ -57,6 +65,8 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             AssertStuffedBody(expected, ArticleBodyWireStuffer.StuffBody(expected));
         }
 
+        /// <summary>Truncated wire fixtures must fail destuffing with <see cref="EndOfStreamException"/>.</summary>
+        /// <param name="name">Incomplete wire fixture name.</param>
         [Theory]
         [InlineData("wire-no-body")]
         [InlineData("wire-strange")]
@@ -66,6 +76,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             await Assert.ThrowsAsync<EndOfStreamException>(() => ReadPayloadAsync(Load(name)));
         }
 
+        /// <summary>Accepted INN samples retain stuffed body bytes through canonical materialization.</summary>
         [Fact]
         public void Accepted_articles_keep_the_stuffed_body_through_canonical_materialization()
         {
@@ -93,6 +104,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             }
         }
 
+        /// <summary>NUL in the body of <c>bad-nul-body</c> remains an accepted parse (legacy INN behavior).</summary>
         [Fact]
         public void Body_nul_is_not_a_parse_failure()
         {
@@ -100,17 +112,23 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.True(parsed.IsAccepted);
         }
 
+        /// <summary>Negative fixtures map to the expected parse failure codes.</summary>
+        /// <param name="name">Fixture file name.</param>
+        /// <param name="expected">Expected rejection reason.</param>
         [Theory]
-        [InlineData("bad-nul-header", NntpArticleParseFailureCode.ContainsIllegalControlByte)]
-        [InlineData("bad-no-body", NntpArticleParseFailureCode.MissingHeaderBodySeparator)]
-        [InlineData("bad-no-header", NntpArticleParseFailureCode.MissingMessageId)]
-        public void Parser_rejects_incomplete_or_nul_fixtures(string name, NntpArticleParseFailureCode expected)
+        [InlineData("bad-nul-header", nameof(NntpArticleParseFailureCode.ContainsIllegalControlByte))]
+        [InlineData("bad-no-body", nameof(NntpArticleParseFailureCode.MissingHeaderBodySeparator))]
+        [InlineData("bad-no-header", nameof(NntpArticleParseFailureCode.MissingMessageId))]
+        public void Parser_rejects_incomplete_or_nul_fixtures(string name, string expected)
         {
             var parsed = new NntpArticleParser("backfiller.test").Parse(Load(name));
             Assert.False(parsed.IsAccepted);
-            Assert.Equal(expected, parsed.FailureCode);
+            Assert.Equal(Enum.Parse<NntpArticleParseFailureCode>(expected), parsed.FailureCode);
         }
 
+        /// <summary>Compares logical and stuffed bodies line-by-line, accounting for one added dot per dot-leading line.</summary>
+        /// <param name="logical">Unstuffed article bytes.</param>
+        /// <param name="stuffed">Output of <see cref="ArticleBodyWireStuffer.StuffBody"/>.</param>
         private static void AssertStuffedBody(byte[] logical, byte[] stuffed)
         {
             var body = BodyStart(logical);
@@ -154,6 +172,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.Equal(logical.Length + leadingDots, stuffed.Length);
         }
 
+        /// <summary>Counts body lines that begin with a dot (expected stuffing candidates).</summary>
+        /// <param name="body">Body span after the header separator.</param>
+        /// <returns>Number of dot-leading lines.</returns>
         private static int CountLeadingDotLines(ReadOnlySpan<byte> body)
         {
             var count = 0;
@@ -177,6 +198,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return count;
         }
 
+        /// <summary>Index of the first body byte after the earliest recognized header/body separator.</summary>
+        /// <param name="article">Full article span.</param>
+        /// <returns>Body start offset, or <paramref name="article"/>.Length when no separator exists.</returns>
         private static int BodyStart(ReadOnlySpan<byte> article)
         {
             var crlf = article.IndexOf("\r\n\r\n"u8);
@@ -230,6 +254,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return converted;
         }
 
+        /// <summary>Builds NNTP multiline framing with dot stuffing and terminator for reader tests.</summary>
+        /// <param name="logical">Destuffed logical bytes.</param>
+        /// <returns>Framed wire bytes.</returns>
         private static byte[] FrameLogicalArticle(ReadOnlySpan<byte> logical)
         {
             var extra = 0;
@@ -268,6 +295,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return framed;
         }
 
+        /// <summary>Reads and destuffs a framed payload using production reader limits.</summary>
+        /// <param name="framed">NNTP multiline bytes including terminator.</param>
+        /// <returns>Logical article bytes.</returns>
         private static async Task<byte[]> ReadPayloadAsync(byte[] framed)
         {
             var stream = new MemoryStream(framed, writable: false);
@@ -278,6 +308,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 CancellationToken.None);
         }
 
+        /// <summary>Loads one INN fixture file from the test articles directory.</summary>
+        /// <param name="name">Fixture file name.</param>
+        /// <returns>Raw file bytes.</returns>
         private static byte[] Load(string name)
             => File.ReadAllBytes(RepositoryFiles.Under("tests", "fixtures", "articles", name));
     }

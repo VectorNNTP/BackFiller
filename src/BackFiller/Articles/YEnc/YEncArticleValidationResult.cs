@@ -62,7 +62,7 @@ namespace VectorNNTP.BackFiller.Articles.YEnc
         /// <summary>
         /// Gets a value indicating whether the caller should report this result as yEnc decoding failed.
         /// </summary>
-        internal bool ShouldTreatAsYEncDecodingFailed => Status is not YEncArticleValidationStatus.ValidNonYEnc
+        private bool ShouldTreatAsYEncDecodingFailed => Status is not YEncArticleValidationStatus.ValidNonYEnc
             && !IsValid;
 
         /// <summary>

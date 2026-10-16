@@ -9,7 +9,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// Callers must use <see cref="TryGetCurrent"/> for each use; they must not retain
     /// ownership or dispose the connection.
     /// </remarks>
-    public interface IRabbitMqService
+    internal interface IRabbitMqService
     {
         /// <summary>Gets a value indicating whether the current broker connection is open and usable.</summary>
         bool IsReady { get; }

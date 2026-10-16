@@ -19,7 +19,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="expectedId">Transaction id that must match the response.</param>
         /// <param name="results">Cleared, then filled with one concatenated TXT payload per accepted answer.</param>
         /// <returns><see langword="true"/> when the header and question section were well-formed.</returns>
-        internal static bool TryParseTxtRecords(ReadOnlySpan<byte> buffer, ushort expectedId, List<byte[]> results)
+        private static bool TryParseTxtRecords(ReadOnlySpan<byte> buffer, ushort expectedId, List<byte[]> results)
         {
             ArgumentNullException.ThrowIfNull(results);
             results.Clear();
@@ -78,69 +78,6 @@ namespace VectorNNTP.BackFiller.Dns
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Returns <see langword="true"/> when any TXT RR payload equals <paramref name="expectedTxt"/>.
-        /// </summary>
-        internal static bool ResponseContainsTxt(
-            ReadOnlySpan<byte> buffer,
-            ushort expectedId,
-            ReadOnlySpan<byte> expectedTxt)
-        {
-            if (!DnsResponseHeader.TryReadCounts(
-                    buffer,
-                    expectedId,
-                    out ushort qdCount,
-                    out ushort anCount,
-                    out _,
-                    out _))
-            {
-                return false;
-            }
-
-            int offset = DnsWireFormat.HeaderSize;
-            if (!DnsResponseHeader.TrySkipQuestions(buffer, ref offset, qdCount))
-            {
-                return false;
-            }
-
-            for (int a = 0; a < anCount; a++)
-            {
-                if (!DnsNameCodec.TrySkipName(buffer, ref offset))
-                {
-                    return false;
-                }
-
-                if (offset + DnsWireFormat.ResourceRecordFixedFieldsSize > buffer.Length)
-                {
-                    return false;
-                }
-
-                ushort rrType = BinaryPrimitives.ReadUInt16BigEndian(buffer[offset..]);
-                ushort rrClass = BinaryPrimitives.ReadUInt16BigEndian(buffer[(offset + 2)..]);
-                ushort rdLength = BinaryPrimitives.ReadUInt16BigEndian(buffer[(offset + 8)..]);
-                offset += DnsWireFormat.ResourceRecordFixedFieldsSize;
-
-                if (offset + rdLength > buffer.Length)
-                {
-                    return false;
-                }
-
-                if (rrType == DnsRecordType.Txt && rrClass == DnsRecordType.ClassIn)
-                {
-                    if (TryTxtRdataEquals(buffer, ref offset, rdLength, expectedTxt))
-                    {
-                        return true;
-                    }
-                }
-                else
-                {
-                    offset += rdLength;
-                }
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -214,63 +151,6 @@ namespace VectorNNTP.BackFiller.Dns
             }
 
             return result;
-        }
-
-        /// <summary>
-        /// Returns whether the concatenated TXT character-strings equal <paramref name="expectedTxt"/>, and always advances past the RDATA.
-        /// </summary>
-        /// <param name="span">DNS message.</param>
-        /// <param name="offset">Start of RDATA. On return, the first byte after this RDATA.</param>
-        /// <param name="rdLength">RDLENGTH.</param>
-        /// <param name="expectedTxt">Expected concatenated TXT bytes.</param>
-        /// <returns><see langword="false"/> when the RDATA is malformed or the bytes differ.</returns>
-        private static bool TryTxtRdataEquals(
-            ReadOnlySpan<byte> span,
-            ref int offset,
-            ushort rdLength,
-            ReadOnlySpan<byte> expectedTxt)
-        {
-            int rdEnd = offset + rdLength;
-            if (offset >= rdEnd || offset >= span.Length)
-            {
-                offset = rdEnd;
-                return false;
-            }
-
-            int compareIndex = 0;
-            while (offset < rdEnd)
-            {
-                if (offset >= span.Length)
-                {
-                    offset = rdEnd;
-                    return false;
-                }
-
-                int strLen = span[offset++];
-                if (offset + strLen > span.Length || offset + strLen > rdEnd)
-                {
-                    offset = rdEnd;
-                    return false;
-                }
-
-                ReadOnlySpan<byte> segment = span.Slice(offset, strLen);
-                if (compareIndex + segment.Length > expectedTxt.Length)
-                {
-                    offset = rdEnd;
-                    return false;
-                }
-
-                if (!segment.SequenceEqual(expectedTxt.Slice(compareIndex, segment.Length)))
-                {
-                    offset = rdEnd;
-                    return false;
-                }
-
-                compareIndex += segment.Length;
-                offset += strLen;
-            }
-
-            return compareIndex == expectedTxt.Length;
         }
     }
 }

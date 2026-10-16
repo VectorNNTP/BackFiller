@@ -1,7 +1,7 @@
 namespace VectorNNTP.BackFiller.Messaging.Cache
 {
     /// <summary>Explicit StorageServer fleet announcement that the server is leaving selection.</summary>
-    public enum StorageServerLifecycleState
+    internal enum StorageServerLifecycleState
     {
         /// <summary>The server is shutting down and must not be selected for new work.</summary>
         Draining = 1,
@@ -22,7 +22,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// <paramref name="Timestamp"/> orders this announcement against advertisements for the same FQDN.
     /// It does not identify a process.
     /// </remarks>
-    public sealed record StorageServerLifecycleAnnouncement(
+    internal sealed record StorageServerLifecycleAnnouncement(
         int Version,
         int ServerId,
         string Fqdn,

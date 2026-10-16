@@ -12,14 +12,8 @@ namespace VectorNNTP.BackFiller.Configuration
     /// There is no application-specific prefix and no alias for those secrets.
     /// Never log a complete instance: it contains API keys and PFX passwords.
     /// </remarks>
-    public class AcmeCloudflareOptions
+    internal class AcmeCloudflareOptions
     {
-        /// <summary>
-        /// Shared ACME/Cloudflare secrets bind from the configuration root. There is no
-        /// application section name for those secrets.
-        /// </summary>
-        internal const string SectionName = "";
-
         /// <summary>Configuration key for the Cloudflare API key secret.</summary>
         internal const string CloudFlareApiKeyConfigurationKey = "CloudFlareApiKey";
 
@@ -92,7 +86,7 @@ namespace VectorNNTP.BackFiller.Configuration
         public int BindPortTls { get; set; }
 
         /// <summary>Gets whether TLS/ACME configuration is enabled.</summary>
-        public bool IsTlsListenerEnabled => BindPortTls > 0;
+        internal bool IsTlsListenerEnabled => BindPortTls > 0;
 
         /// <summary>Gets or sets the ACME directory URL.</summary>
         public string AcmeDirectoryUrl { get; set; } = DefaultAcmeDirectoryUrl;
@@ -172,58 +166,6 @@ namespace VectorNNTP.BackFiller.Configuration
             }
 
             return address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any);
-        }
-
-        /// <summary>
-        /// Overwrites shared ACME/Cloudflare values and the Cloudflare operation
-        /// timeout from the configuration root so application sections cannot
-        /// alias those keys. Bind addresses, ports, zone id, and DNS suffix are
-        /// left unchanged.
-        /// </summary>
-        /// <param name="options">The options instance to update.</param>
-        /// <param name="configuration">The full configuration root.</param>
-        /// <param name="includeSharedSecrets">
-        /// When <see langword="false"/>, the account email, certificate password, and API key are left unchanged.
-        /// NNTPD, BackFiller, and StorageServer pass <see langword="false"/> because those values come from <c>nntpsharedconfig</c>.
-        /// </param>
-        public static void OverlaySharedFromRoot(
-            AcmeCloudflareOptions options,
-            IConfiguration configuration,
-            bool includeSharedSecrets = true)
-        {
-            ArgumentNullException.ThrowIfNull(options);
-            ArgumentNullException.ThrowIfNull(configuration);
-
-            options.AcmeDirectoryUrl = configuration[nameof(AcmeDirectoryUrl)] ?? DefaultAcmeDirectoryUrl;
-            options.AcmeStateDir = configuration[nameof(AcmeStateDir)] ?? DefaultAcmeStateDir;
-            options.AcmeRenewalThresholdDays = configuration.GetValue(
-                nameof(AcmeRenewalThresholdDays),
-                DefaultAcmeRenewalThresholdDays);
-            if (includeSharedSecrets)
-            {
-                OverlayAcmeAccountEmail(options, configuration);
-                options.AcmeCertificatePassword = configuration[nameof(AcmeCertificatePassword)] ?? string.Empty;
-                options.CloudFlareApiKey = configuration[nameof(CloudFlareApiKey)] ?? string.Empty;
-            }
-
-            var timeout = configuration[nameof(CloudFlareOperationTimeout)];
-            if (!string.IsNullOrWhiteSpace(timeout) && TimeSpan.TryParse(timeout, out var parsed))
-            {
-                options.CloudFlareOperationTimeout = parsed;
-            }
-        }
-
-        /// <summary>
-        /// Copies the shared ACME account email from <see cref="AcmeAccountConfigurationKey"/>.
-        /// Application-section <c>AcmeEmail</c> keys are ignored.
-        /// </summary>
-        /// <param name="options">The options instance to update.</param>
-        /// <param name="configuration">The full configuration root.</param>
-        internal static void OverlayAcmeAccountEmail(AcmeCloudflareOptions options, IConfiguration configuration)
-        {
-            ArgumentNullException.ThrowIfNull(options);
-            ArgumentNullException.ThrowIfNull(configuration);
-            options.AcmeEmail = configuration[AcmeAccountConfigurationKey] ?? string.Empty;
         }
     }
 }

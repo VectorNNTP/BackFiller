@@ -4,7 +4,7 @@ namespace VectorNNTP.BackFiller.Acme
     internal static class CertificateIdentities
     {
         /// <summary>Shared public news hostname required on every server certificate.</summary>
-        public const string NewsHostname = "news.usenet.ninja";
+        internal const string NewsHostname = "news.usenet.ninja";
 
         /// <summary>
         /// Normalizes the certificate FQDN used as the ACME filesystem partition key.

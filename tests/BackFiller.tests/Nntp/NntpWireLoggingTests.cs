@@ -3,13 +3,27 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// Wire log identity and redaction for connect, AUTHINFO, and ARTICLE without logging article bodies.
+    /// </summary>
+
     public sealed class NntpWireLoggingTests
     {
+        /// <summary>Provider account name embedded in <see cref="NntpProviderSession.WireLogIdentity"/> expectations.</summary>
         private const string Account = "optgiga01";
+
+        /// <summary>Credential sent on the wire during AUTHINFO; must not appear verbatim in Debug logs.</summary>
         private const string Password = "super-secret-nntp-password";
+
+        /// <summary>Message-ID used for ARTICLE command logging without retaining article body bytes.</summary>
         private const string MessageId = "<wire-log@example.invalid>";
 
+        /// <summary>
+        /// WireLogIdentity encodes backbone/account[connection/max] and is stable per session instance.
+        /// </summary>
+
         [Fact]
+
         public void Wire_identity_is_stable_and_uses_existing_account_and_slot()
         {
             var first = CreateSession(logger: new CollectingLogger<NntpProviderSession>(), connectionNumber: 1, maxSessions: 100);
@@ -22,6 +36,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, first.ConnectionNumber);
             Assert.Equal(37, second.ConnectionNumber);
         }
+
+        /// <summary>
+        /// Connect and AUTHINFO emit Debug TX/RX with masked credentials and identity prefix.
+        /// </summary>
 
         [Fact]
         public async Task Connect_and_auth_log_tx_rx_at_debug_with_masked_credentials()
@@ -67,6 +85,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// ARTICLE logs status and byte count only; article body lines never appear in logs.
+        /// </summary>
 
         [Fact]
         public async Task Article_logs_status_and_payload_bytes_without_dumping_the_body()
@@ -132,6 +154,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Two pool sessions produce distinct WireLogIdentity values in log prefixes.
+        /// </summary>
+
         [Fact]
         public async Task Distinct_sessions_produce_distinct_identities()
         {
@@ -168,6 +194,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.DoesNotContain(logger.Messages, static message => message.Contains(Password, StringComparison.Ordinal));
         }
 
+        /// <summary>Builds a provider session with test credentials and connection numbering for wire-log identity assertions.</summary>
+        /// <param name="logger">Logger receiving wire traffic lines.</param>
+        /// <param name="connectionNumber">Pool connection index embedded in wire-log identity.</param>
+        /// <param name="maxSessions">Maximum sessions on the provider definition (denominator in identity).</param>
         private static NntpProviderSession CreateSession(
             ILogger logger,
             int connectionNumber = 1,

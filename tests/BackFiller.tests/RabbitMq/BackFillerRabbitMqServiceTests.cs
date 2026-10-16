@@ -7,16 +7,30 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {
+    /// <summary>
+    /// Application RabbitMQ connection service: connect, generation replacement, recovery races, shutdown, and channels.
+    /// </summary>
+
     public sealed class RabbitMqServiceTests
     {
+        /// <summary>
+        /// RabbitMqConnectionHandle does not implement IDisposable; connection lifetime stays with RabbitMqService.
+        /// </summary>
+
         [Fact]
+
         public void ConnectionHandle_does_not_own_the_connection()
         {
             Assert.DoesNotContain(typeof(IDisposable), typeof(RabbitMqConnectionHandle).GetInterfaces());
             Assert.DoesNotContain(typeof(IAsyncDisposable), typeof(RabbitMqConnectionHandle).GetInterfaces());
         }
 
+        /// <summary>
+        /// First StartAsync connects once, publishes generation 1, and exposes a current handle.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_connects_once_and_is_ready()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -43,7 +57,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Connect exception fails startup without marking service ready.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_fails_when_connect_throws()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory
@@ -61,7 +80,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.False(service.TryGetCurrent(out _));
         }
 
+        /// <summary>
+        /// Unusable connection from factory is disposed and startup fails.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_fails_when_connection_is_not_usable()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory { ReturnUnusableConnection = true };
@@ -73,7 +97,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(1, factory.LastConnection!.DisposeCount);
         }
 
+        /// <summary>
+        /// Canceled StartAsync leaves zero connections and not ready.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_cancelled_does_not_leave_a_connection()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory
@@ -93,7 +122,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Null(service.Execution);
         }
 
+        /// <summary>
+        /// After failed StartAsync, a retry can connect successfully.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_can_retry_after_failed_connect()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory
@@ -112,7 +146,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Second StartAsync does not create another connection.
+        /// </summary>
+
         [Fact]
+
         public async Task StartAsync_is_idempotent()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -123,7 +162,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// StopAsync disposes the active connection and clears readiness.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_after_successful_startup_disposes_the_current_generation()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -138,7 +182,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(1, connection.DisposeCount);
         }
 
+        /// <summary>
+        /// Simulated connection loss installs generation 2 and disposes the prior connection.
+        /// </summary>
+
         [Fact]
+
         public async Task ConnectionLost_replaces_connection_and_increments_generation()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -170,7 +219,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Multiple consecutive connection losses keep recovering with increasing generation.
+        /// </summary>
+
         [Fact]
+
         public async Task Repeated_connection_loss_recovers_indefinitely()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -211,7 +265,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Stale connection loss handler cannot replace a newer generation.
+        /// </summary>
+
         [Fact]
+
         public async Task Stale_generation_cannot_replace_newer_generation()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -244,7 +303,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(1, current.DisposeCount);
         }
 
+        /// <summary>
+        /// Dispose on stale handle does not dispose the current connection.
+        /// </summary>
+
         [Fact]
+
         public async Task Stale_generation_cannot_dispose_newer_generation()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -271,7 +335,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Equal(1, current.DisposeCount);
         }
 
+        /// <summary>
+        /// DisposeAsync invalidates handle, disposes connection, and does not fault execution.
+        /// </summary>
+
         [Fact]
+
         public async Task Current_generation_can_be_shut_down_cleanly()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -288,7 +357,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.False(service.Execution!.IsFaulted);
         }
 
+        /// <summary>
+        /// Connection dispose exception is logged; service still shuts down.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_connection_disposal_failure_does_not_stop_shutdown()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -310,7 +384,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.Contains(logger.Entries, static entry => entry.EventId.Id == 2816);
         }
 
+        /// <summary>
+        /// Stop during blocked recovery leaves no replacement connection installed.
+        /// </summary>
+
         [Fact]
+
         public async Task Cancellation_during_recovery_does_not_install_a_replacement()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -339,7 +418,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Dispose while recovery connect is in flight cancels install without faulting execution.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_before_recovery_install_does_not_fault_the_watcher()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -376,7 +460,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             AssertInstallCanceled(logger);
         }
 
+        /// <summary>
+        /// Dispose after recovery connect returns but before install avoids publishing stale generation.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_after_recovery_connect_does_not_publish_or_fault()
         {
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -413,7 +502,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 2809);
         }
 
+        /// <summary>
+        /// Recovery connect exception faults execution and surfaces on DisposeAsync.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_recovery_failure_faults_the_watcher_and_disposal()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -440,7 +534,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.DoesNotContain(logger.Entries, static entry => entry.EventId.Id == 9100);
         }
 
+        /// <summary>
+        /// CreateManualAckChannelAsync on current handle opens channel without disposing connection.
+        /// </summary>
+
         [Fact]
+
         public async Task CreateChannel_uses_the_current_generation_and_does_not_dispose_the_connection()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -461,7 +560,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Stale handle cannot create channels on the replaced connection.
+        /// </summary>
+
         [Fact]
+
         public async Task CreateChannel_on_a_stale_handle_fails()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory();
@@ -482,7 +586,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             await service.DisposeAsync();
         }
 
+        /// <summary>
+        /// Failed connect logs must not contain configured RabbitMQ password.
+        /// </summary>
+
         [Fact]
+
         public async Task Logs_do_not_include_configured_password()
         {
             var factory = new FakeBackFillerRabbitMqConnectionFactory
@@ -499,7 +608,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 static message => Assert.DoesNotContain(BackFillerTestOptions.SecretPassword, message, StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Production RabbitMq sources avoid blocking sync waits on async paths.
+        /// </summary>
+
         [Fact]
+
         public void Production_rabbitmq_code_does_not_block_synchronously()
         {
             var directory = FindRabbitMqSourceDirectory();
@@ -513,7 +627,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Legacy BackFillerRabbitMqService type is absent from the integrated assembly.
+        /// </summary>
+
         [Fact]
+
         public void BackFiller_assembly_does_not_contain_BackFillerRabbitMqService()
         {
             var assembly = typeof(VectorNNTP.BackFiller.Hosting.BackFillerServiceCollectionExtensions).Assembly;
@@ -523,7 +642,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 static type => type.Name == "BackFillerRabbitMqService");
         }
 
+        /// <summary>
+        /// Assembly retains cache/article-work types and excludes legacy backfiller.storage resources.
+        /// </summary>
+
         [Fact]
+
         public void Integrated_standalone_assembly_keeps_common_cache_contracts_without_legacy_backfiller_storage()
         {
             var assembly = typeof(RabbitMqService).Assembly;
@@ -550,6 +674,13 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             Assert.DoesNotContain(topologyNames, static value => value == "backfiller.storage");
         }
 
+        /// <summary>
+        /// Constructs a <see cref="RabbitMqService"/> with minimal reconnect delays for fast tests.
+        /// Does not start the service or open connections.
+        /// </summary>
+        /// <param name="factory">Connection factory injected into the service.</param>
+        /// <param name="logger">Optional logger; defaults to null logger.</param>
+
         internal static RabbitMqService CreateService(
             IRabbitMqConnectionFactory factory,
             ILogger<RabbitMqService>? logger = null)
@@ -564,6 +695,8 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 logger ?? NullLogger<RabbitMqService>.Instance);
         }
 
+        /// <summary>Runtime options with RabbitMQ pool reconnect delays minimized for unit tests.</summary>
+
         internal static BackFillerRuntimeOptions CreateFastRuntime()
         {
             var rabbit = BackFillerTestOptions.CreateValidRabbitMq();
@@ -575,6 +708,8 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 BackFillerTestOptions.CreateValidAcme(),
                 rabbit);
         }
+
+        /// <summary>Walks upward from the test base directory to locate src/BackFiller/RabbitMq on disk.</summary>
 
         private static string FindRabbitMqSourceDirectory()
         {
@@ -593,6 +728,9 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/RabbitMq.");
         }
 
+        /// <summary>Asserts install-canceled diagnostics are logged and topology install success is absent.</summary>
+        /// <param name="logger">Collecting logger from the service under test.</param>
+
         private static void AssertInstallCanceled(CollectingLogger<RabbitMqService> logger)
         {
             Assert.Contains(
@@ -608,12 +746,20 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
         /// </summary>
         private sealed class HoldSecondConnectFactory : IRabbitMqConnectionFactory
         {
+            /// <summary>Underlying fake factory performing actual connect work after gates release.</summary>
+
             private readonly FakeBackFillerRabbitMqConnectionFactory _inner = new();
+            /// <summary>Signaled when the second connect attempt begins.</summary>
             private readonly TaskCompletionSource _secondConnectEntered;
+            /// <summary>Released to unblock the held second connect.</summary>
             private readonly TaskCompletionSource _releaseSecondConnect;
+            /// <summary>Connect attempts observed by this wrapper.</summary>
             private int _attempts;
 
-            public HoldSecondConnectFactory(
+            /// <summary>Blocks the second connect until released for recovery race tests.</summary>
+            /// <param name="secondConnectEntered">Signaled when the second attempt starts.</param>
+            /// <param name="releaseSecondConnect">Released to finish the blocked connect.</param>
+            internal HoldSecondConnectFactory(
                 TaskCompletionSource secondConnectEntered,
                 TaskCompletionSource releaseSecondConnect)
             {
@@ -621,7 +767,16 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 _releaseSecondConnect = releaseSecondConnect;
             }
 
-            public FakeBackFillerRabbitMqConnectionFactory Inner => _inner;
+            /// <summary>Fake factory used for connections that are not held on the second attempt.</summary>
+
+            internal FakeBackFillerRabbitMqConnectionFactory Inner => _inner;
+
+            /// <summary>
+            /// Delegates the first connect to the inner fake; second and later attempts block until released.
+            /// </summary>
+            /// <param name="options">RabbitMQ options forwarded to the inner factory.</param>
+            /// <param name="connectionName">Client connection name forwarded to the inner factory.</param>
+            /// <param name="cancellationToken">Honored on the first attempt only.</param>
 
             public Task<IRabbitMqConnection> ConnectAsync(
                 RabbitMqOptions options,
@@ -635,6 +790,12 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
                 return ConnectSecondAsync(options, connectionName);
             }
+
+            /// <summary>
+            /// Signals second-connect entry, waits for test release, then connects with no cancellation token.
+            /// </summary>
+            /// <param name="options">RabbitMQ options forwarded to the inner factory.</param>
+            /// <param name="connectionName">Client connection name forwarded to the inner factory.</param>
 
             private async Task<IRabbitMqConnection> ConnectSecondAsync(
                 RabbitMqOptions options,

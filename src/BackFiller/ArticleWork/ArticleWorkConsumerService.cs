@@ -13,15 +13,22 @@ namespace VectorNNTP.BackFiller.ArticleWork
     /// backbones that currently have usable capacity, immediately before consumers start.
     /// </summary>
     /// <remarks>
-    /// Membership is reconciled on start, on <see cref="ReconcileInterval"/>, after a usable-capacity snapshot,
+    /// Membership is reconciled on start, on a supervised interval, after a usable-capacity snapshot,
     /// and after a RabbitMQ connection replacement. Those paths share <see cref="_replaceGate"/> except
     /// <see cref="RetireCapacityAsync"/>. Tracked sessions are guarded by <see cref="_gate"/>.
+    /// An unexpected reconcile-loop fault, or a pass that cannot declare topology for a desired consumer, is logged
+    /// and the same loop waits with bounded backoff before trying again. A pass that starts every desired consumer,
+    /// including a pass with nothing to start, resets that delay. Shutdown cancellation ends the loop and does not
+    /// schedule another one.
     /// This type does not delete topology when capacity later drops to zero.
     /// </remarks>
     internal sealed class ArticleWorkConsumerService : IHostedService, IAsyncDisposable, IArticleWorkConsumerReconciliation
     {
-        /// <summary>Delay waited by the background reconcile loop between membership passes.</summary>
+        /// <summary>Delay waited by the background reconcile loop between successful membership passes.</summary>
         private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(15);
+
+        /// <summary>Upper bound for the reconcile-loop backoff after repeated unexpected faults or topology-not-ready passes.</summary>
+        private static readonly TimeSpan ReconcileBackoffCap = TimeSpan.FromMinutes(2);
 
         /// <summary>Process RabbitMQ connection owner. This service opens channels on it and does not open another connection.</summary>
         private readonly IRabbitMqService _connections;
@@ -43,6 +50,23 @@ namespace VectorNNTP.BackFiller.ArticleWork
 
         /// <summary>Usable NNTP capacity gate. An omitted provider starts empty and raises no snapshots.</summary>
         private readonly IBackboneUsableCapacityProvider _capacity;
+
+        /// <summary>Clock for the reconcile delay. Production uses <see cref="TimeProvider.System"/>.</summary>
+        private readonly TimeProvider _time;
+
+        /// <summary>
+        /// Loop body. Null runs <see cref="ReconcileAsync"/>. Tests supply a faulting body without replacing the loop task.
+        /// </summary>
+        private readonly Func<CancellationToken, Task>? _reconcileLoopBody;
+
+        /// <summary>Current reconcile delay in ticks. Doubled after an unexpected fault and reset after success.</summary>
+        private long _reconcileDelayTicks = ReconcileInterval.Ticks;
+
+        /// <summary>Unexpected reconcile-loop faults observed by this process. Shutdown cancellation is not counted.</summary>
+        private int _unexpectedReconcileFaults;
+
+        /// <summary>How many times the loop has armed its delay. Used by tests to observe backoff without a second loop.</summary>
+        private int _reconcileWaitsStarted;
 
         /// <summary>
         /// Guards the session dictionary, <see cref="_stopping"/>, and publication of <see cref="_replaceTask"/>.
@@ -90,6 +114,10 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="logger">Consumer logger.</param>
         /// <param name="catalog">Current provider snapshot. Empty when omitted.</param>
         /// <param name="capacity">Published usable NNTP capacity. Empty when omitted.</param>
+        /// <param name="time">Clock for the reconcile delay. <see cref="TimeProvider.System"/> when omitted.</param>
+        /// <param name="reconcileLoopBody">
+        /// Optional loop body. Null reconciles membership. A thrown exception is supervised inside the same loop task.
+        /// </param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="connections"/>, <paramref name="runtime"/>, <paramref name="handler"/>,
         /// <paramref name="publisher"/>, or <paramref name="logger"/> is null.
@@ -102,7 +130,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
             IArticleWorkResponsePublisher publisher,
             ILogger<ArticleWorkConsumerService> logger,
             IBackFillerProviderCatalog? catalog = null,
-            IBackboneUsableCapacityProvider? capacity = null)
+            IBackboneUsableCapacityProvider? capacity = null,
+            TimeProvider? time = null,
+            Func<CancellationToken, Task>? reconcileLoopBody = null)
         {
             ArgumentNullException.ThrowIfNull(connections);
             ArgumentNullException.ThrowIfNull(runtime);
@@ -116,6 +146,8 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _logger = logger;
             _catalog = catalog ?? new StaticBackFillerProviderCatalog();
             _capacity = capacity ?? new BackboneUsableCapacityState();
+            _time = time ?? TimeProvider.System;
+            _reconcileLoopBody = reconcileLoopBody;
         }
 
         /// <summary>
@@ -135,6 +167,18 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 }
             }
         }
+
+        /// <summary>Background reconcile loop started by <see cref="StartAsync"/>. The same task continues after a fault.</summary>
+        internal Task? ReconcileLoop => _reconcileLoop;
+
+        /// <summary>Unexpected faults handled inside <see cref="RunReconcileLoopAsync"/>. Shutdown cancellation is excluded.</summary>
+        internal int UnexpectedReconcileFaults => Volatile.Read(ref _unexpectedReconcileFaults);
+
+        /// <summary>How many reconcile delays the loop has armed, including the delay that follows a fault.</summary>
+        internal int ReconcileWaitsStarted => Volatile.Read(ref _reconcileWaitsStarted);
+
+        /// <summary>Delay the loop will use for the wait it has armed or will arm next.</summary>
+        internal TimeSpan CurrentReconcileDelay => TimeSpan.FromTicks(Volatile.Read(ref _reconcileDelayTicks));
 
         /// <summary>Gets a copy of the tracked sessions, taken under the session lock.</summary>
         /// <remarks>Intended for tests. The copy does not observe the latest dictionary changes.</remarks>
@@ -162,7 +206,8 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// </returns>
         /// <remarks>
         /// On failure the subscriptions are removed, sessions started during the attempt are stopped, the start flag is cleared, and the exception propagates.
-        /// The loop is not started when reconcile throws. A later call can retry.
+        /// The loop is not started when reconcile throws. A broker that is not ready does not throw, so the loop still starts and applies backoff on its next pass.
+        /// A later call can retry.
         /// </remarks>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
@@ -228,17 +273,31 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="cancellationToken">Cancels the replacement-gate wait and the membership pass.</param>
         /// <returns>
         /// A task that completes when the pass finishes. Returns a completed task when <see cref="IsRunning"/> is false
-        /// before the gate is taken or after it is acquired.
+        /// before the gate is taken or after it is acquired. Infrastructure failure is not thrown; the periodic loop
+        /// reads it from <see cref="ReconcileCoreAsync"/>.
         /// </returns>
         /// <remarks>
         /// Serialized with start, connection replacement, and shutdown through <see cref="_replaceGate"/>.
-        /// Does not catch exceptions from the membership pass.
+        /// Does not catch exceptions from the membership pass. Callers other than the periodic loop do not change
+        /// its backoff. A failed replacement or capacity pass is retried by that loop.
         /// </remarks>
-        public async Task ReconcileAsync(CancellationToken cancellationToken)
+        public Task ReconcileAsync(CancellationToken cancellationToken) =>
+            ReconcileCoreAsync(cancellationToken);
+
+        /// <summary>
+        /// Runs one membership pass and reports whether every desired consumer was started.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels the replacement-gate wait and the membership pass.</param>
+        /// <returns>
+        /// <see cref="ReconcilePass.Succeeded"/> when there was nothing to start or every desired slot is running.
+        /// <see cref="ReconcilePass.InfrastructureUnavailable"/> when a desired backbone could not be declared because
+        /// RabbitMQ was not ready or topology declaration failed. That result is not an unexpected exception.
+        /// </returns>
+        private async Task<ReconcilePass> ReconcileCoreAsync(CancellationToken cancellationToken)
         {
             if (!IsRunning)
             {
-                return;
+                return ReconcilePass.Succeeded;
             }
 
             await _replaceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -246,10 +305,10 @@ namespace VectorNNTP.BackFiller.ArticleWork
             {
                 if (!IsRunning)
                 {
-                    return;
+                    return ReconcilePass.Succeeded;
                 }
 
-                await ReconcileSessionsAsync(cancellationToken).ConfigureAwait(false);
+                return await ReconcileSessionsAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -310,7 +369,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <returns>A task that completes when sessions are stopped and the gate and reconcile source are disposed of. A second call returns immediately.</returns>
         /// <remarks>
         /// Sets <see cref="_stopping"/> before waiting. <see cref="OperationCanceledException"/> from the reconciling loop is swallowed.
-        /// Other exceptions from that loop propagate. A faulted replacement task is logged with its message, and shutdown continues.
+        /// Unexpected loop faults are contained by the loop and do not fault this wait. A faulted replacement task is logged with its message, and shutdown continues.
         /// </remarks>
         private async Task ShutdownAsync(CancellationToken cancellationToken)
         {
@@ -381,17 +440,54 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _replacementRetirementCts.Dispose();
         }
 
-        /// <summary>Waits <see cref="ReconcileInterval"/> and then reconciles until <paramref name="cancellationToken"/> is cancelled.</summary>
+        /// <summary>
+        /// Waits, then reconciles, until <paramref name="cancellationToken"/> is cancelled.
+        /// An unexpected exception is logged and the same task waits again with bounded backoff.
+        /// </summary>
         /// <param name="cancellationToken">Loop cancellation, owned by <see cref="_reconcileCts"/>.</param>
-        /// <returns>A task that completes when the token cancels the delay or a reconciling. Other exceptions propagate and end the loop.</returns>
+        /// <returns>A task that completes when shutdown cancels the delay or a reconciling. Other exceptions do not end the loop.</returns>
         private async Task RunReconcileLoopAsync(CancellationToken cancellationToken)
         {
             try
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    await Task.Delay(ReconcileInterval, cancellationToken).ConfigureAwait(false);
-                    await ReconcileAsync(cancellationToken).ConfigureAwait(false);
+                    Interlocked.Increment(ref _reconcileWaitsStarted);
+                    await Task.Delay(CurrentReconcileDelay, _time, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        if (_reconcileLoopBody is null)
+                        {
+                            var pass = await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
+                            if (pass == ReconcilePass.Succeeded)
+                            {
+                                Volatile.Write(ref _reconcileDelayTicks, ReconcileInterval.Ticks);
+                            }
+                            else
+                            {
+                                ArticleWorkLogMessages.ConsumerReconcileFailed(
+                                    _logger,
+                                    "provider topology is not ready");
+                                IncreaseReconcileDelay();
+                            }
+                        }
+                        else
+                        {
+                            await _reconcileLoopBody(cancellationToken).ConfigureAwait(false);
+                            Volatile.Write(ref _reconcileDelayTicks, ReconcileInterval.Ticks);
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    // codeql[cs/catch-of-all-exceptions] A reconcile fault must stay inside this loop so membership recovery continues.
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref _unexpectedReconcileFaults);
+                        ArticleWorkLogMessages.ConsumerReconcileFailed(_logger, ex.Message);
+                        IncreaseReconcileDelay();
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -400,10 +496,28 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
         }
 
+        /// <summary>Doubles the reconcile delay up to <see cref="ReconcileBackoffCap"/>.</summary>
+        private void IncreaseReconcileDelay()
+        {
+            var current = Volatile.Read(ref _reconcileDelayTicks);
+            var doubled = current > (ReconcileBackoffCap.Ticks / 2)
+                ? ReconcileBackoffCap.Ticks
+                : current * 2;
+            if (doubled > ReconcileBackoffCap.Ticks)
+            {
+                doubled = ReconcileBackoffCap.Ticks;
+            }
+
+            Volatile.Write(ref _reconcileDelayTicks, doubled);
+        }
+
         /// <summary>Starts an untracked reconciling when the host is running.</summary>
         /// <param name="sender">Event sender. Not used.</param>
         /// <param name="eventArgs">Empty snapshot notice. Not used.</param>
-        /// <remarks>The reconcile uses <see cref="CancellationToken.None"/>. Failures are logged by <see cref="ReconcileObservedAsync"/>.</remarks>
+        /// <remarks>
+        /// The reconcile uses <see cref="CancellationToken.None"/>. Failures are logged by <see cref="ReconcileObservedAsync"/>
+        /// and retried by <see cref="RunReconcileLoopAsync"/>. They do not replace that loop.
+        /// </remarks>
         private void OnCapacitySnapshotPublished(object? sender, EventArgs eventArgs)
         {
             if (!IsRunning)
@@ -438,15 +552,19 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="cancellationToken">
         /// Cancels retirement of stale sessions, topology declaration, and each new session start.
         /// </param>
-        /// <returns>A task that completes when the pass has logged its tracked session count.</returns>
+        /// <returns>
+        /// <see cref="ReconcilePass.Succeeded"/> when no slot was desired or every desired slot was started.
+        /// <see cref="ReconcilePass.InfrastructureUnavailable"/> when at least one desired backbone had no ready topology.
+        /// Sessions whose topology did declare are still started.
+        /// </returns>
         /// <remarks>
         /// A tracked running session whose key is still desired is kept. Any other tracked session whose key is no longer desired is removed and retired.
         /// A desired key with no running tracked session is started. Prefetch is the configured positive count, otherwise 1.
         /// Sessions started in one pass share a new pipeline. A start failure disposes sessions started in that pass and propagates; they are not tracked.
         /// If shutdown is set before publication, those new sessions are disposed of instead of tracked.
-        /// When no desired backbone's topology is ready, the pass logs and returns without starting sessions.
+        /// No desired slots is success. A desired slot whose topology is not ready is not success and does not log completion.
         /// </remarks>
-        private async Task ReconcileSessionsAsync(CancellationToken cancellationToken)
+        private async Task<ReconcilePass> ReconcileSessionsAsync(CancellationToken cancellationToken)
         {
             var pipeline = new ArticleWorkDeliveryPipeline(
                 _handler,
@@ -483,16 +601,20 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 await session.DisposeAsync().ConfigureAwait(false);
             }
 
+            var infrastructureUnavailable = false;
             if (desired.Count > 0)
             {
+                var requestedBackbones = desired.Values
+                    .Select(static item => item.Backbone)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var readyBackbones = await EnsureProviderTopologyAsync(
-                        desired.Values.Select(static item => item.Backbone),
+                        requestedBackbones,
                         cancellationToken)
                     .ConfigureAwait(false);
+                infrastructureUnavailable = requestedBackbones.Any(backbone => !readyBackbones.Contains(backbone));
                 if (readyBackbones.Count == 0)
                 {
-                    ArticleWorkLogMessages.ConsumerReconcileCompleted(_logger, Sessions.Count);
-                    return;
+                    return ReconcilePass.InfrastructureUnavailable;
                 }
 
                 foreach (var pair in desired.ToArray().Where(pair => !readyBackbones.Contains(pair.Value.Backbone)))
@@ -552,7 +674,23 @@ namespace VectorNNTP.BackFiller.ArticleWork
                 await session.DisposeAsync().ConfigureAwait(false);
             }
 
+            if (infrastructureUnavailable)
+            {
+                return ReconcilePass.InfrastructureUnavailable;
+            }
+
             ArticleWorkLogMessages.ConsumerReconcileCompleted(_logger, Sessions.Count);
+            return ReconcilePass.Succeeded;
+        }
+
+        /// <summary>Result of one membership pass for the periodic reconcile loop.</summary>
+        private enum ReconcilePass
+        {
+            /// <summary>Every desired consumer is running, or no consumer was desired.</summary>
+            Succeeded,
+
+            /// <summary>At least one desired backbone could not be declared. The periodic loop keeps its backoff.</summary>
+            InfrastructureUnavailable,
         }
 
         /// <summary>
@@ -777,6 +915,10 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="removed">Sessions removed before this task was published.</param>
         /// <param name="started">Completed after <see cref="OnConnectionReplaced"/> releases <see cref="_gate"/>.</param>
         /// <returns>A task that completes when the rebuild attempt finishes. Failures are logged and not rethrown.</returns>
+        /// <remarks>
+        /// An infrastructure-unavailable membership result is not a thrown failure and does not change the periodic loop's delay.
+        /// That loop retries the missing sessions.
+        /// </remarks>
         private async Task FinishAcquiredReplacementAsync(
             List<ArticleWorkConsumerSession> removed,
             Task started)

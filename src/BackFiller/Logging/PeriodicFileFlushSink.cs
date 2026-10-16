@@ -19,11 +19,22 @@ namespace VectorNNTP.BackFiller.Logging
     /// </remarks>
     internal sealed class PeriodicFileFlushSink : ILogEventSink, IDisposable
     {
+        /// <summary>Serializes flush with dispose. Emit does not take this lock.</summary>
         private readonly object _gate = new();
+
+        /// <summary>Inner sink that receives every event. Disposed by <see cref="Dispose"/> when it implements <see cref="IDisposable"/>.</summary>
         private readonly ILogEventSink _sink;
+
+        /// <summary>Same instance as <see cref="_sink"/>, used for <see cref="IFlushableFileSink.FlushToDisk"/>.</summary>
         private readonly IFlushableFileSink _flushable;
+
+        /// <summary>Periodic flush timer. Stopped and disposed by <see cref="Dispose"/>.</summary>
         private readonly Timer _timer;
+
+        /// <summary><c>1</c> when an event has been emitted since the last successful flush. A failed flush sets it again.</summary>
         private int _flushRequired;
+
+        /// <summary><c>1</c> after the first <see cref="Dispose"/>. The timer callback returns without flushing once this is set.</summary>
         private int _disposed;
 
         /// <summary>Wraps <paramref name="sink"/> and flushes it on <paramref name="flushInterval"/>.</summary>
@@ -131,6 +142,10 @@ namespace VectorNNTP.BackFiller.Logging
             }
         }
 
+        /// <summary>
+        /// Flushes when a write is pending and the sink has not been disposed. A flush failure is reported and left pending for a later tick.
+        /// </summary>
+        /// <param name="state">Unused timer state.</param>
         private void OnTick(object? state)
         {
             try

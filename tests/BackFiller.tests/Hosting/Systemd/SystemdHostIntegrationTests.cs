@@ -15,8 +15,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {
+    /// <summary>End-to-end host systemd notify ordering: READY only after successful start, STOPPING on shutdown, none when disabled.</summary>
     public sealed class SystemdHostIntegrationTests
     {
+        /// <summary>Under fake systemd runtime, successful host start emits READY once and STOPPING once on stop; health tracks running state.</summary>
         [Fact]
         public async Task Host_EmitsReadyAfterSuccessfulStart_AndStoppingOnShutdown()
         {
@@ -39,6 +41,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(1, notify.StoppingCount);
             Assert.False(host.Services.GetRequiredService<BackFillerApplicationHealth>().IsHealthyForWatchdog);
         }
+        /// <summary>Application service start failure must not emit READY=1.</summary>
 
         [Fact]
         public async Task Host_StartupFailure_DoesNotEmitReady()
@@ -50,6 +53,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
             Assert.Equal(0, notify.ReadyCount);
         }
+        /// <summary>When notify bridge is disabled, start and stop produce no systemd notifications.</summary>
 
         [Fact]
         public async Task Host_OutsideSystemd_DoesNotEmitNotifications()
@@ -71,6 +75,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(0, notify.StoppingCount);
         }
 
+        /// <summary>Builds a BackFiller host with fake systemd notify and optional ACME startup failure.</summary>
         private static IHost CreateHost(FakeSystemdNotifyBridge notify, bool failApplicationService = false)
         {
             var builder = Host.CreateApplicationBuilder([]);
@@ -101,6 +106,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             return builder.Build();
         }
 
+        /// <summary>Swaps the registered ACME application service for immediate-ready or failing test doubles.</summary>
         private static void ReplaceAcmeApplicationService(IServiceCollection services, bool fail)
         {
             for (var i = 0; i < services.Count; i++)
@@ -115,6 +121,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             }
         }
 
+        /// <summary>Binds an ephemeral loopback TCP port for TLS bind configuration in host tests.</summary>
         private static int GetFreePort()
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -123,17 +130,22 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             listener.Stop();
             return port;
         }
-    }
 
-    internal sealed class FailingAcmeApplicationService : IApplicationService
-    {
-        public string Name => "FailingAcme";
+        /// <summary>IApplicationService test double that always fails start to regress missing READY notify.</summary>
+        private sealed class FailingAcmeApplicationService : IApplicationService
+        {
+            /// <inheritdoc />
+            public string Name => "FailingAcme";
 
-        public Task? Execution => null;
+            /// <inheritdoc />
+            public Task? Execution => null;
 
-        public Task StartAsync(CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("ACME startup failed");
+            /// <inheritdoc />
+            public Task StartAsync(CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("ACME startup failed");
 
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+            /// <inheritdoc />
+            public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        }
     }
 }

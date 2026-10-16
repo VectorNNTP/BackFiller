@@ -31,7 +31,7 @@ namespace VectorNNTP.BackFiller.Hosting
         internal const string ConfigurationPathVariable = "VECTORNNTP_BACKFILLER_STARTUP_SMOKE_CONFIG";
 
         /// <summary>Stdout prefix written after configuration binding succeeds.</summary>
-        internal const string CheckpointPrefix = "BackFiller startup smoke: configuration";
+        private const string CheckpointPrefix = "BackFiller startup smoke: configuration";
 
         /// <summary>Returns whether <paramref name="value"/> requests startup smoke.</summary>
         /// <param name="value">Raw environment value. Null and every value other than <see cref="EnabledValue"/> are ignored.</param>

@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// Newsgroups is the <see cref="ArticleFieldTable.Newsgroups"/> range (no allocated group
     /// list). This type is not a serialization protocol.
     /// </remarks>
-    public readonly struct ArticleRecord
+    internal readonly struct ArticleRecord
     {
         /// <summary>
         /// Retained wire-format article. Headers are the canonical logical bytes. Body lines that begin with <c>.</c> are dot-stuffed. The NNTP terminator is absent. Field ranges index these bytes. The struct stores the reference and does not copy the array.
@@ -63,7 +63,7 @@ namespace VectorNNTP.BackFiller.Articles
         internal ulong ArtHash { get; }
 
         /// <summary>Gets the retained wire-format article size; always <c>ArtData.Length</c>.</summary>
-        public int ArtSize => _artData?.Length ?? 0;
+        internal int ArtSize => _artData?.Length ?? 0;
 
         /// <summary>Gets the Diablo-derived article type flags. Not <c>NntpArticleType</c>.</summary>
         internal ArticleType ArtType { get; }
@@ -75,7 +75,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// body-length check. Materialization does not rewrite the body, so the count is
         /// valid for canonical ArtData.
         /// </summary>
-        public int ArtLines { get; }
+        internal int ArtLines { get; }
 
         /// <summary>Gets the winning Date-family header resolved to UTC.</summary>
         internal DateTime CanonicalUtc { get; }
@@ -84,13 +84,13 @@ namespace VectorNNTP.BackFiller.Articles
         /// Gets the parse/validation state of this record.
         /// <see cref="ArticleParseStatus.CanonicalV1"/> does not imply request Message-ID matching.
         /// </summary>
-        public ArticleParseStatus ParseStatus { get; }
+        internal ArticleParseStatus ParseStatus { get; }
 
         /// <summary>Gets the retained wire-format article (canonical headers, blank line, dot-stuffed body, no NNTP terminator).</summary>
-        public ReadOnlyMemory<byte> ArtData => _artData;
+        internal ReadOnlyMemory<byte> ArtData => _artData;
 
         /// <summary>Gets header value ranges into <see cref="ArtData"/>.</summary>
-        public ArticleFieldTable Fields { get; }
+        internal ArticleFieldTable Fields { get; }
 
         /// <summary>Gets the Message-ID header value bytes in ArtData.</summary>
         internal ReadOnlySpan<byte> MessageId => Fields.MessageId.Slice(_artData);
@@ -109,8 +109,5 @@ namespace VectorNNTP.BackFiller.Articles
 
         /// <summary>Gets the References header value bytes in ArtData.</summary>
         internal ReadOnlySpan<byte> References => Fields.References.Slice(_artData);
-
-        /// <summary>Gets the Path header value bytes in ArtData.</summary>
-        internal ReadOnlySpan<byte> Path => Fields.Path.Slice(_artData);
     }
 }

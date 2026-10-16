@@ -23,6 +23,11 @@ namespace VectorNNTP.BackFiller.Retention
     /// <summary>Result of one NNTP delivery claim attempt.</summary>
     internal readonly struct ArticleDeliveryClaimResult
     {
+        /// <summary>
+        /// Stores one claim outcome. <paramref name="claim"/> is non-null only when <paramref name="kind"/> is <see cref="ArticleDeliveryClaimKind.Claimed"/>.
+        /// </summary>
+        /// <param name="kind">Classification returned to the listener.</param>
+        /// <param name="claim">Exclusive claim when delivery may proceed; otherwise null.</param>
         private ArticleDeliveryClaimResult(
             ArticleDeliveryClaimKind kind,
             ArticleRetentionAuthority.ArticleDeliveryClaim? claim)
@@ -31,10 +36,16 @@ namespace VectorNNTP.BackFiller.Retention
             Claim = claim;
         }
 
-        /// <summary>Gets the claim classification.</summary>
+        /// <summary>
+        /// Listener-facing outcome of <see cref="IArticleRetentionAuthority.TryClaimForDelivery"/>.
+        /// Rejections leave <see cref="Claim"/> null and do not consume a RequestId.
+        /// </summary>
         internal ArticleDeliveryClaimKind Kind { get; }
 
-        /// <summary>Gets the claim when <see cref="Kind"/> is <see cref="ArticleDeliveryClaimKind.Claimed"/>.</summary>
+        /// <summary>
+        /// Exclusive delivery hold when <see cref="Kind"/> is <see cref="ArticleDeliveryClaimKind.Claimed"/>.
+        /// The caller must <see cref="ArticleRetentionAuthority.ArticleDeliveryClaim.Commit"/> after a complete NNTP write or dispose to roll back.
+        /// </summary>
         internal ArticleRetentionAuthority.ArticleDeliveryClaim? Claim { get; }
 
         /// <summary>Creates a claimed result.</summary>

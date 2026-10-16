@@ -4,14 +4,24 @@ using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Tests
 {
+    /// <summary>
+    /// Locks assembly version metadata to the repository date-time four-part scheme without source-control suffixes.
+    /// </summary>
     public sealed class ApplicationVersionTests
     {
+        /// <summary>
+        /// The BackFiller assembly version, informational version, file version, and copyright match the expected date-time layout.
+        /// </summary>
         [Fact]
         public void CompiledVersion_IsDateTimeFourPartNumeric_WithoutSourceRevision()
         {
             AssertDateTimeApplicationVersion(typeof(BackFillerLoggingExtensions).Assembly);
         }
 
+        /// <summary>
+        /// Asserts version fields on <paramref name="assembly"/> follow major 1.0, build near today, and no SCM tokens in informational text.
+        /// </summary>
+        /// <param name="assembly">Assembly whose version attributes are inspected.</param>
         private static void AssertDateTimeApplicationVersion(Assembly assembly)
         {
             var version = assembly.GetName().Version;

@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
     internal sealed class CloudflareDnsReconciler : ICloudflareDnsReconciler, IDisposable
     {
         /// <summary>Maximum reconcile attempts within a single <see cref="ReconcileAsync"/> call.</summary>
-        internal const int MaxAttempts = 3;
+        private const int MaxAttempts = 3;
 
         /// <summary>Cloudflare DNS record API used for list, create, update, and delete.</summary>
         private readonly ICloudflareDnsClient _client;
@@ -53,11 +53,11 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <summary>
         /// Gets or sets the delay function used for reconciler attempt backoff (tests may replace this).
         /// </summary>
-        internal Func<TimeSpan, CancellationToken, Task> DelayAsync { get; set; } =
+        private Func<TimeSpan, CancellationToken, Task> DelayAsync { get; set; } =
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CloudflareDnsReconciler"/> class.
+        /// Stores the DNS client, operation timeout options, and logger. Does not call Cloudflare until reconcile or cleanup runs.
         /// </summary>
         /// <param name="client">DNS record API client.</param>
         /// <param name="options">Options that supply the default operation timeout.</param>
@@ -415,7 +415,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <returns>
         /// <see langword="false"/> for blank input, a name that normalizes to empty, or a name containing an empty label.
         /// </returns>
-        internal static bool TryClassifyExactFqdn(string? recordName, string normalizedExpected, out bool isExactMatch)
+        private static bool TryClassifyExactFqdn(string? recordName, string normalizedExpected, out bool isExactMatch)
         {
             isExactMatch = false;
             if (string.IsNullOrWhiteSpace(recordName) || string.IsNullOrWhiteSpace(normalizedExpected))

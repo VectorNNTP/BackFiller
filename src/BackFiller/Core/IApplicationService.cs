@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Core
     /// Long-running work after <see cref="StartAsync"/> may be exposed via
     /// <see cref="Execution"/> so unexpected termination can be observed.
     /// </remarks>
-    public interface IApplicationService
+    internal interface IApplicationService
     {
         /// <summary>Gets a stable, human-readable name used in logs and diagnostics.</summary>
         string Name { get; }

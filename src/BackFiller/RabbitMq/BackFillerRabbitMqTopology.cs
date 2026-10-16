@@ -13,7 +13,7 @@ namespace VectorNNTP.BackFiller.RabbitMq
     internal static class BackFillerRabbitMqTopology
     {
         /// <summary>Topology namespace prefix.</summary>
-        internal const string Prefix = "backfiller";
+        private const string Prefix = "backfiller";
 
         /// <summary>
         /// Canonical provider backbone labels. <see cref="ComposeProviderEntity"/> turns one label

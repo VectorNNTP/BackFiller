@@ -39,7 +39,7 @@ namespace VectorNNTP.BackFiller.Accounts
         /// <param name="serverId">BackFiller server id bound to <c>@ServerId</c>.</param>
         /// <exception cref="ArgumentNullException"><paramref name="nntpDb"/> is null.</exception>
         /// <exception cref="InvalidOperationException"><paramref name="serverId"/> is outside 0–255.</exception>
-        public MySqlProviderAccountSource(NntpDbService nntpDb, int serverId)
+        internal MySqlProviderAccountSource(NntpDbService nntpDb, int serverId)
         {
             ArgumentNullException.ThrowIfNull(nntpDb);
             if (serverId is < byte.MinValue or > byte.MaxValue)
@@ -71,6 +71,7 @@ namespace VectorNNTP.BackFiller.Accounts
             try
             {
                 await using var session = await _nntpDb.OpenAsync(cancellationToken).ConfigureAwait(false);
+                
                 {
                     var command = session.CreateCommand();
                     await using (command.ConfigureAwait(false))

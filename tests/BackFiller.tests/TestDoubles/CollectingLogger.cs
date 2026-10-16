@@ -2,13 +2,23 @@ using Microsoft.Extensions.Logging;
 
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
 {
+    /// <summary>One captured log line with level, event id, and formatted message text.</summary>
+    /// <param name="Level">Log level passed to <see cref="ILogger.Log{TState}"/>.</param>
+    /// <param name="EventId">Event id passed to the log call.</param>
+    /// <param name="Message">Formatted message; a second entry may be added for <see cref="Exception.Message"/>.</param>
     internal readonly record struct CollectedLog(LogLevel Level, EventId EventId, string Message);
 
+    /// <summary>
+    /// <see cref="ILogger{T}"/> double that records formatted messages (and exception messages) for assertions.
+    /// Does not forward to a real logging pipeline; scopes are no-ops and all levels are enabled.
+    /// </summary>
     internal sealed class CollectingLogger<T> : ILogger<T>
     {
+        /// <summary>Captured log entries guarded for concurrent assertions.</summary>
         private readonly List<CollectedLog> _entries = [];
 
-        public IReadOnlyList<string> Messages
+        /// <summary>Formatted messages in capture order (thread-safe snapshot).</summary>
+        internal IReadOnlyList<string> Messages
         {
             get
             {
@@ -19,7 +29,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
-        public IReadOnlyList<CollectedLog> Entries
+        /// <summary>Structured capture entries in insertion order (thread-safe snapshot).</summary>
+        internal IReadOnlyList<CollectedLog> Entries
         {
             get
             {
@@ -30,11 +41,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        /// <inheritdoc />
         public IDisposable BeginScope<TState>(TState state)
             where TState : notnull => NullScope.Instance;
 
+        /// <inheritdoc />
         public bool IsEnabled(LogLevel logLevel) => true;
 
+        /// <inheritdoc />
         public void Log<TState>(
             LogLevel logLevel,
             EventId eventId,
@@ -54,10 +68,13 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
         }
 
+        /// <summary>No-op logging scope returned from <see cref="BeginScope{TState}"/>.</summary>
         private sealed class NullScope : IDisposable
         {
+            /// <summary>Shared no-op scope instance.</summary>
             public static NullScope Instance { get; } = new();
 
+            /// <inheritdoc />
             public void Dispose()
             {
             }

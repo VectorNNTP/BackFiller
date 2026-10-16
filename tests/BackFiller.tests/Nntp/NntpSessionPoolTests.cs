@@ -5,9 +5,18 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// NNTP session pool leasing, replenishment, shrink, shutdown, and DATE keep-alive with scripted transports.
+    /// </summary>
+
     public sealed class NntpSessionPoolTests
     {
+        /// <summary>
+        /// EnsureDesiredSessions opens MaxSessions connections before any lease is taken.
+        /// </summary>
+
         [Fact]
+
         public async Task EnsureDesiredSessions_connects_max_sessions_before_any_lease()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -22,7 +31,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// BindProvider shrink retires excess idle sessions without additional connect attempts.
+        /// </summary>
+
         [Fact]
+
         public async Task ShrinkToBound_retires_excess_idle_sessions_without_reconnect()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -57,7 +71,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Released healthy lease reuses the same connection when max is one.
+        /// </summary>
+
         [Fact]
+
         public async Task Pool_reuses_a_healthy_session_and_does_not_exceed_max()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -75,7 +94,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Concurrent acquires receive distinct sessions up to pool capacity.
+        /// </summary>
+
         [Fact]
+
         public async Task Pool_does_not_allow_concurrent_use_of_one_session()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -91,7 +115,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Canceled wait on full pool and dispose while waiting fail without leaking leases.
+        /// </summary>
+
         [Fact]
+
         public async Task Acquire_cancellation_and_shutdown_while_waiting()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -111,7 +140,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await Assert.ThrowsAnyAsync<Exception>(() => shutdownWait);
         }
 
+        /// <summary>
+        /// Non-reusable session after protocol error is replaced on next acquire.
+        /// </summary>
+
         [Fact]
+
         public async Task Broken_session_is_not_reused()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -134,7 +168,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Double dispose on a lease does not put the same session back twice.
+        /// </summary>
+
         [Fact]
+
         public async Task Double_release_does_not_return_the_session_twice()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -150,7 +189,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Pool dispose waits for active lease release then rejects further acquires.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_with_active_lease_waits_then_closes()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -164,7 +208,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await Assert.ThrowsAnyAsync<Exception>(() => pool.AcquireAsync(CancellationToken.None));
         }
 
+        /// <summary>
+        /// Unreusable session after failed ARTICLE is not returned to the idle pool.
+        /// </summary>
+
         [Fact]
+
         public async Task Session_failure_during_release_does_not_return_the_session()
         {
             var factory = new ScriptedNntpTransportFactory();
@@ -186,7 +235,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>
+        /// Failed connect on acquire does not leave ActiveLeaseCount elevated.
+        /// </summary>
+
         [Fact]
+
         public async Task Connect_failure_does_not_leak_a_lease_slot()
         {
             var factory = new ScriptedNntpTransportFactory
@@ -200,6 +254,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await pool.DisposeAsync();
         }
 
+        /// <summary>Enqueues scripted NNTP servers that accept AUTHINFO and otherwise return 430 missing.</summary>
+        /// <param name="factory">Transport factory receiving ready server instances.</param>
+        /// <param name="count">Number of identical servers to enqueue.</param>
         internal static void EnqueueReadyServers(ScriptedNntpTransportFactory factory, int count)
         {
             for (var i = 0; i < count; i++)
@@ -213,7 +270,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// Replenish connect fault is logged; pool can drop to zero active sessions without crashing.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_replenish_failure_is_logged_and_does_not_fault_the_unobserved_fill()
         {
             var logger = new CollectingLogger<NntpSessionPool>();
@@ -235,7 +297,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(0, pool.ActiveSessionCount);
         }
 
+        /// <summary>
+        /// Shutdown during gated establishment logs cancel distinct from replenish failure.
+        /// </summary>
+
         [Fact]
+
         public async Task Shutdown_during_observed_fill_is_logged_separately_from_replenishment_failure()
         {
             var logger = new CollectingLogger<NntpSessionPool>();
@@ -278,9 +345,21 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>Creates a session-establishment gate capped at <paramref name="maxConcurrent"/> parallel connects.</summary>
+        /// <param name="maxConcurrent">Maximum simultaneous provider session establishments.</param>
         internal static ProviderSessionEstablishmentGate CreateEstablishmentGate(int maxConcurrent = 1024) =>
             new(maxConcurrent);
 
+        /// <summary>Constructs an <see cref="NntpSessionPool"/> wired to a scripted factory with test timeouts and backbone label.</summary>
+        /// <param name="factory">Scripted transport factory supplying NNTP connections.</param>
+        /// <param name="max">Maximum concurrent sessions for the provider definition.</param>
+        /// <param name="min">Minimum desired sessions.</param>
+        /// <param name="keepAliveSeconds">DATE keep-alive interval; zero disables keep-alive.</param>
+        /// <param name="time">Optional time provider for keep-alive timers.</param>
+        /// <param name="commandTimeout">Optional per-command timeout override.</param>
+        /// <param name="establishment">Optional establishment gate; defaults to a high concurrency gate.</param>
+        /// <param name="backbone">Provider backbone name used in logs.</param>
+        /// <param name="logger">Logger instance; defaults to null logger.</param>
         internal static NntpSessionPool CreatePool(
             ScriptedNntpTransportFactory factory,
             int max,
@@ -316,6 +395,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 timeProvider: time);
         }
 
+        /// <summary>Scripted server answering DATE, AUTHINFO, and ARTICLE with optional synchronization gates.</summary>
+        /// <param name="dateResponse">Raw DATE command response line including CRLF.</param>
+        /// <param name="dateStarted">Optional signal when a DATE command is received.</param>
+        /// <param name="blockDate">Optional gate that blocks DATE handling until released.</param>
+        /// <param name="articleStarted">Optional signal when an ARTICLE command is received.</param>
+        /// <param name="blockArticle">Optional gate that blocks ARTICLE handling until released.</param>
         internal static ScriptedNntpServer CreateDateAwareServer(
             string dateResponse = "111 20260926120000\r\n",
             TaskCompletionSource? dateStarted = null,
@@ -352,7 +437,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             return server;
         }
 
+        /// <summary>
+        /// Pool dispose logs DATE keep-alive cancellation and completes.
+        /// </summary>
+
         [Fact]
+
         public async Task Keepalive_cancellation_is_logged_and_disposal_completes()
         {
             var logger = new CollectingLogger<NntpSessionPool>();
@@ -375,7 +465,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                     StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// DATE keep-alive fault retires the session and is logged.
+        /// </summary>
+
         [Fact]
+
         public async Task Unexpected_keepalive_failure_retires_the_session()
         {
             var logger = new CollectingLogger<NntpSessionPool>();
@@ -395,6 +490,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(0, pool.ActiveLeaseCount);
         }
 
+        /// <summary>Polls <paramref name="predicate"/> with yields until true or a two-second timeout.</summary>
+        /// <param name="predicate">Condition that must become true.</param>
         private static async Task WaitUntilAsync(Func<bool> predicate)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -405,16 +502,29 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// TimeProvider returning inert timers for keep-alive tests.
+        /// </summary>
+
         private sealed class IdleTimeProvider : TimeProvider
         {
+            /// <summary>Returns <see cref="IdleTimer"/> instances so DATE keep-alive timers never fire during the scenario.</summary>
+            /// <inheritdoc />
             public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
                 new IdleTimer();
         }
 
+        /// <summary>
+        /// TimeProvider whose first timer throws to simulate keep-alive clock failure.
+        /// </summary>
+
         private sealed class OnceFailingTimeProvider : TimeProvider
         {
+            /// <summary>Number of <see cref="CreateTimer"/> invocations; the first triggers retirement via thrown exception.</summary>
             private int _calls;
 
+            /// <summary>First timer creation throws <see cref="NotSupportedException"/>; later calls return inert timers like <see cref="IdleTimeProvider"/>.</summary>
+            /// <inheritdoc />
             public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
             {
                 if (Interlocked.Increment(ref _calls) == 1)
@@ -426,14 +536,23 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// No-op ITimer used when keep-alive timers should not fire.
+        /// </summary>
+
         private sealed class IdleTimer : ITimer
         {
+            /// <summary>Always returns false so the timer is never rescheduled.</summary>
+            /// <param name="dueTime">Ignored.</param>
+            /// <param name="period">Ignored.</param>
             public bool Change(TimeSpan dueTime, TimeSpan period) => false;
 
+            /// <summary>No-op timer disposal.</summary>
             public void Dispose()
             {
             }
 
+            /// <summary>Completes immediately; no asynchronous timer teardown.</summary>
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }

@@ -17,10 +17,10 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     internal static class StorageServerLifecycleWireProtocol
     {
         /// <summary>Current application protocol version.</summary>
-        public const int CurrentVersion = 1;
+        private const int CurrentVersion = 1;
 
         /// <summary>Reason returned when the payload is an object without <c>state</c>.</summary>
-        public const string NotLifecycleReason = "Payload is not a StorageServer lifecycle announcement.";
+        private const string NotLifecycleReason = "Payload is not a StorageServer lifecycle announcement.";
 
         /// <summary>Serializes a version-1 lifecycle announcement into compact UTF-8 JSON.</summary>
         /// <param name="announcement">Concrete valid v1 announcement.</param>

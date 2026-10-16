@@ -59,19 +59,21 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="retriever">NNTP ARTICLE retriever.</param>
         /// <param name="retention">Canonical retention authority.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="retriever"/> or <paramref name="retention"/> is null.</exception>
-        public ProviderArticleWorkHandler(INntpArticleRetriever retriever, IArticleRetentionAuthority retention)
+        internal ProviderArticleWorkHandler(INntpArticleRetriever retriever, IArticleRetentionAuthority retention)
             : this(retriever, retention, new NntpArticleParser("backfiller.test"))
         {
         }
 
-        /// <summary>Initializes the handler.</summary>
+        /// <summary>
+        /// Creates the handler with an explicit Path identity on the CanonicalV1 parser and no shared-configuration catalogue.
+        /// </summary>
         /// <param name="retriever">NNTP ARTICLE retriever.</param>
         /// <param name="retention">Canonical retention authority.</param>
         /// <param name="parser">CanonicalV1 parser, including the Path host identity it stamps onto accepted articles.</param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="retriever"/>, <paramref name="retention"/>, or <paramref name="parser"/> is null.
         /// </exception>
-        public ProviderArticleWorkHandler(
+        internal ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser)
@@ -84,7 +86,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="retention">Canonical retention authority.</param>
         /// <param name="parser">CanonicalV1 parser used when <paramref name="sharedConfiguration"/> is null.</param>
         /// <param name="sharedConfiguration">Published <c>nntpsharedconfig</c>. Captured once per article.</param>
-        public ProviderArticleWorkHandler(
+        private ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -100,7 +102,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="sharedConfiguration">Published <c>nntpsharedconfig</c>. Captured once per article.</param>
         /// <param name="serverId">BackFiller server id combined with <c>dnssuffix</c> for the Path hop and retained endpoint.</param>
         /// <param name="logger">Article-processing logger. Null uses <see cref="NullLogger{T}.Instance"/>.</param>
-        public ProviderArticleWorkHandler(
+        internal ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -119,16 +121,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _logger = logger ?? NullLogger<ProviderArticleWorkHandler>.Instance;
         }
 
-        /// <summary>Gets the last retrieval classification (tests).</summary>
+        /// <summary>Last <see cref="INntpArticleRetriever"/> outcome written by <see cref="HandleAsync"/> without synchronization (tests).</summary>
         internal ArticleRetrievalKind? LastKind { get; private set; }
 
-        /// <summary>Gets the last retention classification (tests).</summary>
+        /// <summary>Last <see cref="IArticleRetentionAuthority.RetainCanonical"/> kind from the same call (tests).</summary>
         internal ArticleRetentionKind? LastRetentionKind { get; private set; }
 
-        /// <summary>Gets the last retained BackFiller FQDN (tests).</summary>
+        /// <summary>Last Success FQDN returned by retention for routing metadata (tests).</summary>
         internal string? LastFqdn { get; private set; }
 
-        /// <summary>Gets the last retained listener port (tests).</summary>
+        /// <summary>Last Success TLS listener port returned by retention (tests).</summary>
         internal int? LastListenerPort { get; private set; }
 
         /// <summary>

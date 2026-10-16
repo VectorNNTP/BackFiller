@@ -125,7 +125,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>
         /// Builds AMQP properties for a confirmed publication.
         /// </summary>
-        internal static BasicProperties CreateProperties(RabbitMqConfirmedPublication publication)
+        private static BasicProperties CreateProperties(RabbitMqConfirmedPublication publication)
         {
             ArgumentNullException.ThrowIfNull(publication);
             var properties = new BasicProperties
@@ -174,33 +174,6 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             }
 
             return properties;
-        }
-
-        /// <summary>
-        /// Builds the AMQP properties sent on OverviewDB-shaped publications.
-        /// </summary>
-        /// <param name="messageId">Fresh UUID string for this publish attempt.</param>
-        /// <param name="appId">Generated application FQDN.</param>
-        /// <param name="expiration">Per-message TTL in milliseconds, as an AMQP string.</param>
-        /// <returns>The properties instance passed to <c>BasicPublishAsync</c>.</returns>
-        internal static BasicProperties CreateHandoffProperties(string messageId, string appId, string expiration)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
-            ArgumentException.ThrowIfNullOrWhiteSpace(appId);
-            ArgumentException.ThrowIfNullOrWhiteSpace(expiration);
-            return CreateProperties(
-                new RabbitMqConfirmedPublication(
-                    Exchange: string.Empty,
-                    RoutingKey: "placeholder",
-                    MessageId: messageId,
-                    AppId: appId,
-                    CorrelationId: null,
-                    ContentType: null,
-                    RequestIdHeader: null,
-                    ExpirationMilliseconds: expiration,
-                    Persistent: true,
-                    Mandatory: true,
-                    Body: ReadOnlyMemory<byte>.Empty));
         }
     }
 }

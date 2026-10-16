@@ -18,6 +18,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
     /// </summary>
     public sealed class ArticleIngestionWorkloadBench
     {
+        /// <summary>
+        /// Runs factory, pipeline, stage, scan, concurrent, retention, and CRC measurements for synthetic sizes; console output only.
+        /// </summary>
         [Fact]
         public async Task Measure_synthetic_article_sizes()
         {
@@ -86,6 +89,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             MeasureCrc();
         }
 
+        /// <summary>Times repeated <see cref="ArticleRecordFactory.TryCreate"/> and prints throughput, percentiles, and allocation.</summary>
+        /// <param name="parser">Shared parser.</param>
+        /// <param name="name">Sample label.</param>
+        /// <param name="logical">Destuffed logical bytes.</param>
+        /// <param name="iterations">Timed iterations after warmup.</param>
         private static void MeasureFactory(NntpArticleParser parser, string name, byte[] logical, int iterations)
         {
             for (var i = 0; i < 2; i++)
@@ -124,6 +132,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"{name} factory logical={logical.Length} wire={wire} n={iterations} articles/s={iterations / (ms / 1000.0):F0} MiB/s={mib / (ms / 1000.0):F1} alloc/article={allocated / iterations} p50us={TicksToUs(samples[PercentileIndex(iterations, 50)]):F0} p95us={TicksToUs(samples[PercentileIndex(iterations, 95)]):F0} p99us={TicksToUs(samples[PercentileIndex(iterations, 99)]):F0} gen0={GC.CollectionCount(0) - g0} gen1={GC.CollectionCount(1) - g1} gen2={GC.CollectionCount(2) - g2} managedPeak={managedPeak}");
         }
 
+        /// <summary>Times reader destuff plus factory callback on a cycling framed stream.</summary>
+        /// <param name="parser">Shared parser.</param>
+        /// <param name="name">Sample label.</param>
+        /// <param name="logical">Logical article bytes.</param>
+        /// <param name="iterations">Timed iterations after one cold read.</param>
         private static async Task MeasurePipelineAsync(NntpArticleParser parser, string name, byte[] logical, int iterations)
         {
             var wire = Frame(logical);
@@ -184,6 +197,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"{name} pipeline logical={logical.Length} n={iterations} articles/s={iterations / (ms / 1000.0):F0} MiB/s={mib / (ms / 1000.0):F1} alloc/article={allocated / iterations} coldAlloc={coldAlloc} offThreadCallbacks={offThread} p50us={TicksToUs(samples[PercentileIndex(iterations, 50)]):F0} p95us={TicksToUs(samples[PercentileIndex(iterations, 95)]):F0} p99us={TicksToUs(samples[PercentileIndex(iterations, 99)]):F0} gen0={GC.CollectionCount(0) - g0} gen1={GC.CollectionCount(1) - g1} gen2={GC.CollectionCount(2) - g2} workingSet={workingSet}");
         }
 
+        /// <summary>Times rejected <see cref="ArticleRecordFactory.TryCreate"/> attempts (for example truncated yEnc).</summary>
+        /// <param name="parser">Shared parser.</param>
+        /// <param name="name">Sample label.</param>
+        /// <param name="logical">Bytes expected to reject.</param>
+        /// <param name="iterations">Timed iterations.</param>
         private static void MeasureRejection(NntpArticleParser parser, string name, byte[] logical, int iterations)
         {
             var samples = new long[iterations];
@@ -203,6 +221,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Console.WriteLine($"{name} rejection logical={logical.Length} n={iterations} rejects/s={iterations / (ms / 1000.0):F0} alloc/article={allocated / iterations}");
         }
 
+        /// <summary>Prints average microseconds for parse, materialize, hash, and full yEnc validation stages.</summary>
+        /// <param name="parser">Shared parser.</param>
+        /// <param name="logical">Accepted logical article.</param>
+        /// <param name="name">Sample label.</param>
         private static void MeasureStages(NntpArticleParser parser, byte[] logical, string name)
         {
             const int iterations = 24;
@@ -231,6 +253,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"{name} stages n={iterations} parseUs={TicksToUs(parseTicks / iterations):F0} materializeUs={TicksToUs(materializeTicks / iterations):F0} hashUs={TicksToUs(hashTicks / iterations):F0} fullValidatorUs={TicksToUs(yencTicks / iterations):F0}");
         }
 
+        /// <summary>Compares production dot counting against an index-of baseline on the parsed body.</summary>
+        /// <param name="logical">Logical article containing a body to scan.</param>
+        /// <param name="name">Sample label.</param>
         private static void MeasureScanCandidates(byte[] logical, string name)
         {
             var parsedBodyStart = logical.AsSpan().IndexOf("\r\n\r\n"u8);
@@ -254,6 +279,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"{name} scan n={iterations} body={body.Length} scalarUs={TicksToUs(scalar / iterations):F0} indexOfUs={TicksToUs(indexed / iterations):F0}");
         }
 
+        /// <summary>Parallel factory throughput and allocation snapshot for one logical article.</summary>
+        /// <param name="parser">Shared parser.</param>
+        /// <param name="logical">Logical bytes.</param>
+        /// <param name="name">Sample label.</param>
+        /// <param name="operations">Concurrent worker count.</param>
         private static void MeasureConcurrent(NntpArticleParser parser, byte[] logical, string name, int operations)
         {
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -284,6 +314,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"{name} concurrent={operations} elapsedMs={elapsedMs:F1} articles/s={operations / (elapsedMs / 1000.0):F0} alloc/article={allocated / operations} gen0={GC.CollectionCount(0) - g0} gen1={GC.CollectionCount(1) - g1} gen2={GC.CollectionCount(2) - g2} workingSet={Process.GetCurrentProcess().WorkingSet64}");
         }
 
+        /// <summary>Prints allocation for first retain versus duplicate <see cref="IArticleRetentionAuthority.RetainCanonical"/> on one record.</summary>
+        /// <param name="parser">Parser used to build the record.</param>
+        /// <param name="logical">750KiB-class plain sample.</param>
         private static async Task MeasureRetentionAsync(NntpArticleParser parser, byte[] logical)
         {
             var created = ArticleRecordFactory.TryCreate(parser, logical, ArticlePathMode.Traverse);
@@ -311,6 +344,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"750KiB-plain retention wire={created.Record.ArtSize} admitAlloc={admitAlloc} duplicateAlloc={duplicateAlloc} retainedBytes={authority.RetainedPayloadBytes}");
         }
 
+        /// <summary>Compares scalar yEnc CRC32 against <see cref="Crc32"/> block and chunked append timings.</summary>
         private static void MeasureCrc()
         {
             const int bytes = 750 * 1024;
@@ -342,6 +376,11 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 $"crc32 decoded={bytes} n={iterations} scalarUs={TicksToUs(scalarTicks / iterations):F0} hashingBlockUs={TicksToUs(blockTicks / iterations):F0} hashing512Us={TicksToUs(chunkTicks / iterations):F0}");
         }
 
+        /// <summary>Runs one warmup plus <paramref name="iterations"/> timed calls and returns total elapsed ticks.</summary>
+        /// <param name="_">Unused label for call-site readability.</param>
+        /// <param name="action">Stage under measurement.</param>
+        /// <param name="iterations">Timed repetitions after warmup.</param>
+        /// <returns>Stopwatch ticks across timed iterations.</returns>
         private static long Time(string _, Action action, int iterations)
         {
             action();
@@ -354,6 +393,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return Stopwatch.GetTimestamp() - start;
         }
 
+        /// <summary>Reference dot-line counter used to validate <see cref="ArticleBodyWireStuffer.CountExtraDots"/> in scan benches.</summary>
+        /// <param name="body">Parsed body span.</param>
+        /// <returns>Count of body lines that begin with a dot.</returns>
         private static int CountExtraDotsIndexOf(ReadOnlySpan<byte> body)
         {
             var extra = 0;
@@ -388,11 +430,23 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return extra;
         }
 
+        /// <summary>Maps a percentile to a zero-based index in a sorted sample array.</summary>
+        /// <param name="count">Sample length.</param>
+        /// <param name="percentile">Percentile in [0, 100].</param>
+        /// <returns>Clamped index for order statistics.</returns>
         private static int PercentileIndex(int count, int percentile) =>
             Math.Clamp((int)Math.Ceiling(count * (percentile / 100.0)) - 1, 0, count - 1);
 
+        /// <summary>Converts stopwatch ticks to microseconds for bench console lines.</summary>
+        /// <param name="ticks">Elapsed ticks.</param>
+        /// <returns>Microseconds at the current frequency.</returns>
         private static double TicksToUs(long ticks) => ticks * 1_000_000.0 / Stopwatch.Frequency;
 
+        /// <summary>Builds ASCII logical articles with optional Path header.</summary>
+        /// <param name="id">Message-ID local part.</param>
+        /// <param name="body">Body bytes after headers.</param>
+        /// <param name="includePath">When true, includes a Path header line.</param>
+        /// <returns>Concatenated header and body.</returns>
         private static byte[] Article(string id, byte[] body, bool includePath)
         {
             var header = Encoding.ASCII.GetBytes(
@@ -409,6 +463,10 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return article;
         }
 
+        /// <summary>Repeats a line pattern until at least <paramref name="minimumBytes"/> of body exist.</summary>
+        /// <param name="line">Line template including line ending bytes.</param>
+        /// <param name="minimumBytes">Minimum body size target.</param>
+        /// <returns>Trimmed body buffer.</returns>
         private static byte[] Repeat(ReadOnlySpan<byte> line, int minimumBytes)
         {
             var body = new byte[minimumBytes + line.Length];
@@ -422,6 +480,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return body.AsSpan(0, written).ToArray();
         }
 
+        /// <summary>Generates variable-length lines with periodic dot-leading lines for mixed stuffing benches.</summary>
+        /// <param name="minimumBytes">Target minimum body size.</param>
+        /// <returns>Synthetic mixed body bytes.</returns>
         private static byte[] MixedBody(int minimumBytes)
         {
             ReadOnlySpan<byte> lengths = [24, 48, 80, 120];
@@ -449,6 +510,9 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return body.AsSpan(0, written).ToArray();
         }
 
+        /// <summary>Builds a valid yEnc section with begin/end lines sized near <paramref name="minimumBytes"/> logical footprint.</summary>
+        /// <param name="minimumBytes">Approximate total logical size target.</param>
+        /// <returns>Full logical article including yEnc headers in the body.</returns>
         private static byte[] YEncArticle(int minimumBytes)
         {
             const int lineLength = 128;
@@ -473,9 +537,16 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             return Article("yenc", body, includePath: true);
         }
 
+        /// <summary>Shortens an article from the tail to synthesize truncated rejection samples.</summary>
+        /// <param name="article">Source logical bytes.</param>
+        /// <param name="trailingBytesToDrop">Bytes removed from the end.</param>
+        /// <returns>Truncated copy.</returns>
         private static byte[] Truncate(byte[] article, int trailingBytesToDrop) =>
             article.AsSpan(0, article.Length - trailingBytesToDrop).ToArray();
 
+        /// <summary>NNTP multiline framing with dot stuffing and terminator for pipeline benches.</summary>
+        /// <param name="logical">Destuffed logical article.</param>
+        /// <returns>Wire bytes fed to <see cref="CyclingStream"/>.</returns>
         private static byte[] Frame(byte[] logical)
         {
             var buffer = new byte[logical.Length + (logical.Length / 2) + 8];
@@ -529,6 +600,7 @@ namespace VectorNNTP.BackFiller.Tests.Articles
         private static double LogicalMebibytes(int logicalLength, int iterations)
             => (double)logicalLength * iterations / (1024d * 1024d);
 
+        /// <summary>Guards <see cref="LogicalMebibytes"/> against int overflow when multiplying length by iteration count.</summary>
         [Fact]
         public void Logical_mebibytes_multiply_before_the_unit_conversion()
         {
@@ -539,30 +611,40 @@ namespace VectorNNTP.BackFiller.Tests.Articles
             Assert.True(widened > 0d);
         }
 
+        /// <summary>Read-only stream that loops one NNTP frame indefinitely for repeated reader measurements.</summary>
         private sealed class CyclingStream(byte[] frame) : Stream
         {
+            /// <summary>Cursor within the repeating frame buffer.</summary>
             private int _position;
 
+            /// <inheritdoc />
             public override bool CanRead => true;
 
+            /// <inheritdoc />
             public override bool CanSeek => false;
 
+            /// <inheritdoc />
             public override bool CanWrite => false;
 
+            /// <inheritdoc />
             public override long Length => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override long Position
             {
                 get => throw new NotSupportedException();
                 set => throw new NotSupportedException();
             }
 
+            /// <inheritdoc />
             public override void Flush()
             {
             }
 
+            /// <inheritdoc />
             public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
+            /// <inheritdoc />
             public override int Read(Span<byte> buffer)
             {
                 var written = 0;
@@ -582,16 +664,20 @@ namespace VectorNNTP.BackFiller.Tests.Articles
                 return written;
             }
 
+            /// <inheritdoc />
             public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return new ValueTask<int>(Read(buffer.Span));
             }
 
+            /// <inheritdoc />
             public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void SetLength(long value) => throw new NotSupportedException();
 
+            /// <inheritdoc />
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
     }

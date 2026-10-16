@@ -2,6 +2,8 @@ namespace VectorNNTP.BackFiller.Core
 {
     /// <summary>Source-generated log messages for <see cref="ApplicationServiceManager"/>.</summary>
     /// <remarks>
+    /// Each method writes at the level declared on its <see cref="LoggerMessageAttribute"/>.
+    /// Host log filtering can suppress a call without changing runtime behavior.
     /// Exception parameters are recorded on the log event. These methods do not throw those exceptions.
     /// </remarks>
     internal static partial class ApplicationServiceManagerLogMessages

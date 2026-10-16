@@ -23,7 +23,7 @@ namespace VectorNNTP.BackFiller.Nntp
             _session = session;
         }
 
-        /// <summary>Gets the leased session.</summary>
+        /// <summary>Exclusive pooled session valid until the first <see cref="DisposeAsync"/>.</summary>
         /// <exception cref="ObjectDisposedException">The lease has been disposed.</exception>
         internal NntpProviderSession Session =>
             _session ?? throw new ObjectDisposedException(nameof(NntpSessionLease));

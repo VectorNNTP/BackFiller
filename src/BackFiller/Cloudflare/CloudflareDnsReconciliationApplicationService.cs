@@ -16,7 +16,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
         /// <summary>Reconciliation service that performs hostname, bind-address, and Cloudflare work.</summary>
         private readonly CloudflareDnsReconciliationService _inner;
 
-        /// <summary>Initializes a new wrapper.</summary>
+        /// <summary>Delegates lifecycle to the shared <see cref="CloudflareDnsReconciliationService"/> instance.</summary>
         /// <param name="inner">Reconciliation service registered beside this adapter.</param>
         public CloudflareDnsReconciliationApplicationService(CloudflareDnsReconciliationService inner)
         {

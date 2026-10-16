@@ -2,9 +2,18 @@ using VectorNNTP.BackFiller.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {
+    /// <summary>
+    /// Article-work RabbitMQ entity naming: provider backbones map to stable backfiller.* names without storage grabber prefixes.
+    /// </summary>
+
     public sealed class BackFillerRabbitMqTopologyTests
     {
+        /// <summary>
+        /// Provider entity composition is lower-case, trimmed, and prefixed with backfiller.
+        /// </summary>
+
         [Fact]
+
         public void ComposeProviderEntity_uses_backfiller_prefix_and_invariant_lower_case()
         {
             Assert.Equal("backfiller.giganews", BackFillerRabbitMqTopology.ComposeProviderEntity("Giganews"));

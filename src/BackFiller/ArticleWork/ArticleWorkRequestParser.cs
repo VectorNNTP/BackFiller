@@ -193,18 +193,41 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
         }
 
+        /// <summary>Outcome of reading the top-level <c>messageId</c> string.</summary>
+        /// <param name="PropertySeen">
+        /// <see langword="true"/> when a top-level <c>messageId</c> property was present, including null, non-string, and overlong values.
+        /// <see langword="false"/> when the property was absent.
+        /// </param>
+        /// <param name="MessageId">
+        /// The accepted ASCII Message-ID when the property was a valid token; otherwise <see langword="null"/>.
+        /// </param>
         private readonly record struct MessageIdRead(bool PropertySeen, string? MessageId);
 
+        /// <summary>How a top-level JSON string copy finished. Callers treat only <see cref="Copied"/> as a candidate token.</summary>
         private enum TopLevelJsonString
         {
+            /// <summary>The property was absent, or the payload was not a JSON object.</summary>
             Missing,
+
+            /// <summary>The property was present and JSON null.</summary>
             Null,
+
+            /// <summary>The property was present and was not a JSON string.</summary>
             NotString,
+
+            /// <summary>The property was a string longer than the destination buffer.</summary>
             TooLong,
+
+            /// <summary>The unescaped string bytes were copied into the destination.</summary>
             Copied,
         }
 
         /// <summary>Copies one top-level JSON string property into <paramref name="destination"/> without a heap allocation.</summary>
+        /// <param name="json">UTF-8 JSON object. A payload that is not an object is <see cref="TopLevelJsonString.Missing"/>.</param>
+        /// <param name="propertyName">Exact top-level property name. Nested properties are skipped.</param>
+        /// <param name="destination">Buffer that receives the unescaped string bytes.</param>
+        /// <param name="written">Bytes copied when the result is <see cref="TopLevelJsonString.Copied"/>; otherwise zero.</param>
+        /// <returns>Why the copy stopped. <see cref="TopLevelJsonString.TooLong"/> means the string did not fit <paramref name="destination"/>.</returns>
         private static TopLevelJsonString TryCopyTopLevelJsonString(
             ReadOnlySpan<byte> json,
             ReadOnlySpan<byte> propertyName,

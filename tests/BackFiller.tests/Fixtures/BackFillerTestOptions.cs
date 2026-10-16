@@ -5,11 +5,19 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Fixtures
 {
+    /// <summary>Valid BackFiller, RabbitMQ, and ACME option snapshots for binding and host tests.</summary>
     internal static class BackFillerTestOptions
     {
+        /// <summary>Non-production RabbitMQ password used in configuration pairs.</summary>
         internal const string SecretPassword = "super-secret-password-xyz";
+        /// <summary>Non-production Cloudflare API token used in configuration pairs.</summary>
         internal const string SecretToken = "super-secret-cloudflare-token-xyz";
+        /// <summary>Non-production ACME PFX password used in configuration pairs.</summary>
         internal const string SecretPfx = "super-secret-pfx-password-xyz";
+
+        /// <summary>
+        /// Options that pass identity validation: server 1, usenet.ninja, loopback TLS port 1190, and the default ACME directory.
+        /// </summary>
 
         internal static BackFillerOptions CreateValid()
         {
@@ -27,6 +35,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             };
         }
 
+        /// <summary>
+        /// Local plaintext RabbitMQ options for 127.0.0.1 using <see cref="SecretPassword"/>.
+        /// </summary>
+
         internal static RabbitMqOptions CreateValidRabbitMq() =>
             new()
             {
@@ -36,6 +48,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 EnableSsl = false,
             };
 
+        /// <summary>In-memory configuration key/value pairs that pass production validators.</summary>
         internal static Dictionary<string, string?> CreateValidConfigurationPairs()
         {
             return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
@@ -61,6 +74,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             };
         }
 
+        /// <summary>
+        /// In-memory configuration from <see cref="CreateValidConfigurationPairs"/>, with <paramref name="overlays"/> replacing matching keys.
+        /// </summary>
+
         internal static IConfiguration CreateValidConfiguration(IReadOnlyDictionary<string, string?>? overlays = null)
         {
             var pairs = CreateValidConfigurationPairs();
@@ -77,6 +94,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 .Build();
         }
 
+        /// <summary>
+        /// NntpDB options pointing at 127.0.0.1 database nntp. The password is a fixture, not a production secret.
+        /// </summary>
+
         internal static NntpDbOptions CreateValidNntpDb()
         {
             return new NntpDbOptions
@@ -84,6 +105,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 ConnectionString = "Server=127.0.0.1;Database=nntp;User ID=nntparticles;Password=db-secret-xyz",
             };
         }
+
+        /// <summary>
+        /// ACME options copied from <paramref name="options"/>, or from <see cref="CreateValid"/>, plus fixture email, PFX password, and API token.
+        /// </summary>
 
         internal static AcmeCloudflareOptions CreateValidAcme(BackFillerOptions? options = null)
         {
@@ -105,6 +130,10 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             };
         }
 
+        /// <summary>
+        /// Validator with 64 GiB of memory unless <paramref name="memory"/> is supplied. <paramref name="assignee"/> is ignored.
+        /// </summary>
+
         internal static BackFillerOptionsValidator CreateValidator(
             ILocalIpAddressAssignee? assignee = null,
             IPhysicalMemoryProvider? memory = null,
@@ -117,25 +146,50 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         }
     }
 
+    /// <summary>
+    /// ILocalIpAddressAssignee that assigns all or no addresses based on assignAll.
+    /// </summary>
+
     internal sealed class FakeLocalIpAddressAssignee(bool assignAll) : ILocalIpAddressAssignee
     {
+        /// <summary>
+        /// Returns the constructor flag for every non-null address. Does not inspect the host's interfaces.
+        /// </summary>
+
         public bool IsLocallyAssigned(IPAddress address)
         {
             ArgumentNullException.ThrowIfNull(address);
             return assignAll;
         }
 
+        /// <summary>Documentation-only addresses 198.18.0.10 and 2001:db8::10 when assigning, otherwise none.</summary>
         public IReadOnlyList<IPAddress> GetAssignedUnicastAddresses() =>
             assignAll ? [IPAddress.Parse("198.18.0.10"), IPAddress.Parse("2001:db8::10")] : [];
     }
 
+    /// <summary>
+    /// Returns a fixed total physical memory byte count for validator tests.
+    /// </summary>
+
     internal sealed class FakePhysicalMemoryProvider(long totalBytes) : IPhysicalMemoryProvider
     {
+        /// <summary>
+        /// Returns the constructor byte count. Does not query the operating system.
+        /// </summary>
+
         public long GetTotalPhysicalMemoryBytes() => totalBytes;
     }
 
+    /// <summary>
+    /// GetTotalPhysicalMemoryBytes throws to exercise retention validation when OS memory is unknown.
+    /// </summary>
+
     internal sealed class FailingPhysicalMemoryProvider : IPhysicalMemoryProvider
     {
+        /// <summary>
+        /// Always throws, so retention validation can observe an unknown memory size.
+        /// </summary>
+
         public long GetTotalPhysicalMemoryBytes() =>
             throw new InvalidOperationException("Total physical memory could not be determined.");
     }

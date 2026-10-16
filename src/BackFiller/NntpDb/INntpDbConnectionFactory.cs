@@ -1,7 +1,7 @@
 namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>Opens a logical MySQL connection using MySqlConnector's native pool.</summary>
-    public interface INntpDbConnectionFactory
+    internal interface INntpDbConnectionFactory
     {
         /// <summary>
         /// Opens one logical connection. Dispose returns the physical connection to the provider pool.

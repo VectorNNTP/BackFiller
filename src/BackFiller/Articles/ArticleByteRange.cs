@@ -3,13 +3,13 @@ namespace VectorNNTP.BackFiller.Articles
     /// <summary>
     /// Integer offset/length into an <see cref="ArticleRecord"/> ArtData buffer.
     /// </summary>
-    public readonly struct ArticleByteRange : IEquatable<ArticleByteRange>
+    internal readonly struct ArticleByteRange : IEquatable<ArticleByteRange>
     {
-        /// <summary>Gets a range that does not refer to any ArtData bytes.</summary>
+        /// <summary>Sentinel with <see cref="Offset"/> -1 and <see cref="IsPresent"/> false for missing header fields.</summary>
         internal static ArticleByteRange Absent { get; } = new(-1, 0);
 
         /// <summary>
-        /// Initializes a range.
+        /// Stores an inclusive offset and length into canonical ArtData, or an absent sentinel when <paramref name="offset"/> is -1.
         /// </summary>
         /// <param name="offset">Byte offset into ArtData, or -1 when absent.</param>
         /// <param name="length">Byte length of the field value.</param>
@@ -20,13 +20,13 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Gets the byte offset into ArtData, or -1 when the field is absent.</summary>
-        internal int Offset { get; }
+        private int Offset { get; }
 
-        /// <summary>Gets the value length in bytes.</summary>
-        internal int Length { get; }
+        /// <summary>Header value length in bytes; zero is allowed when <see cref="IsPresent"/> is true.</summary>
+        private int Length { get; }
 
-        /// <summary>Gets a value indicating whether this range refers to ArtData.</summary>
-        public bool IsPresent => Offset >= 0;
+        /// <summary>True when <see cref="Offset"/> is non-negative and <see cref="Slice"/> may index ArtData.</summary>
+        internal bool IsPresent => Offset >= 0;
 
         /// <summary>
         /// Slices <paramref name="artData"/> for this range.
@@ -52,10 +52,10 @@ namespace VectorNNTP.BackFiller.Articles
         /// <inheritdoc />
         public override int GetHashCode() => HashCode.Combine(Offset, Length);
 
-        /// <summary>Equality operator.</summary>
+        /// <summary>True when both ranges have the same offset and length.</summary>
         public static bool operator ==(ArticleByteRange left, ArticleByteRange right) => left.Equals(right);
 
-        /// <summary>Inequality operator.</summary>
+        /// <summary>True when the ranges differ in offset or length.</summary>
         public static bool operator !=(ArticleByteRange left, ArticleByteRange right) => !left.Equals(right);
     }
 }

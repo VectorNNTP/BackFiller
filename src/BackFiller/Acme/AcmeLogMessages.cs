@@ -273,5 +273,24 @@ namespace VectorNNTP.BackFiller.Acme
             Level = LogLevel.Warning,
             Message = "DNS-01 best-effort cleanup failed after issuance failure")]
         internal static partial void Dns01BestEffortCleanupFailed(ILogger logger, Exception exception);
+
+        /// <summary>
+        /// Written when the published certificate starts blocking systemd watchdog keep-alives.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="Reason">Certificate status category such as <c>expired</c> or <c>renewal_threshold</c>.</param>
+        [LoggerMessage(
+            EventId = 1924,
+            Level = LogLevel.Error,
+            Message = "Published TLS certificate is blocking watchdog keep-alives ({Reason})")]
+        internal static partial void CertificateWatchdogBlocked(ILogger logger, string Reason);
+
+        /// <summary>Written when a usable certificate clears the watchdog block.</summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        [LoggerMessage(
+            EventId = 1925,
+            Level = LogLevel.Information,
+            Message = "Published TLS certificate is usable; watchdog keep-alives may resume")]
+        internal static partial void CertificateWatchdogRestored(ILogger logger);
     }
 }

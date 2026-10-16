@@ -15,13 +15,19 @@ namespace VectorNNTP.BackFiller.Retention
     /// </remarks>
     internal interface IArticleRetentionAuthority
     {
-        /// <summary>Gets configured sweep interval.</summary>
+        /// <summary>
+        /// Fixed interval between <see cref="SweepExpired"/> passes. Set at authority construction and not changed at runtime.
+        /// </summary>
         TimeSpan SweepInterval { get; }
 
-        /// <summary>Gets currently owned retained ArtData bytes.</summary>
+        /// <summary>
+        /// Sum of authority-owned ArtData bytes, including logically removed entries that still have a delivery reader.
+        /// </summary>
         long RetainedPayloadBytes { get; }
 
-        /// <summary>Gets the number of physically retained entries.</summary>
+        /// <summary>
+        /// Entries not yet physically disposed. TTL and committed delivery can drop this before the last reader releases.
+        /// </summary>
         int RetainedCount { get; }
 
         /// <summary>

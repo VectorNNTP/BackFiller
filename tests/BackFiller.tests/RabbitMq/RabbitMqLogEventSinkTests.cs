@@ -6,8 +6,16 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.RabbitMq
 {
+    /// <summary>
+    /// Serilog-to-RabbitMQ sink fault containment for format and disposal failures.
+    /// </summary>
+
     public sealed class RabbitMqLogEventSinkTests
     {
+        /// <summary>
+        /// Formatter exceptions are self-logged and not propagated to Serilog callers.
+        /// </summary>
+
         [Fact]
         public async Task Unexpected_formatter_failure_stays_inside_the_sink()
         {
@@ -35,6 +43,10 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 await service.DisposeAsync();
             }
         }
+
+        /// <summary>
+        /// Publish channel disposal failures during sink shutdown stay inside the sink.
+        /// </summary>
 
         [Fact]
         public async Task Unexpected_channel_disposal_failure_stays_inside_the_sink()
@@ -68,6 +80,10 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             }
         }
 
+        /// <summary>
+        /// Builds a minimal Serilog event driving sink tests.
+        /// </summary>
+
         private static LogEvent Event() =>
             new(
                 DateTimeOffset.UtcNow,
@@ -76,8 +92,15 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
                 new MessageTemplateParser().Parse("marker"),
                 []);
 
+        /// <summary>
+        /// Serilog formatter double that always throws so the sink must contain the failure.
+        /// </summary>
         private sealed class ThrowingFormatter : ITextFormatter
         {
+            /// <summary>Always throws <see cref="FormatException"/>; does not write to the output writer.</summary>
+            /// <param name="logEvent">Ignored incoming event.</param>
+            /// <param name="output">Ignored destination writer.</param>
+
             public void Format(LogEvent logEvent, TextWriter output) =>
                 throw new FormatException("format boom");
         }

@@ -11,13 +11,13 @@ namespace VectorNNTP.BackFiller.Acme
     internal static class AcmeOrderReadiness
     {
         /// <summary>Default overall readiness wait (aligned with DNS-01 propagation budget).</summary>
-        public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(120);
+        internal static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(120);
 
         /// <summary>Default delay between readiness polls.</summary>
-        public static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
+        internal static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
 
         /// <summary>Outcome of evaluating one poll snapshot.</summary>
-        internal enum Decision
+        private enum Decision
         {
             /// <summary>Still pending; keep polling.</summary>
             Continue,
@@ -56,7 +56,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <param name="view">Order status and authorization snapshots.</param>
         /// <param name="invalidDiagnostic">Sanitized explanation when the result is <see cref="Decision.Invalid"/>; otherwise <see langword="null"/>.</param>
         /// <returns><see cref="Decision.Ready"/> for order status <c>ready</c> or <c>valid</c>, <see cref="Decision.Invalid"/> for an invalid authorization or order, otherwise <see cref="Decision.Continue"/>.</returns>
-        internal static Decision Evaluate(OrderView view, out string? invalidDiagnostic)
+        private static Decision Evaluate(OrderView view, out string? invalidDiagnostic)
         {
             ArgumentNullException.ThrowIfNull(view);
             ArgumentNullException.ThrowIfNull(view.Authorizations);

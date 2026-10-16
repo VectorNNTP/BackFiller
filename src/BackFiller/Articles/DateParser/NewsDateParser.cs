@@ -96,7 +96,7 @@ namespace VectorNNTP.BackFiller.Articles.DateParser
         /// <param name="utc">Canonical UTC instant when parsing succeeds.</param>
         /// <param name="failure">Failure reason describing the stage that rejected <paramref name="input"/>.</param>
         /// <returns><see langword="true"/> when parsing succeeds.</returns>
-        internal static bool TryGetCanonicalUtc(
+        private static bool TryGetCanonicalUtc(
             ReadOnlySpan<byte> input,
             DateParseOptions options,
             out DateTime utc,

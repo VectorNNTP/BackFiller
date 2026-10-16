@@ -7,7 +7,7 @@ namespace VectorNNTP.BackFiller.Acme
     /// TLS-only hosts must not open a listener until <see cref="IsReady"/> is
     /// <see langword="true"/>. The flag is set only after successful publish.
     /// </remarks>
-    public interface IAcmeCertificateReadiness
+    internal interface IAcmeCertificateReadiness
     {
         /// <summary>Gets whether a usable certificate has been published.</summary>
         bool IsReady { get; }

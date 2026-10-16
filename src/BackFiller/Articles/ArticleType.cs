@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// This is not <c>NntpArticleType</c>.
     /// </remarks>
     [Flags]
-    public enum ArticleType
+    internal enum ArticleType
     {
         /// <summary>Diablo <c>none</c>.</summary>
         None = 0,

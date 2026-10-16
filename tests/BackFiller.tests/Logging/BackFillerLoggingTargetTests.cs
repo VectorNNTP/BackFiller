@@ -15,9 +15,13 @@ using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
 namespace VectorNNTP.BackFiller.Tests.Logging
 {
+    /// <summary>
+    /// Optional log targets (file, syslog, rabbit), formatters, console switch, and log-context enrichment.
+    /// </summary>
     [Collection(SerilogCollection.Name)]
     public sealed class BackFillerLoggingTargetTests
     {
+        /// <summary>Default bound logging options enable file only with documented defaults.</summary>
         [Fact]
         public void Defaults_EnableFile_AndDisableRabbitMq_Syslog_AndJson()
         {
@@ -36,6 +40,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Equal(BackFillerLoggingOptions.DefaultLogLevel, logging.LogLevel);
             Assert.Equal(BackFillerLoggingOptions.DefaultLogRetentionDays, logging.LogRetentionDays);
         }
+        /// <summary>File disabled skips file sink and does not create log directory.</summary>
 
         [Fact]
         public void File_CanBeDisabled_WithoutCreatingTheLogDirectory()
@@ -55,6 +60,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Multiple sinks register without Serilog.Sinks.RabbitMQ package reference.</summary>
 
         [Fact]
         public void File_Syslog_AndRabbitMq_CanBeEnabledTogether()
@@ -83,6 +89,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Rabbit log sink uses existing IRabbitMqService connection without blocking Log.Information caller.</summary>
 
         [Fact]
         public async Task RabbitMqTarget_PublishesOnTheExistingConnection_WithoutBlockingTheCaller()
@@ -132,6 +139,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Syslog sink sends to loopback UDP or TCP per protocol setting.</summary>
 
         [Theory]
         [InlineData("Udp")]
@@ -187,6 +195,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Global Json flag applies MessageTemplate JSON to file, console, syslog, and rabbit sinks.</summary>
 
         [Fact]
         public async Task JsonFormatter_AppliesToFile_Console_AndSyslog_WithoutPerTargetSettings()
@@ -243,6 +252,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Per-target Formatter keys do not override global text formatting.</summary>
 
         [Fact]
         public void TextFormatter_StaysInEffect_WhenOnlyADecoyPerTargetFormatterIsSet()
@@ -274,6 +284,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>File and syslog sinks coexist in one logger configuration.</summary>
 
         [Fact]
         public void File_And_Syslog_CanBeEnabledTogether()
@@ -298,6 +309,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>Console sink appears only when --console command-line flag is set.</summary>
 
         [Fact]
         public void Console_IsAbsentUnlessTheConsoleSwitchIsPresent()
@@ -330,6 +342,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 TryDelete(logDir);
             }
         }
+        /// <summary>LogContext enrichment requires --log-context switch.</summary>
 
         [Fact]
         public void LogContextEnrichment_IsAppliedOnlyWhenRequested()
@@ -343,6 +356,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.False(EventHasProbe(off));
             Assert.True(EventHasProbe(on));
         }
+        /// <summary>Text outputs omit SourceContext unless log-context switch is set.</summary>
 
         [Fact]
         public void SourceContext_IsAbsentFromTextOutput_UnlessTheLogContextSwitchIsSet()
@@ -372,6 +386,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Contains(category, withContext.Bootstrap, StringComparison.Ordinal);
             Assert.Contains(category, withContext.Rabbit, StringComparison.Ordinal);
         }
+        /// <summary>Syslog text includes category only with log-context.</summary>
 
         [Fact]
         public async Task Syslog_RendersSourceContext_OnlyWhenTheLogContextSwitchIsSet()
@@ -389,6 +404,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 category);
             Assert.Contains(category, present.Packet, StringComparison.Ordinal);
         }
+        /// <summary>JSON file and rabbit omit SourceContext property unless log-context.</summary>
 
         [Fact]
         public void JsonOutput_IncludesSourceContext_OnlyWhenTheLogContextSwitchIsSet()
@@ -411,6 +427,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Contains("\"SourceContext\":\"" + category + "\"", withContext.Rabbit, StringComparison.Ordinal);
             Assert.Contains("\"Application\":", withContext.Rabbit, StringComparison.Ordinal);
         }
+        /// <summary>JSON syslog includes SourceContext only with log-context.</summary>
 
         [Fact]
         public async Task JsonSyslog_IncludesSourceContext_OnlyWhenTheLogContextSwitchIsSet()
@@ -429,6 +446,11 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             Assert.Contains("\"SourceContext\":\"" + category + "\"", present.Packet, StringComparison.Ordinal);
         }
 
+        /// <summary>Renders file, console, bootstrap, and Rabbit text output for one probe event.</summary>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <param name="category">Source context category.</param>
+        /// <param name="marker">Message template marker written to sinks.</param>
+        /// <returns>Captured text from each target.</returns>
         private static (string File, string Console, string Bootstrap, string Rabbit) RenderTextTargets(
             BackFillerLoggingCommandLine commandLine,
             string category,
@@ -469,6 +491,11 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Builds JSON file logging plus Rabbit formatter output and reports SourceContext on the root event.</summary>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <param name="category">Source context category.</param>
+        /// <param name="marker">Debug marker message.</param>
+        /// <returns>File contents, Rabbit line, and whether SourceContext was attached.</returns>
         private static (string File, string Rabbit, bool RootEventHasSourceContext) RenderJson(
             BackFillerLoggingCommandLine commandLine,
             string category,
@@ -517,6 +544,11 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Captures bootstrap logger console output before full host configuration.</summary>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <param name="category">Source context for the probe event.</param>
+        /// <param name="marker">Information marker text.</param>
+        /// <returns>Console text from the bootstrap logger.</returns>
         private static string RenderBootstrap(BackFillerLoggingCommandLine commandLine, string category, string marker)
         {
             using var captured = new StringWriter();
@@ -542,6 +574,11 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Emits one UDP syslog packet and records whether SourceContext was on the emitted log event.</summary>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <param name="category">Source context category.</param>
+        /// <param name="json">When true, enables JSON formatting for the syslog target.</param>
+        /// <returns>UTF-8 packet text and SourceContext presence on the root event.</returns>
         private static async Task<(string Packet, bool RootEventHasSourceContext)> ReadSyslogPacketAsync(
             BackFillerLoggingCommandLine commandLine,
             string category,
@@ -589,6 +626,10 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Builds a debug log event with SourceContext for Rabbit formatter probes.</summary>
+        /// <param name="category">Source context value.</param>
+        /// <param name="marker">Message template text.</param>
+        /// <returns>Log event passed to formatters.</returns>
         private static LogEvent SourceContextEvent(string category, string marker) =>
             new(
                 DateTimeOffset.UtcNow,
@@ -597,6 +638,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
                 new Serilog.Parsing.MessageTemplateParser().Parse(marker),
                 [new LogEventProperty(Constants.SourceContextPropertyName, new ScalarValue(category))]);
 
+        /// <summary>Returns whether LogContext properties reach the configured logger when enrich switches demand it.</summary>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <returns>True when the captured event includes the pushed ProbeToken property.</returns>
         private static bool EventHasProbe(BackFillerLoggingCommandLine commandLine)
         {
             var logDir = NewLogDir();
@@ -622,6 +666,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>In-memory configuration pointing file logging at a temp directory.</summary>
+        /// <param name="logDir">Directory for rolling file output.</param>
+        /// <returns>Configuration manager for ConfigureLogger calls.</returns>
         private static ConfigurationManager Configuration(string logDir)
         {
             using var configuration = new ConfigurationManager();
@@ -629,6 +676,11 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return configuration;
         }
 
+        /// <summary>Creates a production-configured Serilog logger from in-memory settings.</summary>
+        /// <param name="configuration">BackFiller configuration.</param>
+        /// <param name="commandLine">Logging command-line switches.</param>
+        /// <param name="services">Optional DI services (for Rabbit sink).</param>
+        /// <returns>Root logger for target tests.</returns>
         private static Logger Build(
             IConfiguration configuration,
             BackFillerLoggingCommandLine commandLine = default,
@@ -643,6 +695,8 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return loggerConfiguration.CreateLogger();
         }
 
+        /// <summary>Service provider with RabbitMQ marked unavailable so sink wiring can be exercised safely.</summary>
+        /// <returns>Built service provider owning the fake Rabbit service.</returns>
         private static ServiceProvider RabbitServices()
         {
             var services = new ServiceCollection();
@@ -650,6 +704,9 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             return services.BuildServiceProvider();
         }
 
+        /// <summary>Depth-first walk of Serilog sink object graphs for introspection tests.</summary>
+        /// <param name="root">Logger or sink root object.</param>
+        /// <returns>Unique sink objects reachable from fields.</returns>
         private static IEnumerable<object> Sinks(object root)
         {
             var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
@@ -705,12 +762,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>Allocates a unique temp directory name for isolated file logging runs.</summary>
+        /// <returns>Path under the system temp folder (not created).</returns>
         private static string NewLogDir()
         {
             var dir = Path.Join(Path.GetTempPath(), "vectornntp-bf-target-" + Guid.NewGuid().ToString("N"));
             return dir;
         }
 
+        /// <summary>Best-effort recursive delete of a temp log directory; ignores files still in use.</summary>
+        /// <param name="path">Directory to remove.</param>
         private static void TryDelete(string path)
         {
             try
@@ -726,18 +787,23 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>RabbitMQ service double that never offers a connection handle.</summary>
         private sealed class UnavailableRabbitMqService : IRabbitMqService
         {
+            /// <inheritdoc />
             public bool IsReady => false;
 
+            /// <inheritdoc />
             public long ConnectionGeneration => 0;
 
+            /// <inheritdoc />
             public event EventHandler<RabbitMqConnectionReplacedEventArgs>? ConnectionReplaced
             {
                 add { }
                 remove { }
             }
 
+            /// <inheritdoc />
             public bool TryGetCurrent(out RabbitMqConnectionHandle handle)
             {
                 handle = default;
@@ -745,12 +811,16 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             }
         }
 
+        /// <summary>In-memory Serilog sink that records emitted events for assertions.</summary>
         private sealed class CollectingSink : ILogEventSink
         {
+            /// <summary>Events in emission order. The tests emit on one thread, so this list is not synchronized.</summary>
             private readonly List<LogEvent> _events = [];
 
-            public IReadOnlyList<LogEvent> Events => _events;
+            /// <summary>Events captured in emission order.</summary>
+            internal IReadOnlyList<LogEvent> Events => _events;
 
+            /// <inheritdoc />
             public void Emit(LogEvent logEvent)
             {
                 ArgumentNullException.ThrowIfNull(logEvent);

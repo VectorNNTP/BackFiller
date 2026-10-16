@@ -18,7 +18,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         internal const string JsonContentType = "application/json";
 
         /// <summary>AMQP header carrying the logical request UUID.</summary>
-        internal const string RequestIdHeaderName = "RequestId";
+        private const string RequestIdHeaderName = "RequestId";
 
         /// <summary>
         /// Worker response TTL in milliseconds. Locked NNTPD architecture uses the same value

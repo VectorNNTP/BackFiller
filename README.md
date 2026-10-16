@@ -44,11 +44,11 @@ The standalone project has no external build/runtime dependency on a separate `V
 
 ## Linux service
 
-`tools/Publish-Release.ps1 -Platform linux-64` writes `.artifacts/release/linux-64/`. The Linux CI job writes `.artifacts/linux-x64/` and uploads that directory. Both contain `VectorNNTP.BackFiller`, `VectorNNTP.BackFiller.json`, `VectorNNTP.RabbitMQ.json`, `README.md`, and `vectornntp-backfiller.service`.
+`tools/Publish-Release.ps1 -Platform linux-64` writes `.artifacts/release/linux-64/`. The Linux CI job writes `.artifacts/linux-x64/` and uploads that directory. Both contain `VectorNNTP.BackFiller`, `VectorNNTP.BackFiller.json`, `VectorNNTP.RabbitMQ.json`, `README.md`, `vectornntp-backfiller.service`, and `backfiller.env.example`.
 
 Install that directory at `/opt/vectornntp/backfiller`. `deploy/systemd/vectornntp-backfiller.service` uses that path for `ExecStart`, `WorkingDirectory`, and `Documentation=`. `ReadWritePaths` lists only `logs/` and `certs/`. Under `ProtectSystem=strict` that re-opens those two directories for writing. It does not change Unix ownership or mode. The shipped JSON writes file logs under `logs/` and ACME state under `certs/`, and startup creates files inside directories that must already exist.
 
-Create the account, install the release as root-owned files, and give `vectornntp` write access only to `logs/` and `certs/` before enabling the unit:
+Create the account and install the release as root-owned files. This step copies the placeholder environment file and reloads systemd. It does not start the service.
 
 ```bash
 sudo groupadd --system vectornntp || true
@@ -57,10 +57,71 @@ sudo install -d -o root -g root -m 0755 /opt/vectornntp /opt/vectornntp/backfill
 sudo install -o root -g root -m 0755 VectorNNTP.BackFiller /opt/vectornntp/backfiller/VectorNNTP.BackFiller
 sudo install -o root -g root -m 0644 VectorNNTP.BackFiller.json VectorNNTP.RabbitMQ.json README.md /opt/vectornntp/backfiller/
 sudo install -d -o vectornntp -g vectornntp -m 0750 /opt/vectornntp/backfiller/logs /opt/vectornntp/backfiller/certs
+sudo install -d -o root -g root -m 0755 /etc/vectornntp
+sudo install -o root -g root -m 0600 backfiller.env.example /etc/vectornntp/backfiller.env
 sudo install -o root -g root -m 0644 vectornntp-backfiller.service /etc/systemd/system/vectornntp-backfiller.service
 sudo systemctl daemon-reload
+```
+
+Replace every `REPLACE_WITH_` placeholder before the first start. Open the file with a root editor. Do not pass the connection string as a shell argument, do not commit the installed file, and do not leave it mode `0644`. systemd reads the file as root, so `vectornntp` does not need permission to read it. Owner `root:root` and mode `0600` are the installed permissions.
+
+```bash
+sudoedit /etc/vectornntp/backfiller.env
+```
+
+The placeholder connection string passes MySqlConnector's parser, so startup validation does not reject it. It does not name a database this service can use. The NntpDB startup check then fails and the process exits 1.
+
+The unit directive is `EnvironmentFile=-/etc/vectornntp/backfiller.env`. The leading `-` suppresses errors reading the environment file. Current systemd ignores a missing, unreadable, or invalid file. Older systemd ignored only a missing file. Suppressing that error does not insert a connection string. If `ConnectionStrings__NntpDB` is absent, startup validation fails with `ConnectionStrings:NntpDB must be configured.` and the process exits 1. When that message appears, check that `/etc/vectornntp/backfiller.env` exists, is owned by `root:root`, is mode `0600`, and that its syntax is valid. Do not print the file.
+
+The file is one `KEY=VALUE` per line. A line whose first non-space character is `#` is a comment. systemd parses the file itself. It does not expand variables, command substitutions, or backticks, and `source` does not reproduce that parse. In an unquoted value, a backslash escapes the next character, so `\\` is one backslash, and a backslash at the end of a line joins the next line. Interior spaces remain. Leading and trailing spaces are removed. On systemd 259, single quotes around the whole value keep the enclosed characters verbatim and do not treat a backslash as an escape; a single quote cannot appear inside that pair. Double quotes use a different escape set. Those quote rules are not the same on every systemd version. After editing a value that contains a backslash, a quote, or leading or trailing whitespace, confirm the loaded value on that host without writing it to a log.
+
+The shipped JSON enables TLS (`BindPortTls` 1190). The only environment setting startup validation requires for that configuration is:
+
+```text
+ConnectionStrings__NntpDB=Server=REPLACE_WITH_MYSQL_HOST;User ID=REPLACE_WITH_MYSQL_USER;Password=REPLACE_WITH_MYSQL_PASSWORD;Database=REPLACE_WITH_DATABASE_NAME
+```
+
+That name has no `VECTOR__` prefix. Generic Host maps it to `ConnectionStrings:NntpDB`.
+
+These names are not required in `/etc/vectornntp/backfiller.env`:
+
+```text
+VECTOR__RABBITMQ__USERNAME
+VECTOR__RABBITMQ__PASSWORD
+VECTOR__CLOUDFLAREAPIKEY
+VECTOR__CLOUDFLAREZONEID
+VECTOR__ACMEACCOUNT
+VECTOR__ACMECERTIFICATEPASSWORD
+```
+
+BackFiller discards a bound RabbitMQ username and password, and it clears the ACME account, ACME certificate password, and Cloudflare API key before validation. The root `VECTOR__CLOUDFLAREZONEID` value is not copied onto BackFiller options. After the connection string works, `nntpsharedconfig` supplies those values. Assigning the names above in the environment file does not override that row.
+
+`DOTNET_ENVIRONMENT=Production` is set by the unit. It selects the optional `VectorNNTP.BackFiller.Production.json` overlay. A missing overlay does not fail startup.
+
+After the placeholders have been replaced, validate the unit and the file metadata. `stat` prints the owner and mode and does not print the connection string. `daemon-reload` is required after a unit-file change. An environment-file edit is read on the next service start; `daemon-reload` does not reload the environment of a process that is already running.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemd-analyze verify vectornntp-backfiller.service
+sudo stat -c '%U:%G %a' /etc/vectornntp/backfiller.env
+```
+
+The expected metadata is `root:root 600`. Start the service only after that check:
+
+```bash
 sudo systemctl enable --now vectornntp-backfiller.service
 ```
+
+Inspect startup without printing secrets:
+
+```bash
+sudo systemctl status vectornntp-backfiller.service --no-pager
+sudo journalctl -u vectornntp-backfiller.service -e --no-pager
+```
+
+Do not run `systemctl show -p Environment`, and do not copy `/etc/vectornntp/backfiller.env` into a ticket or log. A missing file, a missing key, or a blank value produces `ConnectionStrings:NntpDB must be configured.` The same message appears when the leading `-` caused systemd to ignore an unreadable or invalid file. A string MySqlConnector's parser rejects fails in startup validation. The placeholder is accepted by that parser and fails later, at the NntpDB startup check. Correct the file and restart the service. Do not paste the connection string.
+
+Rotate the connection string by editing `/etc/vectornntp/backfiller.env` with a root editor, then `sudo systemctl restart vectornntp-backfiller.service`. Rotate the ACME account, ACME certificate password, Cloudflare API key, Cloudflare zone id, and RabbitMQ username and password in `nntpsharedconfig`, then restart the service so the next snapshot is loaded. Do not put those secrets on a command line, in Git, or in a world-readable file.
 
 `groupadd` and `useradd` may report that the account already exists; that is safe to ignore. Do not `chown -R` the install tree to `vectornntp` and do not use mode `0777`. The executable and JSON stay owned by root and are not writable by the service account. `TimeoutStopSec=60` covers the shipped 30-second shutdown grace; raise it when `BackFiller:Shutdown:GracePeriodSeconds` is raised. `WatchdogSec` stays unset until readiness has been checked on the host.
 

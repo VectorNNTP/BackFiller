@@ -4,8 +4,16 @@ using VectorNNTP.BackFiller.Nntp;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// Hot provider configuration snapshots: pool replacement, lease survival, shrink, and shared shutdown grace.
+    /// </summary>
+
     public sealed class NntpProviderRegistrySnapshotTests
     {
+        /// <summary>
+        /// An active lease keeps its session until disposed while a new pool serves updated configuration.
+        /// </summary>
+
         [Fact]
         public async Task Active_leased_session_survives_configuration_replacement()
         {
@@ -31,6 +39,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Same(newPool, after);
         }
 
+        /// <summary>
+        /// Provider removal hides the pool immediately while existing leases finish on retired sessions.
+        /// </summary>
+
         [Fact]
         public async Task Removed_provider_stops_accepting_new_leases()
         {
@@ -49,6 +61,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await removing;
             Assert.False(registry.TryGetPool("Giganews", out _));
         }
+
+        /// <summary>
+        /// Changing one backbone replaces only that pool without reconnecting unrelated pools.
+        /// </summary>
 
         [Fact]
         public async Task Unrelated_provider_pool_is_retained_when_another_provider_changes()
@@ -81,6 +97,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 transport.ConnectAttempts.Count(static attempt => attempt.Backbone == "Giganews"));
             await reused.DisposeAsync();
         }
+
+        /// <summary>
+        /// MaxSessions shrink retires excess idle sessions without new connects.
+        /// </summary>
 
         [Fact]
         public async Task MaxSessions_shrink_keeps_the_same_pool_and_retires_excess_sessions()
@@ -115,6 +135,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await reused.DisposeAsync();
         }
 
+        /// <summary>
+        /// Min/Max session bound changes replace only the affected provider pool.
+        /// </summary>
+
         [Fact]
         public async Task Min_and_max_session_changes_replace_only_that_pool()
         {
@@ -139,6 +163,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, replaced.Provider.MinSessions);
             Assert.Equal(8, replaced.Provider.MaxSessions);
         }
+
+        /// <summary>
+        /// StopAsync with an expired token drains all pools and blocks new snapshots until stop completes.
+        /// </summary>
 
         [Fact]
         public async Task Stop_uses_one_shared_grace_token_across_pools()
@@ -180,6 +208,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(connects, transport.ConnectAttempts.Count);
         }
 
+        /// <summary>
+        /// Creates NntpProviderRegistry with short timeouts for snapshot tests.
+        /// </summary>
+
         private static NntpProviderRegistry CreateRegistry(
             ProviderConfigurationCatalog catalog,
             ScriptedNntpTransportFactory transport)
@@ -196,6 +228,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 TimeSpan.FromSeconds(2),
                 NullLogger<NntpProviderRegistry>.Instance);
         }
+
+        /// <summary>
+        /// Builds a TLS provider definition for registry snapshot scenarios.
+        /// </summary>
 
         private static BackFillerProviderDefinition CreateDefinition(
             string backbone = "Giganews",

@@ -11,8 +11,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting
 {
+    /// <summary>Regresses platform hosting: content root pinning, Windows service registration source, console formatter stripping, and path resolution from application base.</summary>
     public sealed class BackFillerPlatformHostingTests
     {
+        /// <summary>Program must pin content root to <see cref="AppContext.BaseDirectory"/> so configuration and paths align with the deployed layout.</summary>
         [Fact]
         public void Program_pins_content_root_to_the_application_base()
         {
@@ -31,6 +33,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
                 StringComparison.Ordinal);
         }
 
+        /// <summary>Platform hosting registers Windows service lifetime and removes default console logger configure options from DI.</summary>
         [Fact]
         public void Platform_hosting_sets_the_windows_service_name_and_strips_console_formatters()
         {
@@ -64,9 +67,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             });
         }
 
+        /// <summary>Locates <c>BackFillerServiceCollectionExtensions.cs</c> under the repository src tree.</summary>
         private static string FindPlatformHostingSource() =>
             FindSource(RelativePath.Under("Hosting", "BackFillerServiceCollectionExtensions.cs"));
 
+        /// <summary>Walks parents from the test base directory until <paramref name="relativePath"/> exists under src/BackFiller.</summary>
+        /// <param name="relativePath">Path relative to src/BackFiller.</param>
+        /// <returns>Absolute path to the source file.</returns>
         private static string FindSource(string relativePath)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -84,6 +91,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             throw new FileNotFoundException($"Could not locate {relativePath}.");
         }
 
+        /// <summary>Log and certificate directories resolve from application base even when host content root points elsewhere.</summary>
         [Fact]
         public void Runtime_options_resolve_relative_paths_from_the_application_base_not_content_root()
         {
@@ -121,6 +129,8 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             }
         }
 
+        /// <summary>Minimal host with decoy content root for runtime path resolution checks.</summary>
+        /// <param name="contentRoot">Host content root path (may differ from application base).</param>
         private static IHost CreateHost(string contentRoot)
         {
             var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings

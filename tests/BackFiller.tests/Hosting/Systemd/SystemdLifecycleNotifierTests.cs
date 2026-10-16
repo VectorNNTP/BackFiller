@@ -7,8 +7,10 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 {
+    /// <summary>SystemdLifecycleNotifier must emit READY only after ApplicationStarted and STOPPING on stopping; notify failures are non-fatal.</summary>
     public sealed class SystemdLifecycleNotifierTests
     {
+        /// <summary>READY follows ApplicationStarted once; STOPPING follows ApplicationStopping; health marks running then not.</summary>
         [Fact]
         public async Task Readiness_FollowsApplicationStarted_AndIsNotDuplicated()
         {
@@ -34,6 +36,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(1, notify.ReadyCount);
             Assert.Equal(1, notify.StoppingCount);
         }
+        /// <summary>Notifier start alone must not emit READY or mark watchdog health running.</summary>
 
         [Fact]
         public async Task Readiness_IsNotSentBeforeApplicationStarted()
@@ -48,6 +51,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(0, notify.ReadyCount);
             Assert.False(health.IsHealthyForWatchdog);
         }
+        /// <summary>With notify disabled, started and stopping signals produce no notifications.</summary>
 
         [Fact]
         public async Task Readiness_IsNotSentWhenNotifyDisabled()
@@ -66,6 +70,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(0, notify.ReadyCount);
             Assert.Equal(0, notify.StoppingCount);
         }
+        /// <summary>After stopping is signaled, a late ApplicationStarted must not emit READY.</summary>
 
         [Fact]
         public async Task Shutdown_PreventsSubsequentReadinessReporting()
@@ -86,6 +91,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             await notifier.StopAsync(CancellationToken.None);
             Assert.Equal(1, notify.StoppingCount);
         }
+        /// <summary>Second StopAsync does not duplicate READY or STOPPING counts.</summary>
 
         [Fact]
         public async Task RepeatedStop_IsIdempotent()
@@ -104,6 +110,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(1, notify.ReadyCount);
             Assert.Equal(1, notify.StoppingCount);
         }
+        /// <summary>Notify exceptions are swallowed so notifier start/stop completes without duplicate READY/STOPPING.</summary>
 
         [Fact]
         public async Task NotificationFailure_DoesNotCrashNotifier()
@@ -124,6 +131,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.Equal(0, notify.ReadyCount);
             Assert.Equal(0, notify.StoppingCount);
         }
+        /// <summary>BackFillerApplicationHealth reflects started, stopping, and unexpected termination for watchdog gating.</summary>
 
         [Fact]
         public void ApplicationHealth_TracksStartedStoppingAndUnexpectedTermination()
@@ -143,6 +151,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.False(health2.IsHealthyForWatchdog);
         }
 
+        /// <summary>Constructs a lifecycle notifier with Linux-under-systemd runtime fakes.</summary>
         private static SystemdLifecycleNotifier CreateNotifier(
             IHostApplicationLifetime lifetime,
             BackFillerApplicationHealth health,

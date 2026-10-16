@@ -18,7 +18,7 @@ namespace VectorNNTP.BackFiller.RabbitMq
         internal const string QuorumQueueType = "quorum";
 
         /// <summary>Fanout exchange type used for provider endpoints.</summary>
-        internal const string FanoutExchangeType = "fanout";
+        private const string FanoutExchangeType = "fanout";
 
         /// <summary>
         /// Declares the fanout exchange, durable quorum queue, and binding for

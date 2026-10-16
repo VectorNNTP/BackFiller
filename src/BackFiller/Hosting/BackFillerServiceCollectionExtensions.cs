@@ -234,7 +234,8 @@ namespace VectorNNTP.BackFiller.Hosting
                 provider.GetRequiredService<IArticleRetentionAuthority>(),
                 provider.GetRequiredService<IAcmeCertificateReadiness>(),
                 provider.GetRequiredService<IBackFillerStartupJournal>(),
-                provider.GetRequiredService<ILogger<CacheListenerService>>()));
+                provider.GetRequiredService<ILogger<CacheListenerService>>(),
+                provider.GetRequiredService<TimeProvider>()));
             builder.Services.TryAddEnumerable(
                 ServiceDescriptor.Singleton<IApplicationService, CacheListenerService>(static provider =>
                     provider.GetRequiredService<CacheListenerService>()));

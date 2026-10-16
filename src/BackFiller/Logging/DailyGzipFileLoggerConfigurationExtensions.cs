@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Logging
     /// <summary>
     /// Registers <see cref="GzipRollingFileSink"/> with the same flush wrapping as Serilog's File sink.
     /// </summary>
-    public static class DailyGzipFileLoggerConfigurationExtensions
+    internal static class DailyGzipFileLoggerConfigurationExtensions
     {
         /// <summary>
         /// Writes a rolling file that gzip-compresses completed periods and retains <c>.log</c> and <c>.log.gz</c> together.
@@ -31,7 +31,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// <param name="compressor">Compression implementation. Defaults to <see cref="GzipLogFileCompressor"/>.</param>
         /// <param name="timeProvider">Clock used for roll checkpoints.</param>
         /// <returns>The logger configuration, so calls can be chained.</returns>
-        public static LoggerConfiguration DailyGzipFile(
+        internal static LoggerConfiguration DailyGzipFile(
             this LoggerSinkConfiguration sinkConfiguration,
             string path,
             LogEventLevel restrictedToMinimumLevel = LogEventLevel.Verbose,
@@ -83,7 +83,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// When <paramref name="flushToDiskInterval"/> is set, a <see cref="PeriodicFileFlushSink"/> wraps the rolling
         /// sink. Serilog stores that wrapper and calls <see cref="IDisposable.Dispose"/> when the logger is closed.
         /// </remarks>
-        public static LoggerConfiguration DailyGzipFile(
+        internal static LoggerConfiguration DailyGzipFile(
             this LoggerSinkConfiguration sinkConfiguration,
             ITextFormatter formatter,
             string path,

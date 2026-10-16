@@ -93,7 +93,7 @@ namespace VectorNNTP.BackFiller.Nntp
         private TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Delay between periodic deficit fills toward <see cref="BackFillerProviderDefinition.MaxSessions"/>.</summary>
-        internal static readonly TimeSpan ReplenishInterval = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan ReplenishInterval = TimeSpan.FromSeconds(15);
 
         /// <summary>
         /// Creates a pool whose lease permits and connection-number ceiling start at <see cref="BackFillerProviderDefinition.MaxSessions"/> on <paramref name="provider"/>.
@@ -175,7 +175,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Gets the number of outstanding leases.</summary>
+        /// <summary>Outstanding <see cref="NntpSessionLease"/> instances that have not yet been disposed.</summary>
         internal int ActiveLeaseCount => Volatile.Read(ref _activeLeases);
 
         /// <summary>Raised after ACTIVE session count may have changed.</summary>
@@ -950,7 +950,7 @@ namespace VectorNNTP.BackFiller.Nntp
     /// <summary>Connect-time failure that preserves retrieval classification.</summary>
     internal sealed class NntpProviderConnectException : InvalidOperationException
     {
-        /// <summary>Initializes a connect failure.</summary>
+        /// <summary>Wraps a failed connect so callers map the failure to <see cref="ArticleRetrievalKind"/> without parsing the message.</summary>
         /// <param name="kind">Retrieval classification copied from the failed connect.</param>
         /// <param name="statusCode">NNTP status when the server produced one; otherwise null.</param>
         /// <param name="reason">Exception message. Diagnostic text from the session.</param>
@@ -961,10 +961,10 @@ namespace VectorNNTP.BackFiller.Nntp
             StatusCode = statusCode;
         }
 
-        /// <summary>Gets the retrieval classification.</summary>
+        /// <summary>Article Work retrieval kind assigned when connect failed before Ready.</summary>
         internal ArticleRetrievalKind Kind { get; }
 
-        /// <summary>Gets the NNTP status when present.</summary>
+        /// <summary>Three-digit NNTP response code when the server returned one during connect; otherwise null.</summary>
         internal int? StatusCode { get; }
     }
 }

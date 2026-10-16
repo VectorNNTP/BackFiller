@@ -14,6 +14,9 @@ namespace VectorNNTP.BackFiller.Accounts
     /// <summary>Opens one NntpDB session and uses <see cref="NntpSharedConfigurationReader"/>.</summary>
     internal sealed class NntpDbSharedConfigurationSource : IBackFillerSharedConfigurationSource
     {
+        /// <summary>
+        /// Started NntpDB service used to open one session per read. This source does not start or dispose it.
+        /// </summary>
         private readonly NntpDbService _nntpDb;
 
         /// <summary>Retains the database service.</summary>

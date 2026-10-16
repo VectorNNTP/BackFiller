@@ -14,6 +14,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
     /// </summary>
     public sealed class BackFillerCanonicalIdentityTests
     {
+        /// <summary>
+        /// Contract: Application prefix is fixed and name is not configuration.
+        /// </summary>
+
         [Fact]
         public void Application_prefix_is_fixed_and_name_is_not_configuration()
         {
@@ -25,6 +29,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(typeof(BackFillerRuntimeOptions).GetProperty("Name"));
         }
 
+        /// <summary>
+        /// Contract: TransitServer is not part of BackFiller configuration.
+        /// </summary>
+
         [Fact]
         public void TransitServer_is_not_part_of_BackFiller_configuration()
         {
@@ -35,6 +43,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(typeof(BackFillerRuntimeOptions).Assembly.GetType(
                 "VectorNNTP.BackFiller.Configuration.BackFillerTransitServerRuntimeOptions"));
         }
+
+        /// <summary>
+        /// Contract: Canonical fqdn comes from shared builder.
+        /// </summary>
 
         [Theory]
         [InlineData(1, "backfiller01.usenet.ninja")]
@@ -55,6 +67,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 options.Fqdn);
         }
 
+        /// <summary>
+        /// Contract: Leftover name configuration does not change fqdn.
+        /// </summary>
+
         [Fact]
         public void Leftover_name_configuration_does_not_change_fqdn()
         {
@@ -72,6 +88,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Equal("backfiller01.usenet.ninja", options.Fqdn);
             Assert.NotEqual("cache01.usenet.ninja", options.Fqdn);
         }
+
+        /// <summary>
+        /// Contract: Host acme cloudflare and storage use the canonical fqdn.
+        /// </summary>
 
         [Fact]
         public void Host_acme_cloudflare_and_storage_use_the_canonical_fqdn()
@@ -101,6 +121,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 AcmePaths.LiveDir("certs", runtime.Fqdn));
         }
 
+        /// <summary>
+        /// Builds a host from <paramref name="pairs"/> with assign-all addresses, a no-op DNS reconciler, 64 GiB of memory, and fake RabbitMQ and provider accounts.
+        /// </summary>
+        /// <param name="pairs">In-memory configuration. This host does not read the production JSON file.</param>
         private static IHost CreateHost(Dictionary<string, string?> pairs)
         {
             var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings

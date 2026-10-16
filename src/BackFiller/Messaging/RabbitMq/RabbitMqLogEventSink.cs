@@ -29,13 +29,13 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     internal sealed class RabbitMqLogEventSink : ILogEventSink, IDisposable
     {
         /// <summary>AMQP content type used for plain-text log payloads.</summary>
-        public const string TextContentType = "text/plain";
+        internal const string TextContentType = "text/plain";
 
         /// <summary>AMQP content type used for JSON log payloads.</summary>
-        public const string JsonContentType = "application/json";
+        internal const string JsonContentType = "application/json";
 
         /// <summary>AMQP content encoding written on every publication.</summary>
-        public const string Utf8ContentEncoding = "utf-8";
+        private const string Utf8ContentEncoding = "utf-8";
 
         /// <summary>Process connection owner. This sink does not dispose it and does not open its own connection.</summary>
         private readonly IRabbitMqService _rabbitMq;
@@ -89,7 +89,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>Gets the destination exchange.</summary>
         private string Exchange { get; }
 
-        /// <summary>Gets the routing key.</summary>
+        /// <summary>Routing key copied from the constructor after trimming. It does not change afterward.</summary>
         private string RoutingKey { get; }
 
         /// <summary>Gets the AMQP AppId.</summary>

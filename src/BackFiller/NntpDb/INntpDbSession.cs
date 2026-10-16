@@ -8,7 +8,7 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// <remarks>
     /// This is the shared connection surface. Application query methods stay in the owning application.
     /// </remarks>
-    public interface INntpDbSession : IAsyncDisposable
+    internal interface INntpDbSession : IAsyncDisposable
     {
         /// <summary>
         /// Executes <c>SELECT 1</c> and returns the scalar integer result.

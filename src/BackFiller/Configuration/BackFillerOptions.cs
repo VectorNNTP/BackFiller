@@ -92,13 +92,19 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <summary>
         /// Gets or sets the DNS suffix used to generate <see cref="Fqdn"/>.
         /// </summary>
+        /// <remarks>
+        /// Omitted configuration uses <c>usenet.ninja</c>. A successful
+        /// <c>nntpsharedconfig</c> projection replaces this value. Whitespace fails when the
+        /// runtime snapshot canonicalizes the suffix.
+        /// </remarks>
         public string DnsSuffix { get; set; } = DefaultDnsSuffix;
 
         /// <summary>
         /// Gets or sets the Cloudflare zone identifier.
         /// </summary>
         /// <remarks>
-        /// Required. Binds from <c>BackFiller:CloudFlareZoneId</c> only.
+        /// Required at bind time from <c>BackFiller:CloudFlareZoneId</c> only.
+        /// A successful <c>nntpsharedconfig</c> projection replaces the bound value.
         /// </remarks>
         public string CloudFlareZoneId { get; set; } = string.Empty;
 
@@ -138,12 +144,19 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <summary>
         /// Gets or sets the ACME directory URL.
         /// </summary>
-        /// <remarks>Absolute HTTPS URL. The default is Let's Encrypt staging.</remarks>
+        /// <remarks>
+        /// Binder default is the Let's Encrypt staging directory. The value must be an absolute HTTPS URL
+        /// when ACME options are validated. A successful <c>nntpsharedconfig</c> projection replaces it.
+        /// </remarks>
         public string AcmeDirectoryUrl { get; set; } = DefaultAcmeDirectoryUrl;
 
         /// <summary>
         /// Gets or sets how many days before expiry a certificate is due for renewal.
         /// </summary>
+        /// <remarks>
+        /// Binder default is 30. ACME validation accepts 1–90. A successful <c>nntpsharedconfig</c>
+        /// projection replaces the bound value before renewal decisions use it.
+        /// </remarks>
         public int AcmeRenewalThresholdDays { get; set; } = DefaultAcmeRenewalThresholdDays;
 
         /// <summary>
@@ -156,6 +169,7 @@ namespace VectorNNTP.BackFiller.Configuration
         public string AcmeStateDir { get; set; } = DefaultAcmeStateDir;
 
         /// <summary>Gets or sets application-owned logging targets.</summary>
+        /// <remarks>A null section is replaced by <see cref="BackFillerLoggingOptions"/> defaults when the runtime snapshot resolves the file-log directory.</remarks>
         public BackFillerLoggingOptions Logging { get; set; } = new();
 
         /// <summary>
@@ -173,26 +187,31 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <summary>
         /// Gets or sets in-memory article retention settings.
         /// </summary>
+        /// <remarks>Required. The runtime snapshot rejects a null section.</remarks>
         public BackFillerArticleRetentionOptions ArticleRetention { get; set; } = new();
 
         /// <summary>
         /// Gets or sets a graceful shutdown policy.
         /// </summary>
+        /// <remarks>Required. The runtime snapshot rejects a null section. Defaults live on <see cref="BackFillerShutdownOptions"/>.</remarks>
         public BackFillerShutdownOptions Shutdown { get; set; } = new();
 
         /// <summary>
         /// Gets or sets Listener resource-safety bounds.
         /// </summary>
+        /// <remarks>Required. The runtime snapshot rejects a null section. Defaults and ranges live on <see cref="BackFillerListenerOptions"/>.</remarks>
         public BackFillerListenerOptions Listener { get; set; } = new();
 
         /// <summary>
         /// Gets or sets outbound NNTP provider session resource bounds.
         /// </summary>
+        /// <remarks>Required. The runtime snapshot rejects a null section.</remarks>
         public BackFillerNntpOptions Nntp { get; set; } = new();
 
         /// <summary>
         /// Gets or sets Linux systemd notify/watchdog options.
         /// </summary>
+        /// <remarks>Defaults live on <see cref="BackFillerSystemdOptions"/>. Windows hosts still bind the section.</remarks>
         public BackFillerSystemdOptions Systemd { get; set; } = new();
 
         /// <summary>
@@ -258,21 +277,42 @@ namespace VectorNNTP.BackFiller.Configuration
     internal sealed class BackFillerListenerOptions
     {
         /// <summary>Maximum incomplete inbound protocol bytes per connection.</summary>
+        /// <remarks>
+        /// Default 262144. Validation requires 32768 through <see cref="int.MaxValue"/>.
+        /// The runtime listener snapshot does not copy this value.
+        /// </remarks>
         public int ParserAccumulationMaxBytes { get; set; } = 262144;
 
         /// <summary>TLS handshake timeout in seconds.</summary>
+        /// <remarks>
+        /// Default 30. Validation accepts 1–300. Copied into the runtime snapshot as a <see cref="TimeSpan"/>.
+        /// </remarks>
         public int TlsHandshakeTimeoutSeconds { get; set; } = 30;
 
         /// <summary>Per-operation I/O no-progress timeout in seconds.</summary>
+        /// <remarks>
+        /// Default 60. Validation accepts 1–600. Copied into the runtime snapshot as a <see cref="TimeSpan"/>.
+        /// </remarks>
         public int IoProgressTimeoutSeconds { get; set; } = 60;
 
         /// <summary>ReceiptAck wait after a completed Found transfer, in seconds.</summary>
+        /// <remarks>
+        /// Default 30. Validation accepts 1–300. The runtime listener snapshot does not copy this value.
+        /// </remarks>
         public int AwaitingReceiptAckTimeoutSeconds { get; set; } = 30;
 
         /// <summary>Maximum queued Found payload bytes per connection.</summary>
+        /// <remarks>
+        /// Default 67108864. Validation requires 1 through <see cref="int.MaxValue"/>.
+        /// Copied into the runtime snapshot. The cache listener does not read it.
+        /// </remarks>
         public int MaxQueuedFoundPayloadBytes { get; set; } = 67108864;
 
         /// <summary>Maximum concurrently active accepted connections.</summary>
+        /// <remarks>
+        /// Default 1024. Validation requires 1 through <see cref="int.MaxValue"/>.
+        /// The cache listener rejects further accepts at this count.
+        /// </remarks>
         public int MaxActiveConnections { get; set; } = 1024;
     }
 
@@ -327,21 +367,28 @@ namespace VectorNNTP.BackFiller.Configuration
         /// Under pressure, FIFO reclaim skips entries that still have openable Success RequestIds;
         /// new admissions may then fail with capacity unavailable instead of invalidating those capabilities.
         /// </summary>
+        /// <remarks>
+        /// Default 4. Validation requires a positive value that does not exceed 80 percent of physical memory
+        /// or the largest GiB count that fits in a 64-bit byte length. The snapshot stores the value in bytes.
+        /// </remarks>
         public int MaximumRetainedPayloadGigabytes { get; set; } = 4;
 
         /// <summary>
         /// Maximum retention lifetime in seconds from insertion.
         /// TTL expiry removes the entry and clears remaining openable RequestIds.
         /// </summary>
+        /// <remarks>Default 60. Validation accepts 1–60. The snapshot stores a <see cref="TimeSpan"/>.</remarks>
         public int RetentionTtlSeconds { get; set; } = 60;
 
         /// <summary>
         /// Maximum concurrently openable Article Work RequestIds attached to one retained Message-ID.
         /// AlreadyPresent attachments beyond this limit are rejected without revoking existing RequestIds.
         /// </summary>
+        /// <remarks>Default 16. Validation accepts 1–256.</remarks>
         public int MaxOpenableRequestIdsPerArticle { get; set; } = 16;
 
         /// <summary>Sweep cadence in seconds.</summary>
+        /// <remarks>Default 1. Validation accepts 1–60. The snapshot stores a <see cref="TimeSpan"/>.</remarks>
         public int SweepIntervalSeconds { get; set; } = 1;
     }
 }

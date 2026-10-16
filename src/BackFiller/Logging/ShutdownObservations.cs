@@ -1,6 +1,10 @@
 namespace VectorNNTP.BackFiller.Logging
 {
     /// <summary>Debug records for shutdown and cleanup paths that continue after an expected failure.</summary>
+    /// <remarks>
+    /// Each method writes at <see cref="LogLevel.Debug"/>. Host log filtering can suppress a call without changing runtime behavior.
+    /// These methods do not throw; they only record that shutdown continued.
+    /// </remarks>
     internal static partial class ShutdownObservations
     {
         /// <summary>Records that a cancelled operation ended a shutdown wait.</summary>

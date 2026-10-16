@@ -8,8 +8,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
     /// </summary>
     /// <remarks>
     /// <para>
-    /// BackFiller does not use NNTPD's <c>ApplicationLifecycle</c> state machine. Ready is reported
-    /// at most once after <see cref="IHostApplicationLifetime.ApplicationStarted"/> (all hosted
+    /// Ready is reported at most once after <see cref="IHostApplicationLifetime.ApplicationStarted"/> (all hosted
     /// services started successfully). Startup failure never reports ready. Once shutdown begins,
     /// further readiness notifications are suppressed.
     /// </para>

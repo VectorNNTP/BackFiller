@@ -6,8 +6,14 @@ using BackFillerApplicationServiceManager = VectorNNTP.BackFiller.Core.Applicati
 
 namespace VectorNNTP.BackFiller.Tests.Core
 {
+    /// <summary>
+    /// ApplicationServiceManager start/stop ordering, rollback, and unexpected termination events.
+    /// </summary>
     public sealed class ApplicationServiceManagerTests
     {
+        /// <summary>
+        /// Started services are tracked in registration order; stop reverses order and clears the started list.
+        /// </summary>
         [Fact]
         public async Task Starts_in_registration_order_and_stops_in_reverse()
         {
@@ -31,6 +37,9 @@ namespace VectorNNTP.BackFiller.Tests.Core
             Assert.Empty(manager.StartedServices);
         }
 
+        /// <summary>
+        /// When a later service fails to start, already-started services are stopped in reverse and none remain started.
+        /// </summary>
         [Fact]
         public async Task Startup_failure_rolls_back_already_started_services()
         {
@@ -50,6 +59,9 @@ namespace VectorNNTP.BackFiller.Tests.Core
             Assert.Empty(manager.StartedServices);
         }
 
+        /// <summary>
+        /// UnexpectedServiceTermination carries a null exception when the service execution task completes successfully.
+        /// </summary>
         [Fact]
         public async Task Unexpected_termination_event_for_completed_execution_has_null_exception()
         {
@@ -74,6 +86,9 @@ namespace VectorNNTP.BackFiller.Tests.Core
             await manager.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>
+        /// UnexpectedServiceTermination surfaces the fault exception when the service execution task faults.
+        /// </summary>
         [Fact]
         public async Task Unexpected_termination_event_for_faulted_execution_has_non_null_exception()
         {
@@ -99,6 +114,8 @@ namespace VectorNNTP.BackFiller.Tests.Core
             await manager.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>Waits for the next UnexpectedServiceTermination event or fails if none arrives within two seconds.</summary>
+        /// <param name="manager">Manager whose termination event is subscribed.</param>
         private static async Task<(string ServiceName, Exception? Exception)> AwaitUnexpectedTerminationAsync(
             BackFillerApplicationServiceManager manager)
         {
@@ -111,39 +128,57 @@ namespace VectorNNTP.BackFiller.Tests.Core
             return await completion.Task;
         }
 
+        /// <summary>Minimal service exposing a monitored execution task for termination signaling tests.</summary>
         private sealed class MonitoredService : IApplicationService
         {
-            public MonitoredService(string name, Task execution)
+            /// <summary>Creates a service with the given logical name and background execution task.</summary>
+            /// <param name="name">Reported service name.</param>
+            /// <param name="execution">Task whose completion or fault drives termination events.</param>
+            internal MonitoredService(string name, Task execution)
             {
                 Name = name;
                 Execution = execution;
             }
 
+            /// <inheritdoc />
             public string Name { get; }
 
+            /// <inheritdoc />
             public Task? Execution { get; }
 
+            /// <inheritdoc />
             public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+            /// <inheritdoc />
             public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         }
 
+        /// <summary>Records start/stop calls in a shared list; can throw on start to simulate startup failure.</summary>
         private sealed class TrackingService : IApplicationService
         {
+            /// <summary>Shared list mutated with start/stop markers.</summary>
             private readonly List<string> _order;
+            /// <summary>Optional exception thrown from <see cref="StartAsync"/> after recording start.</summary>
             private readonly Exception? _startException;
 
-            public TrackingService(string name, List<string> order, Exception? startException = null)
+            /// <summary>Creates a tracker that appends start/stop markers to <paramref name="order"/>.</summary>
+            /// <param name="name">Logical service name used in recorded markers.</param>
+            /// <param name="order">Shared list mutated by start/stop.</param>
+            /// <param name="startException">When set, thrown from <see cref="StartAsync"/> after recording start.</param>
+            internal TrackingService(string name, List<string> order, Exception? startException = null)
             {
                 Name = name;
                 _order = order;
                 _startException = startException;
             }
 
+            /// <inheritdoc />
             public string Name { get; }
 
+            /// <inheritdoc />
             public Task? Execution => null;
 
+            /// <inheritdoc />
             public Task StartAsync(CancellationToken cancellationToken)
             {
                 _order.Add("start:" + Name);
@@ -155,6 +190,7 @@ namespace VectorNNTP.BackFiller.Tests.Core
                 return Task.CompletedTask;
             }
 
+            /// <inheritdoc />
             public Task StopAsync(CancellationToken cancellationToken)
             {
                 _order.Add("stop:" + Name);

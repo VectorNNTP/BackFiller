@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// </summary>
         internal readonly struct Result
         {
-            /// <summary>Initializes a successful exchange.</summary>
+            /// <summary>Captures a response datagram that passed remote-endpoint validation.</summary>
             /// <param name="buffer">Response datagram accepted from the expected nameserver.</param>
             internal Result(byte[] buffer)
             {
@@ -39,8 +39,8 @@ namespace VectorNNTP.BackFiller.Dns
                 Failed = false;
             }
 
-            /// <summary>Initializes a timeout or socket-failure outcome with no response buffer.</summary>
-            /// <param name="timedOut"><see langword="true"/> when the receive window elapsed.</param>
+            /// <summary>Represents a failed exchange with no accepted datagram.</summary>
+            /// <param name="timedOut"><see langword="true"/> when the receive window elapsed without a matching datagram.</param>
             /// <param name="failed"><see langword="true"/> when a socket or disposal error prevented a response.</param>
             private Result(bool timedOut, bool failed)
             {
@@ -56,7 +56,7 @@ namespace VectorNNTP.BackFiller.Dns
             internal bool TimedOut { get; }
 
             /// <summary><see langword="true"/> when a socket error prevented a usable response.</summary>
-            internal bool Failed { get; }
+            private bool Failed { get; }
 
             /// <summary>Creates a timeout outcome.</summary>
             internal static Result Timeout() => new(timedOut: true, failed: false);

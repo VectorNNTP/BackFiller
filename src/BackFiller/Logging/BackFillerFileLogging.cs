@@ -24,7 +24,7 @@ namespace VectorNNTP.BackFiller.Logging
     internal static class BackFillerFileLogging
     {
         /// <summary>Serilog rolling path token: <c>{entry assembly name}-yyyyMMdd.log</c>.</summary>
-        internal const string RollingPathSuffix = "-.log";
+        private const string RollingPathSuffix = "-.log";
 
         /// <summary>
         /// Text output template used when <see cref="BackFillerLoggingOptions.Json"/> is false and the
@@ -37,7 +37,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// Text output template used when <see cref="BackFillerLoggingOptions.Json"/> is false and the
         /// process switch for ambient context enrichment is on. Renders <c>{SourceContext}</c>.
         /// </summary>
-        internal const string SinkOutputTemplateWithSourceContext =
+        private const string SinkOutputTemplateWithSourceContext =
             "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
 
         /// <summary>Restricted minimum level for sinks when the configured level is at least Debug.</summary>
@@ -53,10 +53,10 @@ namespace VectorNNTP.BackFiller.Logging
         /// <summary>
         /// When true, the async file and RabbitMQ wrappers block once <see cref="AsyncBufferSize"/> events are queued.
         /// </summary>
-        internal const bool AsyncBlockWhenFull = true;
+        private const bool AsyncBlockWhenFull = true;
 
         /// <summary>Passed as the File sink <c>buffered</c> flag. True leaves that sink buffered.</summary>
-        internal const bool FileBuffered = true;
+        private const bool FileBuffered = true;
 
         /// <summary>
         /// Serilog File <c>flushToDiskInterval</c> of one second. The host logger is built here,
@@ -68,7 +68,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// Passed as the File sink <c>rollOnFileSizeLimit</c> flag.
         /// False leaves rolling to the daily interval, and no file size limit is set.
         /// </summary>
-        internal const bool RollOnFileSizeLimit = false;
+        private const bool RollOnFileSizeLimit = false;
 
         /// <summary>
         /// Resolves <paramref name="logDirectory"/> through Common

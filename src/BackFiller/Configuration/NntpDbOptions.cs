@@ -19,7 +19,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// Do not log <see cref="ConnectionString"/>.
     /// </para>
     /// </remarks>
-    public sealed class NntpDbOptions
+    internal sealed class NntpDbOptions
     {
         /// <summary>Top-level NntpDB application-options section name.</summary>
         internal const string SectionName = "NntpDb";

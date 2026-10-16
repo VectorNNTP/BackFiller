@@ -3,10 +3,19 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.ArticleWork
 {
+    /// <summary>
+    /// Article work request JSON and AMQP header contract: byte-oriented body parsing, schema validation, and bounded size rejection.
+    /// </summary>
     public sealed class ArticleWorkRequestParserTests
     {
+        /// <summary>
+        /// Default <c>maxPayloadBytes</c> used unless a test overrides the limit for boundary coverage.
+        /// </summary>
         private const int MaxPayload = 1024;
 
+        /// <summary>
+        /// Canonical fixture JSON with matching delivery backbone parses to version 1 identities without mutation.
+        /// </summary>
         [Fact]
         public void Canonical_protocol_payload_is_valid()
         {
@@ -23,6 +32,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("Giganews", parsed.Request.Backbone);
         }
 
+        /// <summary>
+        /// Protocol documentation valid example accepts when the consumer backbone parameter matches routing context.
+        /// </summary>
         [Fact]
         public void Protocol_valid_example_is_accepted()
         {
@@ -37,6 +49,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("Eweka", parsed.Request.Backbone);
         }
 
+        /// <summary>
+        /// Extra JSON properties and wrong-case correlation fields in the body are ignored; required camelCase fields still validate.
+        /// </summary>
         [Fact]
         public void Unknown_json_fields_are_ignored()
         {
@@ -52,6 +67,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkTestDeliveries.CanonicalMessageId, parsed.Request!.MessageId);
         }
 
+        /// <summary>
+        /// PascalCase property names fail validation; failure identities omit request id when version is missing.
+        /// </summary>
         [Fact]
         public void Property_names_are_case_sensitive()
         {
@@ -68,6 +86,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Non-JSON body yields invalid request with JSON syntax reason and no parsed identities.
+        /// </summary>
         [Fact]
         public void Malformed_json_is_invalid_request()
         {
@@ -81,6 +102,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Empty body is rejected before field validation.
+        /// </summary>
         [Fact]
         public void Empty_payload_is_invalid_request()
         {
@@ -93,6 +117,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("empty", parsed.Failure!.Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Missing <c>version</c> fails closed; partial identity may still be extracted for diagnostics.
+        /// </summary>
         [Fact]
         public void Missing_version_is_invalid_request()
         {
@@ -109,6 +136,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId), parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Protocol invalid example (unsupported version / backbone mismatch) rejects with partial failure identities per schema rules.
+        /// </summary>
         [Fact]
         public void Protocol_invalid_example_is_rejected_for_unsupported_version()
         {
@@ -124,6 +154,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("WrongBackbone", parsed.Failure.Identities.Backbone);
         }
 
+        /// <summary>
+        /// Absent <c>requestId</c> is invalid; parser does not invent a guid.
+        /// </summary>
         [Fact]
         public void Missing_request_id_is_invalid_and_not_synthesized()
         {
@@ -140,6 +173,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Empty string and nil UUID request ids are both rejected without identity in failure payload.
+        /// </summary>
         [Fact]
         public void Empty_and_nil_request_ids_are_invalid()
         {
@@ -160,6 +196,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(nil.Failure!.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Missing or unbracketed message ids fail without auto-wrapping or normalizing wire form.
+        /// </summary>
         [Fact]
         public void Missing_and_invalid_message_ids_are_rejected_without_normalization()
         {
@@ -180,6 +219,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(unbracketed.Failure!.Identities.MessageId);
         }
 
+        /// <summary>
+        /// Accepted message-id string equals JSON literal bytes (case and brackets preserved).
+        /// </summary>
         [Fact]
         public void Exact_message_id_is_preserved()
         {
@@ -197,6 +239,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.NotEqual(wire.ToLowerInvariant(), parsed.Request.MessageId);
         }
 
+        /// <summary>
+        /// JSON without <c>backbone</c> is invalid; failure identities omit backbone.
+        /// </summary>
         [Fact]
         public void Missing_backbone_is_invalid_request()
         {
@@ -211,6 +256,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(parsed.Failure.Identities.Backbone);
         }
 
+        /// <summary>
+        /// JSON backbone must match the consumer's expected backbone parameter (ordinal ignore case for equality only).
+        /// </summary>
         [Fact]
         public void Backbone_mismatch_is_invalid_request()
         {
@@ -224,6 +272,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("Giganews", parsed.Failure.Identities.Backbone);
         }
 
+        /// <summary>
+        /// Backbone comparison ignores case but stored value remains the JSON string literal.
+        /// </summary>
         [Fact]
         public void Backbone_match_is_ordinal_ignore_case_and_preserves_json_value()
         {
@@ -239,6 +290,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal("giganews", parsed.Request!.Backbone);
         }
 
+        /// <summary>
+        /// AMQP correlation id header is mandatory for valid requests.
+        /// </summary>
         [Fact]
         public void Missing_correlation_id_is_invalid_request()
         {
@@ -254,6 +308,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(Guid.Parse(ArticleWorkTestDeliveries.CanonicalRequestId), parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Blank reply-to routing target fails validation.
+        /// </summary>
         [Fact]
         public void Missing_reply_to_is_invalid_request()
         {
@@ -268,6 +325,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("ReplyTo", parsed.Failure!.Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Absent or empty Content-Type is allowed; non-JSON content type when present is rejected.
+        /// </summary>
         [Fact]
         public void ContentType_is_required_only_when_present()
         {
@@ -296,6 +356,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("ContentType", wrong.Failure!.Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Optional RequestId header must match body request id when supplied; absent header is allowed.
+        /// </summary>
         [Fact]
         public void RequestId_header_is_required_only_when_present()
         {
@@ -318,6 +381,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Contains("RequestId", mismatch.Failure!.Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Parsed request id remains distinct from AMQP correlation id and delivery tag strings.
+        /// </summary>
         [Fact]
         public void RequestId_is_distinct_from_correlation_id_and_delivery_tag()
         {
@@ -330,6 +396,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.NotEqual(delivery.CorrelationId, delivery.DeliveryTag.ToString());
         }
 
+        /// <summary>
+        /// Size check runs first: oversized canonical body fails without extracting JSON identities.
+        /// </summary>
         [Fact]
         public void Oversized_payload_is_invalid_without_json_identities()
         {
@@ -343,6 +412,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Null(parsed.Failure.Identities.RequestId);
         }
 
+        /// <summary>
+        /// Message-id acceptance aligns with shared NNTP message-id rules (length, brackets, IPv6 literal form).
+        /// </summary>
         [Fact]
         public void Message_id_uses_common_validator()
         {
@@ -361,6 +433,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.False(ParseMessageId("<" + new string('a', 247) + "@b>").IsValid);
         }
 
+        /// <summary>
+        /// Parser reads delivery body bytes directly; UTF-8 decode for logging is not required for successful parse and must not mutate body length.
+        /// </summary>
         [Fact]
         public void Parser_does_not_decode_body_as_string_before_json()
         {
@@ -470,6 +545,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.DoesNotContain("WorkRequestMaxPayloadBytes", parsed.Failure.Reason, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Parses a minimal JSON envelope with the given message-id for validator matrix checks.
+        /// </summary>
+        /// <param name="messageId">Wire message-id literal embedded in JSON.</param>
+        /// <returns>Parse result from <see cref="ArticleWorkRequestParser.Parse"/>.</returns>
         private static ArticleWorkParseResult ParseMessageId(string messageId)
         {
             var json = "{\"version\":1,\"requestId\":\"7c1cb8a0-95f9-4c13-8e53-339773e3afaa\",\"messageId\":\""

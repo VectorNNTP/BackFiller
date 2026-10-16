@@ -27,7 +27,13 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary><c>1</c> after the first <see cref="DisposeAsync"/>. Later calls return immediately.</summary>
         private int _disposed;
 
-        /// <summary>Initializes a new wrapper around an opened broker connection.</summary>
+        /// <summary>Subscribes to shutdown, callback, blocked, and unblocked events on an opened broker connection.</summary>
+        /// <param name="connection">Opened client connection. This wrapper closes and disposes it.</param>
+        /// <param name="virtualHost">Virtual host recorded for diagnostics. It is not read back from the connection.</param>
+        /// <param name="logger">Logger for a failed close. Credentials are not written.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="connection"/> or <paramref name="logger"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="virtualHost"/> is null or white space.</exception>
+        /// <exception cref="InvalidOperationException"><see cref="IConnection.ClientProvidedName"/> is null or white space.</exception>
         internal RabbitMqClientConnection(IConnection connection, string virtualHost, ILogger logger)
         {
             ArgumentNullException.ThrowIfNull(connection);
@@ -72,6 +78,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         public event EventHandler<RabbitMqConnectionLostEventArgs>? ConnectionLost;
 
         /// <inheritdoc />
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The broker connection is not open.</exception>
+        /// <remarks>
+        /// Publisher confirms and confirmation tracking are disabled. Cancellation is forwarded to channel creation
+        /// and does not dispose this connection. The caller owns the returned channel.
+        /// </remarks>
         public async Task<IRabbitMqTopologyChannel> CreateTopologyChannelAsync(CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
@@ -90,6 +102,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The broker connection is not open.</exception>
+        /// <remarks>
+        /// Publisher confirms and confirmation tracking are enabled. <paramref name="generation"/> is stored on the channel
+        /// and is not sent to the broker. Cancellation does not dispose this connection.
+        /// </remarks>
         public async Task<IRabbitMqRpcChannel> CreateRpcChannelAsync(long generation, CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
@@ -108,6 +126,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The broker connection is not open.</exception>
+        /// <remarks>
+        /// Publisher confirms and confirmation tracking are disabled. <paramref name="generation"/> is stored on the channel.
+        /// Cancellation does not dispose this connection.
+        /// </remarks>
         public async Task<IRabbitMqManualAckChannel> CreateManualAckChannelAsync(
             long generation,
             CancellationToken cancellationToken)
@@ -128,6 +152,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The broker connection is not open.</exception>
+        /// <remarks>
+        /// Publisher confirms and library confirmation tracking are enabled, so publish waits for the broker confirm.
+        /// Cancellation does not dispose this connection.
+        /// </remarks>
         public async Task<IRabbitMqPublishChannel> CreatePublishChannelAsync(
             long generation,
             CancellationToken cancellationToken)
@@ -148,6 +178,12 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <inheritdoc />
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The broker connection is not open.</exception>
+        /// <remarks>
+        /// Confirms are enabled and library tracking is disabled, so publish returns after the write.
+        /// Cancellation does not dispose this connection.
+        /// </remarks>
         public async Task<IRabbitMqAsyncConfirmPublishChannel> CreateAsyncConfirmPublishChannelAsync(
             long generation,
             CancellationToken cancellationToken)
@@ -169,7 +205,15 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
             return new RabbitMqClientAsyncConfirmPublishChannel(channel, generation);
         }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// Unsubscribes connection events, closes the broker connection, and disposes it. A second call returns immediately.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="RabbitMQ.Client.Exceptions.AlreadyClosedException"/>, <see cref="RabbitMQ.Client.Exceptions.OperationInterruptedException"/>,
+        /// <see cref="IOException"/>, <see cref="ObjectDisposedException"/>, and <see cref="TimeoutException"/> from close are logged
+        /// and disposal still runs. Other close failures propagate. This method does not raise <see cref="ConnectionLost"/>.
+        /// </remarks>
+        /// <returns>A task that completes after the client connection is disposed.</returns>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1)

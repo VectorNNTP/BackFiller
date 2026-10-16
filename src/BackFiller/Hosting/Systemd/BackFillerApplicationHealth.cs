@@ -4,10 +4,10 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
     /// Host-lifetime health used for systemd watchdog decisions.
     /// </summary>
     /// <remarks>
-    /// BackFiller does not use NNTPD's <c>ApplicationLifecycle</c> state machine. Readiness for
-    /// watchdog purposes means all Generic Host hosted services started successfully, shutdown
-    /// has not begun, and no unexpected supervised-service termination has been recorded.
-    /// Each flag is set to one with <see cref="Interlocked.Exchange(ref int, int)"/> and is never cleared.
+    /// Readiness for watchdog purposes means all Generic Host hosted services started successfully, shutdown
+    /// has not begun, no unexpected supervised-service termination has been recorded, and the published TLS
+    /// certificate is not blocking keep-alives. Start, shutdown, and unexpected termination are sticky.
+    /// <see cref="MarkCertificateUnavailable"/> is cleared by <see cref="MarkCertificateAvailable"/>.
     /// </remarks>
     internal sealed class BackFillerApplicationHealth : IApplicationHealth
     {
@@ -20,11 +20,26 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
         /// <summary>Non-zero after <see cref="MarkUnexpectedTermination"/>.</summary>
         private int _unexpectedTermination;
 
+        /// <summary>
+        /// Non-zero while the published certificate is missing, unusable, expired, or inside the renewal window
+        /// after a renewal that did not replace it. Cleared by <see cref="MarkCertificateAvailable"/>.
+        /// </summary>
+        private int _certificateUnavailable;
+
         /// <inheritdoc />
         public bool IsHealthyForWatchdog =>
             Volatile.Read(ref _started) == 1
             && Volatile.Read(ref _stopping) == 0
-            && Volatile.Read(ref _unexpectedTermination) == 0;
+            && Volatile.Read(ref _unexpectedTermination) == 0
+            && Volatile.Read(ref _certificateUnavailable) == 0;
+
+        /// <summary>Stops watchdog keep-alives until <see cref="MarkCertificateAvailable"/>.</summary>
+        /// <remarks>Reversible. Does not mark unexpected termination and does not stop the host by itself.</remarks>
+        internal void MarkCertificateUnavailable() => Interlocked.Exchange(ref _certificateUnavailable, 1);
+
+        /// <summary>Allows watchdog keep-alives again after a usable certificate is published.</summary>
+        /// <remarks>Does not clear <see cref="_stopping"/> or <see cref="_unexpectedTermination"/>.</remarks>
+        internal void MarkCertificateAvailable() => Interlocked.Exchange(ref _certificateUnavailable, 0);
 
         /// <summary>Marks successful host start (all hosted services started).</summary>
         /// <remarks>Leaves <see cref="_stopping"/> and <see cref="_unexpectedTermination"/> unchanged.</remarks>

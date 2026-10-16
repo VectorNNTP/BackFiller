@@ -10,7 +10,9 @@ namespace VectorNNTP.BackFiller.Tests.Retention
     /// </summary>
     public sealed class ArticleRetentionHardTtlTests
     {
+        /// <summary>Fixed UTC anchor for advancing TTL deadlines in hard-expiry regressions.</summary>
         private static readonly DateTimeOffset Start = new(2026, 9, 26, 12, 0, 0, TimeSpan.Zero);
+        /// <summary>At exact TTL deadline claim fails and bytes drop without requiring sweep.</summary>
 
         [Fact]
         public async Task Entry_expires_at_the_exact_deadline_without_a_sweep()
@@ -36,6 +38,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedCount);
             Assert.Equal(0, authority.SweepExpired());
         }
+        /// <summary>After TTL, NotFound allows re-retain as a new entry.</summary>
 
         [Fact]
         public async Task Expired_entry_is_not_discoverable_before_the_sweep()
@@ -57,6 +60,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(ArticleRetentionKind.Retained, admitted.Kind);
             Assert.Equal(replacement.Record.ArtSize, authority.RetainedPayloadBytes);
         }
+        /// <summary>Sweep at expiry zeroes authority while claim buffer stays valid until dispose.</summary>
 
         [Fact]
         public async Task Expiry_during_an_active_claim_drops_authority_state_and_keeps_captured_bytes()
@@ -86,6 +90,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 Assert.Equal(0, authority.SweepExpired());
             }
         }
+        /// <summary>Claim after expiry on held bytes does not restore index.</summary>
 
         [Fact]
         public async Task A_second_claim_at_expiry_removes_the_entry_without_a_sweep()
@@ -104,6 +109,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
 
             Assert.Equal(0, authority.RetainedPayloadBytes);
         }
+        /// <summary>Sweep during open claim removes authority bytes only.</summary>
 
         [Fact]
         public async Task An_unsettled_claim_does_not_keep_expired_bytes_in_the_authority()
@@ -120,6 +126,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
                 Assert.True(claim.ArticleBytes.Span.SequenceEqual(prepared.ArtData.AsSpan()));
             }
         }
+        /// <summary>AlreadyPresent with later request id does not extend original TTL deadline.</summary>
 
         [Fact]
         public async Task Duplicate_message_id_and_a_later_request_id_do_not_extend_ttl()
@@ -140,6 +147,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.RetainedCount);
         }
+        /// <summary>FIFO after cancel replaces bytes with exact size accounting.</summary>
 
         [Fact]
         public async Task Fifo_reclaim_replaces_retained_bytes_exactly()
@@ -162,6 +170,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(second.Record.ArtSize, authority.RetainedPayloadBytes);
             Assert.Equal(1, authority.RetainedCount);
         }
+        /// <summary>Sweep and claim release subtract each expired generation once from totals.</summary>
 
         [Fact]
         public async Task Expiry_and_claim_release_subtract_the_expired_entry_once()
@@ -191,6 +200,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             Assert.Equal(0, authority.RetainedPayloadBytes);
             Assert.Equal(0, authority.SweepExpired());
         }
+        /// <summary>Repeated sweep/dispose/shutdown do not double-subtract bytes.</summary>
 
         [Fact]
         public async Task Repeated_expiry_and_disposal_are_idempotent()
@@ -221,6 +231,7 @@ namespace VectorNNTP.BackFiller.Tests.Retention
             await authority.DisposeAsync();
             Assert.Equal(0, authority.SweepExpired());
         }
+        /// <summary>ProviderArticleWorkHandler must not expose LastPayload/LastRecord test seams in production.</summary>
 
         [Fact]
         public void Handler_does_not_keep_a_production_article_reference()

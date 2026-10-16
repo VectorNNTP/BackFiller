@@ -17,7 +17,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// One gate per consume-channel wrapper. A replacement wrapper owns a new RabbitMQ channel and therefore a new gate.
         /// The table drops the gate when the wrapper is collected. <see cref="SemaphoreSlim"/> here is unnamed, so it has no wait handle to dispose.
         /// </summary>
-        private static readonly ConditionalWeakTable<IRabbitMqManualAckChannel, SettlementGate> SettlementGates = new();
+        private static readonly ConditionalWeakTable<IRabbitMqManualAckChannel, SettlementGate> SettlementGates = [];
 
         /// <summary>Original consumer channel. Settlement never moves to a replacement channel.</summary>
         private readonly IRabbitMqManualAckChannel _channel;
@@ -49,13 +49,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
             _generation = generation;
         }
 
-        /// <summary>Gets the delivery tag this lease may settle.</summary>
-        internal ulong DeliveryTag => _deliveryTag;
-
-        /// <summary>Gets the connection generation captured at admission.</summary>
-        internal long Generation => _generation;
-
-        /// <summary>Gets whether this lease has claimed its single settlement attempt.</summary>
+        /// <summary>
+        /// Whether this lease has already consumed its one settlement attempt, including when the broker RPC then failed.
+        /// </summary>
         /// <remarks>
         /// Set before the broker RPC. Remains <see langword="true"/> when that RPC throws, so the failed attempt is not retried on this lease.
         /// </remarks>
@@ -169,7 +165,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
             }
         }
 
-        /// <summary>Gets how many settlements are waiting to use <paramref name="channel"/>.</summary>
+        /// <summary>
+        /// Count of callers blocked on the per-channel settlement gate before they may use <paramref name="channel"/>.
+        /// </summary>
         /// <param name="channel">Consume channel whose gate should be observed.</param>
         /// <returns>The waiter count, or zero when that channel has not settled yet.</returns>
         internal static int SettlementWaiters(IRabbitMqManualAckChannel channel)

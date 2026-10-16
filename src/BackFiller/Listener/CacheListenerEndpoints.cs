@@ -29,7 +29,7 @@ namespace VectorNNTP.BackFiller.Listener
         /// <returns>A listening socket. The caller owns it.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="endpoint"/> is null.</exception>
         /// <remarks>Any exception from bind or listen disposes the new socket and is rethrown.</remarks>
-        internal static Socket CreateBoundListenSocket(IPEndPoint endpoint, bool dualMode = false)
+        private static Socket CreateBoundListenSocket(IPEndPoint endpoint, bool dualMode = false)
         {
             ArgumentNullException.ThrowIfNull(endpoint);
             var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)

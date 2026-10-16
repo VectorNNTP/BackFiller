@@ -15,7 +15,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <summary>
         /// Selects at most two rows so a second row is visible. A singleton table is still invalid when empty or duplicated.
         /// </summary>
-        internal const string SelectSql =
+        private const string SelectSql =
             "SELECT maxartsize, sitename, prometheusurl, acmedirectoryurl, acmerenewalthresholddays, cloudflarezoneid, dnssuffix, acmeaccount, acmecertpass, cloudflareapikey, rabbitmqpassword, rabbitmqusername FROM nntpsharedconfig LIMIT 2";
 
         /// <summary>Reads <c>nntpsharedconfig</c> from <paramref name="session"/> and validates the row.</summary>
@@ -77,7 +77,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <param name="rows">Candidates. Exactly one is required.</param>
         /// <returns>The validated snapshot.</returns>
         /// <exception cref="InvalidOperationException">The candidates are not one valid row.</exception>
-        internal static NntpSharedConfiguration Validate(IReadOnlyList<NntpSharedConfigurationCandidate> rows)
+        private static NntpSharedConfiguration Validate(IReadOnlyList<NntpSharedConfigurationCandidate> rows)
         {
             ArgumentNullException.ThrowIfNull(rows);
             if (rows.Count == 0)

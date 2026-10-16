@@ -17,7 +17,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     internal sealed class RabbitMqClientConnectionFactory : IRabbitMqConnectionFactory
     {
         /// <summary>Hostname used when the operating system does not report one.</summary>
-        internal const string UnknownHostName = "unknown-host";
+        private const string UnknownHostName = "unknown-host";
 
         /// <summary>Passed into each <see cref="RabbitMqClientConnection"/> for close-failure logs. Not used to log credentials.</summary>
         private readonly ILogger<RabbitMqClientConnectionFactory> _logger;
@@ -58,7 +58,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>
         /// Builds a RabbitMQ.Client factory with application-managed recovery disabled.
         /// </summary>
-        internal static ConnectionFactory CreateClientFactory(
+        private static ConnectionFactory CreateClientFactory(
             RabbitMqRuntimeOptions options,
             string connectionName)
         {
@@ -109,7 +109,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <param name="readMachineName">Reads the operating-system hostname.</param>
         /// <returns>A non-empty hostname.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="readMachineName"/> is null.</exception>
-        internal static string ResolveClientMachineName(Func<string?> readMachineName)
+        private static string ResolveClientMachineName(Func<string?> readMachineName)
         {
             ArgumentNullException.ThrowIfNull(readMachineName);
 

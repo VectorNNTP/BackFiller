@@ -79,28 +79,5 @@ namespace VectorNNTP.BackFiller.Acme
                 throw new AcmeCertificateException("malformed_pfx", ex.GetType().Name);
             }
         }
-
-        /// <summary>Loads the full PKCS#12 collection (leaf + chain).</summary>
-        /// <param name="pfxBytes">PFX bytes. Empty input fails.</param>
-        /// <param name="password">PFX password. Not included in exception text.</param>
-        /// <returns>The certificate collection. The caller owns disposal of its certificates.</returns>
-        /// <exception cref="AcmeCertificateException">Thrown when the bytes are empty or the load fails. Category <c>malformed_pfx</c>.</exception>
-        private static X509Certificate2Collection LoadCollection(ReadOnlySpan<byte> pfxBytes, string password)
-        {
-            ArgumentNullException.ThrowIfNull(password);
-            if (pfxBytes.IsEmpty)
-            {
-                throw new AcmeCertificateException("malformed_pfx", "empty_pfx");
-            }
-
-            try
-            {
-                return X509CertificateLoader.LoadPkcs12Collection(pfxBytes, password, LoadFlags);
-            }
-            catch (Exception ex) when (ex is CryptographicException or ArgumentException)
-            {
-                throw new AcmeCertificateException("malformed_pfx", ex.GetType().Name);
-            }
-        }
     }
 }

@@ -18,8 +18,22 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
     /// </summary>
     internal sealed class BackFillerPipelineHarness : IAsyncDisposable
     {
+        /// <summary>True after account polling has been started for this harness instance.</summary>
         private bool _accountsStarted;
 
+        /// <summary>Captures composed pipeline dependencies for Article Work integration tests.</summary>
+        /// <param name="accounts">Fake account source feeding refresh.</param>
+        /// <param name="catalog">Mutable provider catalog.</param>
+        /// <param name="accountService">Production account refresh service.</param>
+        /// <param name="registry">NNTP provider registry.</param>
+        /// <param name="nntp">Scripted transport factory for provider connects.</param>
+        /// <param name="retention">Retention authority under test.</param>
+        /// <param name="time">Manual clock driving retention TTL.</param>
+        /// <param name="handler">Article work handler on the real pipeline path.</param>
+        /// <param name="rabbitFactory">Fake RabbitMQ factory for connections.</param>
+        /// <param name="connections">Live RabbitMQ service over fakes.</param>
+        /// <param name="publisher">Response publisher on the pipeline path.</param>
+        /// <param name="pipeline">Delivery pipeline coordinating handler and settlement.</param>
         private BackFillerPipelineHarness(
             FakeProviderAccountSource accounts,
             ProviderConfigurationCatalog catalog,
@@ -48,34 +62,70 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             Pipeline = pipeline;
         }
 
+        /// <summary>Fake MySQL account rows consumed by <see cref="AccountService"/> refresh.</summary>
+
         public FakeProviderAccountSource Accounts { get; }
+
+        /// <summary>Mutable provider catalog updated when account refresh succeeds.</summary>
 
         public ProviderConfigurationCatalog Catalog { get; }
 
+        /// <summary>Production account refresh service; started once by <see cref="LoadProviderAsync"/>.</summary>
+
         public ProviderAccountConfigurationService AccountService { get; }
+
+        /// <summary>NNTP provider registry receiving definitions from account refresh.</summary>
 
         public NntpProviderRegistry Registry { get; }
 
+        /// <summary>Scripted transport factory; enqueue servers before processing work.</summary>
+
         public ScriptedNntpTransportFactory Nntp { get; }
+
+        /// <summary>Retention authority on the real pipeline path; TTL driven by <see cref="Time"/>.</summary>
 
         public ArticleRetentionAuthority Retention { get; }
 
+        /// <summary>Manual clock advancing retention sweeps and timeouts in tests.</summary>
+
         public ManualTimeProvider Time { get; }
+
+        /// <summary>Production article-work handler wired to registry and retention.</summary>
 
         public ProviderArticleWorkHandler Handler { get; }
 
+        /// <summary>Fake RabbitMQ connection factory backing <see cref="Connections"/>.</summary>
+
         public FakeBackFillerRabbitMqConnectionFactory RabbitFactory { get; }
+
+        /// <summary>Started RabbitMQ service over the fake factory; disposed with the harness.</summary>
 
         public RabbitMqService Connections { get; }
 
+        /// <summary>Production response publisher; exposes fake publish channel for assertions.</summary>
+
         public ArticleWorkResponsePublisher Publisher { get; }
+
+        /// <summary>Delivery pipeline coordinating handler execution and response settlement.</summary>
 
         public ArticleWorkDeliveryPipeline Pipeline { get; }
 
-        public FakeBackFillerRabbitMqPublishChannel PublishChannel =>
+        /// <summary>Fake publish channel behind the publisher; fails the test if a real channel is installed.</summary>
+
+        internal FakeBackFillerRabbitMqPublishChannel PublishChannel =>
             Assert.IsType<FakeBackFillerRabbitMqPublishChannel>(Publisher.Channel);
 
-        public static async Task<BackFillerPipelineHarness> StartAsync(
+        /// <summary>
+        /// Builds a started harness with production pipeline types and boundary fakes only.
+        /// Does not enqueue NNTP servers or RabbitMQ deliveries.
+        /// </summary>
+        /// <param name="confirm">Fake publish confirm behavior for response publication.</param>
+        /// <param name="retentionTtl">Retention TTL; defaults to one minute.</param>
+        /// <param name="maxArticleBytes">Optional NNTP max article size override.</param>
+        /// <param name="maxRetainedPayloadBytes">Optional retention byte cap override.</param>
+        /// <returns>Harness with RabbitMQ started and a default Giganews provider loaded.</returns>
+
+        internal static async Task<BackFillerPipelineHarness> StartAsync(
             FakePublishConfirmBehavior confirm = FakePublishConfirmBehavior.Confirm,
             TimeSpan? retentionTtl = null,
             int? maxArticleBytes = null,
@@ -159,7 +209,19 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             return harness;
         }
 
-        public async Task LoadProviderAsync(
+        /// <summary>
+        /// Seeds account rows and runs the first refresh or a subsequent explicit refresh.
+        /// Does not start RabbitMQ or mutate scripted NNTP servers.
+        /// </summary>
+        /// <param name="backbone">Provider backbone name on the fake account row.</param>
+        /// <param name="hostname">NNTP hostname on the fake account row.</param>
+        /// <param name="port">NNTP port on the fake account row.</param>
+        /// <param name="useSsl">SSL flag on the fake account row.</param>
+        /// <param name="username">AUTHINFO username on the fake account row.</param>
+        /// <param name="password">AUTHINFO password on the fake account row.</param>
+        /// <param name="maxConnections">Session pool size on the fake account row.</param>
+
+        internal async Task LoadProviderAsync(
             string backbone = "Giganews",
             string hostname = "news.example.test",
             int port = 563,
@@ -189,14 +251,29 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             Assert.True(await AccountService.RefreshOnceAsync(CancellationToken.None).ConfigureAwait(false));
         }
 
-        public ScriptedNntpServer EnqueueArticle(byte[] payload, TaskCompletionSource? blockArticle = null)
+        /// <summary>
+        /// Creates a scripted article server, enqueues it on the transport factory, and returns it for assertions.
+        /// Does not run the delivery pipeline.
+        /// </summary>
+        /// <param name="payload">Raw article bytes returned after AUTHINFO succeeds.</param>
+        /// <param name="blockArticle">Optional gate delaying article body delivery on the server.</param>
+        /// <returns>The enqueued scripted server instance.</returns>
+
+        internal ScriptedNntpServer EnqueueArticle(byte[] payload, TaskCompletionSource? blockArticle = null)
         {
             var server = CreateArticleServer(payload, blockArticle);
             Nntp.Enqueue(server);
             return server;
         }
 
-        public static ScriptedNntpServer CreateArticleServer(byte[] payload, TaskCompletionSource? blockArticle = null)
+        /// <summary>
+        /// Builds a scripted server that accepts AUTHINFO and streams one multiline article body.
+        /// Does not register the server with any transport factory.
+        /// </summary>
+        /// <param name="payload">Article body bytes placed between 220 follows and the terminating dot.</param>
+        /// <param name="blockArticle">Optional gate delaying article body delivery on the server.</param>
+
+        private static ScriptedNntpServer CreateArticleServer(byte[] payload, TaskCompletionSource? blockArticle = null)
         {
             var server = new ScriptedNntpServer
             {
@@ -211,7 +288,16 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
             return server;
         }
 
-        public Task<ArticleWorkOutcome> ProcessAsync(
+        /// <summary>
+        /// Parses the delivery and runs the production pipeline for backbone Giganews.
+        /// Does not acknowledge or nack the RabbitMQ delivery itself.
+        /// </summary>
+        /// <param name="delivery">Manual-ack delivery payload and headers.</param>
+        /// <param name="channel">Fake channel passed through for settlement.</param>
+        /// <param name="channelStillCurrent">Optional gate; defaults to always true.</param>
+        /// <param name="cancellationToken">Cancellation forwarded to the pipeline.</param>
+
+        private Task<ArticleWorkOutcome> ProcessAsync(
             RabbitMqManualAckDelivery delivery,
             FakeBackFillerRabbitMqChannel channel,
             Func<bool>? channelStillCurrent = null,
@@ -227,7 +313,16 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 parsed);
         }
 
-        public Task<ArticleWorkOutcome> ProcessCanonicalAsync(
+        /// <summary>
+        /// Runs <see cref="ProcessAsync"/> with the shared canonical Article Work delivery fixture.
+        /// </summary>
+        /// <param name="channel">Fake channel passed through for settlement.</param>
+        /// <param name="deliveryTag">AMQP delivery tag on the synthetic delivery.</param>
+        /// <param name="generation">Channel generation on the synthetic delivery.</param>
+        /// <param name="channelStillCurrent">Optional gate; defaults to always true.</param>
+        /// <param name="cancellationToken">Cancellation forwarded to the pipeline.</param>
+
+        internal Task<ArticleWorkOutcome> ProcessCanonicalAsync(
             FakeBackFillerRabbitMqChannel channel,
             ulong deliveryTag = 7,
             long generation = 1,
@@ -239,6 +334,8 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
                 channelStillCurrent,
                 cancellationToken);
 
+        /// <summary>Disposes publisher, connections, account service, registry, and retention in order.</summary>
+
         public async ValueTask DisposeAsync()
         {
             await Publisher.DisposeAsync().ConfigureAwait(false);
@@ -249,8 +346,15 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         }
     }
 
+    /// <summary>
+    /// IBackFillerSharedConfigurationSource returning a fixed configuration root for harness tests.
+    /// </summary>
+
     internal sealed class FixedSharedConfigurationSource : IBackFillerSharedConfigurationSource
     {
+        /// <summary>Returns a fixed shared-configuration snapshot; ignores configuration files and env.</summary>
+        /// <param name="cancellationToken">Honored via <see cref="CancellationToken.ThrowIfCancellationRequested"/>.</param>
+
         public ValueTask<NntpSharedConfiguration> ReadAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

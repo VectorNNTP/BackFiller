@@ -20,7 +20,7 @@ alwaysApply: true
 - Primary project: `src/BackFiller/BackFiller.csproj`; test project: `tests/BackFiller.tests/BackFiller.Tests.csproj`
 - Namespace/layout: production code lives under `VectorNNTP.BackFiller.*` in `src/BackFiller/`; tests live under `VectorNNTP.BackFiller.Tests.*` in `tests/BackFiller.tests/`
 - Source layout: functional directories only. Do not recreate `Common` or `Shared` source trees, namespaces, or project boundaries.
-- Lifecycle: `ApplicationServiceManager` + `IApplicationService`, hosted by `BackFillerApplicationHostedService`. systemd ready is Generic Host `ApplicationStarted` via `SystemdLifecycleNotifier`. `ApplicationLifecycle` is present in `src/BackFiller/Core/` and is not constructed by the host (see `docs/architecture.md`)
+- Lifecycle: `ApplicationServiceManager` + `IApplicationService`, hosted by `BackFillerApplicationHostedService`. systemd ready is Generic Host `ApplicationStarted` via `SystemdLifecycleNotifier`.
 - Config contract: `docs/configuration.md` (authoritative over memory)
 - Protocol data plane: **bytes throughout** — see `docs/architecture.md` § Byte-Oriented Protocol Data Plane
 - NNTP standards library: `docs/standards/rfcs/` — read applicable RFC text before protocol work. BackFiller's client subset is in `docs/architecture.md`

@@ -2,7 +2,7 @@
 
 This document describes the current standalone BackFiller process. BackFiller was extracted from VectorNNTP.NNTPD. Shared configuration that still mentions NNTPD is shared-domain context. It is not a second solution in this repository.
 
-The worker consumes RabbitMQ Article Work, retrieves articles from upstream NNTP providers, parses them, retains accepted payloads in memory, and serves them to cache clients over a TLS listener. After the handshake that listener speaks a partial RFC 3977 session: `ARTICLE` by Message-ID and `QUIT`. It does not listen for cleartext NNTP.
+The worker consumes RabbitMQ Article Work, retrieves articles from upstream NNTP providers, parses them, retains accepted payloads in memory, and serves them to cache clients over a TLS listener. After the handshake that listener speaks a partial RFC 3977 session: `ARTICLE` by Message-ID, `DATE`, and `QUIT`. It does not listen for cleartext NNTP.
 
 ## Host lifecycle
 
@@ -10,17 +10,19 @@ The worker consumes RabbitMQ Article Work, retrieves articles from upstream NNTP
 
 `ApplicationServiceManager` starts registered `IApplicationService` instances in registration order. On startup failure it stops the services that already started (rollback) and leaves the manager idle so start can be tried again. Stop runs in reverse order. One `BackFillerShutdownOptions.GracePeriodSeconds` budget covers the whole stop or rollback loop. It is not granted separately to each service. Overlapping start and stop throw `InvalidOperationException` before waiting on the manager gate.
 
-After start, non-null `IApplicationService.Execution` tasks are watched. A fault, a successful completion, or cancellation of that execution raises `UnexpectedServiceTermination`. `BackFillerApplicationHostedService` marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`. `IApplicationLifecycleOptions.StopHostOnUnexpectedServiceTermination` exists and is not read.
+After start, non-null `IApplicationService.Execution` tasks are watched. A fault, a successful completion, or cancellation of that execution raises `UnexpectedServiceTermination`. `BackFillerApplicationHostedService` marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`.
 
-`SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. Readiness is not inferred from DI registration order.
-
-`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `tests/BackFiller.tests/` constructs it. It is not the live host lifecycle.
+`SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. That flag is also false while the published TLS certificate is missing, unreadable, expired, or still inside the renewal window after a renewal attempt that did not replace it. A later successful publication of a usable certificate clears that condition. Unexpected supervised-service termination stays sticky. Readiness is not inferred from DI registration order.
 
 Article Work shutdown uses `BackFillerShutdownOptions`:
 
 - `DrainQueuedWork` defaults to true. When false, admitted work that has not entered processing is cancelled and NACK-requeued. Broker-prefetched deliveries that were never admitted are not drained by this flag.
 - `FinishActiveArticles` defaults to true. When false, active work is cooperatively cancelled. Cancellation does not ACK the delivery.
 - `ArticleWorkConsumerSession.RetireAsync()` without a token waits for admitted work and does not arm the grace timer. The host shutdown path passes a grace token from `GracePeriodSeconds`.
+
+## Article Work reconcile
+
+The consumer membership loop waits 15 seconds after a pass that started every desired consumer, including a pass with nothing to start. A pass that cannot declare topology because RabbitMQ is not ready, or because channel creation or declaration failed for a desired backbone, does not reset that delay. The next wait doubles, up to 2 minutes. An unexpected exception uses the same delay and does not end the loop. Shutdown cancellation ends the loop and is not a failure. The host stays healthy while RabbitMQ is temporarily unavailable. Capacity snapshots and connection replacement reconcile once on the shared gate and do not change the delay. If replacement cannot restore a session, the same periodic loop retries it. A later successful pass resets the delay to 15 seconds.
 
 ## Article Work settlement
 
@@ -41,7 +43,7 @@ If cancellation is already requested, the planner returns NACK requeue and does 
 
 `ArticleWorkSettlementLease` is one settlement attempt for one delivery tag on the original consumer channel and connection generation. It sets the settled flag before the broker RPC. If that RPC throws, the flag stays set and the lease does not retry. If the channel is stale, closed, or not the original channel, `TrySettleAsync` returns false without ACK or NACK, and the broker may redeliver. Pipeline settlement calls use `CancellationToken.None`.
 
-When the success publisher reports that it does not complete success publication, the pipeline NACK-requeues and still returns `ArticleWorkOutcome.Success`. A non-cancellation publication failure of a non-requeue disposition still settles that disposition, including ACK. Cancellation of the publication attempt NACK-requeues.
+When the success publisher reports that it does not complete success publication, the pipeline NACK-requeues and still returns `ArticleWorkOutcome.Success`. A required terminal response that is cancelled or that fails NACK-requeues and returns `ArticleWorkOutcome.UnexpectedFailure`, including when the planned disposition was ACK. The lease still settles at most once. A failed NACK is not retried on that lease, and a stale or replacement channel is not settled. A confirm lost after the broker has accepted the publish is indistinguishable from a failed publish, so the requeue can publish a second reply with the same correlation id. That is at-least-once for the reply when the confirm is ambiguous, not exactly-once.
 
 Publisher confirms (`BasicAcksAsync` / `BasicNacksAsync` on an async-confirm publish channel) are the broker's response to an outbound publish. They are not the consumer ACK of the inbound delivery.
 
@@ -61,7 +63,7 @@ Relevant local RFC text is under `docs/standards/rfcs/`. For this client, start 
 
 `CacheListenerService` binds the configured TLS endpoints and admits connections up to `MaxActiveConnections`. Each admitted socket gets one TLS 1.2 or 1.3 handshake with no client certificate and revocation checks off. The certificate lease is taken per connection and disposed with that connection. After the handshake succeeds, `NntpCacheListenerSession` uses `StreamCacheListenerTransport`. The session does not own the socket or the certificate. `IoProgressTimeout` still applies to each read and each non-empty write. Shutdown cancellation, handshake failure, timeout, I/O, and other connection failures use the same listener logs as before.
 
-The greeting is `201 NNTP Service Ready, posting prohibited` because posting is not implemented. It is sent before any command response. Command keywords are ASCII case-insensitive. One or more spaces or tabs separate the keyword from its argument. Lines end in CRLF. A command longer than 512 octets, including CRLF, is answered with `501 Syntax error` and is not split into a later command. Bytes after one command stay in the buffer. `QUIT` with no argument sends `205 Connection closing` and returns; the service then closes the connection. `QUIT` with an argument is `501` and the connection stays open. Any other command is `500 Unknown command`. A peer close ends the session without another response.
+The greeting is `201 NNTP Service Ready, posting prohibited` because posting is not implemented. It is sent before any command response. Command keywords are ASCII case-insensitive. One or more spaces or tabs separate the keyword from its argument. Lines end in CRLF. A command longer than 512 octets, including CRLF, is answered with `501 Syntax error` and is not split into a later command. Bytes after one command stay in the buffer. `QUIT` with no argument sends `205 Connection closing` and returns; the service then closes the connection. `QUIT` with an argument is `501` and the connection stays open. `DATE` with no argument sends `111` and fourteen UTC digits `yyyymmddhhmmss` from the same `TimeProvider` used for article admission, then waits for another command. `DATE` with an argument is `501` and the connection stays open. Any other command is `500 Unknown command`. A peer close ends the session without another response.
 
 `ARTICLE` with no argument, or with an all-digit article number, is `412 No newsgroup selected`. There is no selected group. Extra arguments, or a Message-ID that fails `NntpMessageIdValidation`, are `501 Syntax error`. That validator is the RFC 5536 grammar already used by article admission, so it is stricter than an opaque RFC 3977 message-id. A valid Message-ID that is not retained is `430 No Such Article Found`.
 
@@ -99,4 +101,3 @@ This process does not implement:
 - NNTP compression, streaming feeds, or `LIST` extensions
 - PGPVERIFY or SPAMD (`docs/standards/pgpverify/` and `docs/standards/spamd/` are not in this repository)
 - a BenchmarkDotNet project or a `TransitPublisherTests` baseline
-- the `ApplicationLifecycle` state machine as the running host

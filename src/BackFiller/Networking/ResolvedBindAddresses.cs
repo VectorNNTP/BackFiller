@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Networking
     /// <summary>
     /// Deduplicated set of eligible IP addresses derived from configured <c>BindAddress</c> entries.
     /// </summary>
-    public sealed class ResolvedBindAddresses
+    internal sealed class ResolvedBindAddresses
     {
         /// <summary>
         /// Copies <paramref name="addresses"/> into IPv4 and IPv6 lists, dropping duplicate DNS forms.

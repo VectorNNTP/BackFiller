@@ -3,8 +3,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Configuration
 {
+    /// <summary>
+    /// Unit-tests Linux and Windows physical memory parsing used by retention validation.
+    /// </summary>
+
     public sealed class OsPhysicalMemoryProviderTests
     {
+        /// <summary>
+        /// Contract: ParseLinuxMemTotalBytes converts MemTotal kibibytes to bytes.
+        /// </summary>
+
         [Fact]
         public void ParseLinuxMemTotalBytes_converts_MemTotal_kibibytes_to_bytes()
         {
@@ -18,6 +26,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
 
             Assert.Equal(65536000L * 1024, OsPhysicalMemoryProvider.ParseLinuxMemTotalBytes(reader));
         }
+
+        /// <summary>
+        /// Contract: ParseLinuxMemTotalBytes ignores available free and swap.
+        /// </summary>
 
         [Fact]
         public void ParseLinuxMemTotalBytes_ignores_available_free_and_swap()
@@ -35,6 +47,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.NotEqual(104857600L * 1024, bytes);
         }
 
+        /// <summary>
+        /// The operation throws InvalidOperationException with the expected contract.
+        /// </summary>
+
         [Fact]
         public void ParseLinuxMemTotalBytes_fails_when_MemTotal_is_missing()
         {
@@ -49,6 +65,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Contains("MemTotal entry was not found", ex.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// The operation throws InvalidOperationException with the expected contract.
+        /// </summary>
+
         [Fact]
         public void ParseLinuxMemTotalBytes_fails_when_MemTotal_format_is_invalid()
         {
@@ -58,6 +78,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 () => OsPhysicalMemoryProvider.ParseLinuxMemTotalBytes(reader));
             Assert.Contains("format is invalid", ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: ReadLinuxMemTotalBytes reads MemTotal from a file.
+        /// </summary>
 
         [Fact]
         public void ReadLinuxMemTotalBytes_reads_MemTotal_from_a_file()
@@ -80,6 +104,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
         }
 
+        /// <summary>
+        /// The operation throws InvalidOperationException with the expected contract.
+        /// </summary>
+
         [Fact]
         public void ReadLinuxMemTotalBytes_fails_when_the_file_is_missing()
         {
@@ -88,6 +116,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 () => OsPhysicalMemoryProvider.ReadLinuxMemTotalBytes(path));
             Assert.Contains("file does not exist", ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: SelectWindowsTotalPhysicalMemoryBytes uses ullTotalPhys not available.
+        /// </summary>
 
         [Fact]
         public void SelectWindowsTotalPhysicalMemoryBytes_uses_ullTotalPhys_not_available()
@@ -101,6 +133,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.NotEqual((long)availPhys, selected);
         }
 
+        /// <summary>
+        /// The operation throws InvalidOperationException with the expected contract.
+        /// </summary>
+
         [Fact]
         public void SelectWindowsTotalPhysicalMemoryBytes_fails_when_ullTotalPhys_is_zero()
         {
@@ -108,6 +144,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
                 () => OsPhysicalMemoryProvider.SelectWindowsTotalPhysicalMemoryBytes(0, 8UL * 1024 * 1024 * 1024));
             Assert.Contains("ullTotalPhys", ex.Message, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Contract: Production provider type is not gc based.
+        /// </summary>
 
         [Fact]
         public void Production_provider_type_is_not_gc_based()
@@ -117,6 +157,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.Null(typeof(OsPhysicalMemoryProvider).Assembly.GetType(
                 "VectorNNTP.BackFiller.Configuration.GcPhysicalMemoryProvider"));
         }
+
+        /// <summary>
+        /// Invalid or incomplete configuration is rejected with an expected failure message.
+        /// </summary>
 
         [Fact]
         public void Eighty_percent_guard_uses_injected_physical_memory_not_gc()
@@ -130,6 +174,10 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             Assert.True(result.Failed);
             Assert.Contains(result.Failures!, static f => f.Contains("physical-memory", StringComparison.Ordinal));
         }
+
+        /// <summary>
+        /// Contract: Configured retention capacity is independent of physical memory.
+        /// </summary>
 
         [Fact]
         public void Configured_retention_capacity_is_independent_of_physical_memory()

@@ -15,7 +15,7 @@ namespace VectorNNTP.BackFiller.Configuration
     internal sealed partial class OsPhysicalMemoryProvider : IPhysicalMemoryProvider
     {
         /// <summary>Linux meminfo path passed to <see cref="ReadLinuxMemTotalBytes"/> by <see cref="GetTotalPhysicalMemoryBytes"/>.</summary>
-        internal const string LinuxMemInfoPath = "/proc/meminfo";
+        private const string LinuxMemInfoPath = "/proc/meminfo";
 
         /// <inheritdoc />
         public long GetTotalPhysicalMemoryBytes()
@@ -193,7 +193,7 @@ namespace VectorNNTP.BackFiller.Configuration
             internal uint dwLength;
 
             /// <summary>Approximate memory load percentage filled by the API. Not read by this provider.</summary>
-            internal uint dwMemoryLoad;
+            private uint dwMemoryLoad;
 
             /// <summary>Total physical memory in bytes. This is the value the provider returns.</summary>
             internal ulong ullTotalPhys;
@@ -202,19 +202,19 @@ namespace VectorNNTP.BackFiller.Configuration
             internal ulong ullAvailPhys;
 
             /// <summary>Total page-file bytes. Present so the marshalled size matches <c>MEMORYSTATUSEX</c>. Not read.</summary>
-            internal ulong ullTotalPageFile;
+            private ulong ullTotalPageFile;
 
             /// <summary>Available page-file bytes. Present so the marshalled size matches <c>MEMORYSTATUSEX</c>. Not read.</summary>
-            internal ulong ullAvailPageFile;
+            private ulong ullAvailPageFile;
 
             /// <summary>Total virtual bytes. Present so the marshalled size matches <c>MEMORYSTATUSEX</c>. Not read.</summary>
-            internal ulong ullTotalVirtual;
+            private ulong ullTotalVirtual;
 
             /// <summary>Available virtual bytes. Present so the marshalled size matches <c>MEMORYSTATUSEX</c>. Not read.</summary>
-            internal ulong ullAvailVirtual;
+            private ulong ullAvailVirtual;
 
             /// <summary>Available extended virtual bytes. Present so the marshalled size matches <c>MEMORYSTATUSEX</c>. Not read.</summary>
-            internal ulong ullAvailExtendedVirtual;
+            private ulong ullAvailExtendedVirtual;
         }
 
         /// <summary>

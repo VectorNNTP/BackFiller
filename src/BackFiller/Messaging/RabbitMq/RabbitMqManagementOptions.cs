@@ -9,11 +9,8 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// <see cref="RabbitMqOptions.Username"/> / <see cref="RabbitMqOptions.Password"/>
     /// (the same RabbitMQ account used for management access). Never log those secrets.
     /// </remarks>
-    public sealed class RabbitMqManagementOptions
+    internal sealed class RabbitMqManagementOptions
     {
-        /// <summary>Configuration key for this nested section relative to <see cref="RabbitMqOptions.SectionName"/>.</summary>
-        internal const string SectionRelativeName = "Management";
-
         /// <summary>
         /// Absolute base URL of the RabbitMQ Management HTTP API root
         /// (scheme + host + port only; no <c>/api</c> path). Example:

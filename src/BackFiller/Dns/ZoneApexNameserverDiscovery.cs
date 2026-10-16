@@ -343,9 +343,7 @@ namespace VectorNNTP.BackFiller.Dns
                     return [];
                 }
 
-                return all
-                    .Where(static ip => ip.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
-                    .ToArray();
+                return [.. all.Where(static ip => ip.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)];
             }
             catch (OperationCanceledException)
             {

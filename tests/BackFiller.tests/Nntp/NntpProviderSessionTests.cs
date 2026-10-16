@@ -5,8 +5,16 @@ using VectorNNTP.BackFiller.Tests.Fixtures;
 
 namespace VectorNNTP.BackFiller.Tests.Nntp
 {
+    /// <summary>
+    /// Single NNTP provider session: connect, AUTHINFO, ARTICLE retrieval, framing, timeouts, TLS, and disposal.
+    /// </summary>
+
     public sealed class NntpProviderSessionTests
     {
+        /// <summary>
+        /// 200 greeting without credentials reaches Ready without TLS on plain port 119.
+        /// </summary>
+
         [Fact]
         public async Task Connect_accepts_200_greeting_without_authentication()
         {
@@ -22,6 +30,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// 201 posting-prohibited greeting is accepted as a ready session.
+        /// </summary>
+
         [Fact]
         public async Task Connect_accepts_201_greeting()
         {
@@ -32,6 +44,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Non-numeric or 4xx greetings yield ProviderFailure and retire the session.
+        /// </summary>
 
         [Fact]
         public async Task Connect_rejects_malformed_and_non_ready_greetings()
@@ -54,6 +70,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await second.DisposeAsync();
         }
 
+        /// <summary>
+        /// Transport connect failures map to ProviderFailure rather than article outcomes.
+        /// </summary>
+
         [Fact]
         public async Task Connect_failure_and_timeout_are_provider_failures()
         {
@@ -67,6 +87,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(ArticleRetrievalKind.ProviderFailure, result!.Kind);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Full AUTHINFO USER/PASS succeeds; 481 maps to AuthenticationFailure without echoing the password in Reason.
+        /// </summary>
 
         [Fact]
         public async Task Authentication_success_and_failure()
@@ -96,6 +120,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await fail.DisposeAsync();
         }
 
+        /// <summary>
+        /// User without password fails AuthenticationFailure without AUTHINFO on the wire.
+        /// </summary>
+
         [Fact]
         public async Task Half_configured_credentials_fail_without_sending_authinfo()
         {
@@ -109,6 +137,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.DoesNotContain(server.Commands, static command => command.StartsWith("AUTHINFO", StringComparison.Ordinal));
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// ARTICLE sends exact Message-ID, CRLF-framed command, destuffs body dots, and leaves session reusable.
+        /// </summary>
 
         [Fact]
         public async Task Article_preserves_exact_message_id_and_destuffs_payload()
@@ -146,6 +178,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// ARTICLE before connect is ProviderFailure and does not start the article command timer.
+        /// </summary>
+
         [Fact]
         public async Task Article_before_connect_does_not_start_the_command_timer()
         {
@@ -158,6 +194,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(0, session.ArticleCommandStartedTimestamp);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// 430 ArticleNotFound keeps the session reusable for later commands.
+        /// </summary>
 
         [Fact]
         public async Task Article_not_found_is_reusable()
@@ -174,6 +214,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(result.SessionReusable);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Truncated multiline or bad status after 220 retires the session as ProviderFailure.
+        /// </summary>
 
         [Fact]
         public async Task Missing_terminator_and_malformed_status_retire_the_session()
@@ -203,6 +247,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await second.DisposeAsync();
         }
 
+        /// <summary>
+        /// Body without header/body separator is InvalidArticle but session stays reusable.
+        /// </summary>
+
         [Fact]
         public async Task Empty_article_without_separator_is_invalid_and_reusable()
         {
@@ -218,6 +266,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(result.SessionReusable);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Payload callback runs while session is Busy; DATE is suppressed; following ARTICLE succeeds.
+        /// </summary>
 
         [Fact]
         public async Task Callback_RunsWhileBusy_AndSessionCanReadTheNextArticle()
@@ -264,6 +316,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Callback exception propagates yet session returns Ready and accepts another ARTICLE.
+        /// </summary>
+
         [Fact]
         public async Task Callback_Exception_LeavesTheSessionReusable()
         {
@@ -297,6 +353,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// InvalidArticle without separator does not invoke the payload callback.
+        /// </summary>
+
         [Fact]
         public async Task Callback_MissingSeparator_DoesNotInvokeTheConsumer()
         {
@@ -324,6 +384,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// ArticleRecord bytes remain valid after session disposal completes.
+        /// </summary>
+
         [Fact]
         public async Task Payload_remains_readable_after_session_dispose()
         {
@@ -339,6 +403,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, result.Kind);
             Assert.Contains("body"u8, result.Article!.Memory.Span);
         }
+
+        /// <summary>
+        /// Canceled ARTICLE download is Cancelled, not ArticleNotFound.
+        /// </summary>
 
         [Fact]
         public async Task Caller_cancellation_is_not_article_not_found()
@@ -365,6 +433,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// EOF before greeting is ProviderFailure with session not reusable.
+        /// </summary>
+
         [Fact]
         public async Task Eof_before_greeting_is_provider_failure()
         {
@@ -377,6 +449,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.False(result.SessionReusable);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Connect timeout is ProviderFailure, distinct from ArticleNotFound.
+        /// </summary>
 
         [Fact]
         public async Task Connect_timeout_is_provider_failure_not_not_found()
@@ -400,6 +476,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.NotEqual(ArticleRetrievalKind.ArticleNotFound, result.Kind);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Payload exceeding MaxArticleBytes during receive is InvalidArticle and retires the session.
+        /// </summary>
 
         [Fact]
         public async Task Oversized_article_is_invalid_article_and_retires_the_session()
@@ -426,6 +506,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.False(result.SessionReusable);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Destuffed payload exactly at MaxArticleBytes is accepted with reusable session.
+        /// </summary>
 
         [Fact]
         public async Task Exactly_MaxArticleBytes_destuffed_payload_is_accepted()
@@ -455,6 +539,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// One byte over MaxArticleBytes during receive is InvalidArticle and retires the session.
+        /// </summary>
+
         [Fact]
         public async Task MaxArticleBytes_plus_one_is_invalid_article_and_retires_the_session()
         {
@@ -482,6 +570,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// 4xx/5xx ARTICLE statuses are ProviderFailure, not ArticleNotFound, and retire the session.
+        /// </summary>
+
         [Theory]
         [InlineData("400 service unavailable")]
         [InlineData("503 program fault")]
@@ -503,6 +595,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// Single leading dot on body lines is destuffed in returned article bytes.
+        /// </summary>
+
         [Fact]
         public async Task Single_leading_dot_on_a_body_line_is_unstuffed()
         {
@@ -520,6 +616,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await session.DisposeAsync();
         }
 
+        /// <summary>
+        /// UseTls on provider definition is forwarded to the transport factory connect attempt.
+        /// </summary>
+
         [Fact]
         public async Task Tls_flag_is_passed_to_the_transport_factory()
         {
@@ -530,6 +630,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.True(factory.ConnectAttempts[0].UseTls);
             await session.DisposeAsync();
         }
+
+        /// <summary>
+        /// Production TcpNntpTransportFactory and NntpTlsClient source omit accept-all certificate callbacks.
+        /// </summary>
 
         [Fact]
         public void Tcp_factory_does_not_install_an_accept_all_certificate_callback()
@@ -542,6 +646,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Contains("if (serverCertificateValidationCallback is not null)", tlsSource, StringComparison.Ordinal);
             Assert.Contains("NntpTlsClient.AuthenticateAsClientAsync", factorySource, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// Dispose reaches Closed even when QUIT write fails after CompleteAfterResponse.
+        /// </summary>
 
         [Fact]
         public async Task Dispose_still_closes_when_quit_write_fails()
@@ -558,6 +666,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(NntpSessionState.Closed, session.State);
         }
 
+        /// <summary>
+        /// Production Nntp sources under src/BackFiller/Nntp contain no blocking sync waits in async paths.
+        /// </summary>
+
         [Fact]
         public void Production_nntp_code_does_not_block_synchronously()
         {
@@ -573,7 +685,13 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
-        internal static NntpProviderSession CreateSession(
+        /// <summary>
+        /// Builds a Giganews session against 127.0.0.1:119 with two-second command, receive, and connect timeouts.
+        /// </summary>
+        /// <param name="useTls">Forwarded to the provider definition and observed on the transport connect attempt.</param>
+        /// <param name="user">AUTHINFO user. Null leaves the session anonymous.</param>
+        /// <param name="password">AUTHINFO password paired with <paramref name="user"/>.</param>
+        private static NntpProviderSession CreateSession(
             bool useTls = false,
             string? user = null,
             string? password = null) =>
@@ -582,8 +700,13 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 NntpSessionOptions.Default with { CommandTimeout = TimeSpan.FromSeconds(2), ReceiveTimeout = TimeSpan.FromSeconds(2), ConnectTimeout = TimeSpan.FromSeconds(2) },
                 NullLogger.Instance);
 
+        /// <summary>Locates <paramref name="fileName"/> under <see cref="FindSourceDirectory"/>.</summary>
+        /// <param name="fileName">Production NNTP source file name.</param>
         private static string FindSource(string fileName) => RelativePath.Under(FindSourceDirectory(), fileName);
 
+        /// <summary>Walks parents of the test output directory until <c>src/BackFiller/Nntp</c> exists.</summary>
+        /// <returns>Absolute path of the production NNTP source directory.</returns>
+        /// <exception cref="DirectoryNotFoundException">No parent contains that directory.</exception>
         internal static string FindSourceDirectory()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);

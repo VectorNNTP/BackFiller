@@ -17,10 +17,10 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     internal static class StorageServerAdvertisementWireProtocol
     {
         /// <summary>Current application protocol version.</summary>
-        public const int CurrentVersion = 1;
+        private const int CurrentVersion = 1;
 
         /// <summary>AMQP <c>ContentType</c> for advertisement bodies.</summary>
-        public const string JsonContentType = "application/json";
+        private const string JsonContentType = "application/json";
 
         /// <summary>Serializes a version-1 advertisement into compact UTF-8 JSON.</summary>
         /// <param name="advertisement">Concrete valid v1 advertisement.</param>

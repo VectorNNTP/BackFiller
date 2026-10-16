@@ -17,7 +17,9 @@ namespace VectorNNTP.BackFiller.Retention
         /// </summary>
         private int _sweeping;
 
-        /// <summary>Initializes the sweep hosted service.</summary>
+        /// <summary>
+        /// Creates the background sweep that calls <see cref="IArticleRetentionAuthority.SweepExpired"/> on a fixed interval and closes admission on host stop.
+        /// </summary>
         /// <param name="authority">
         /// Retention authority. This service calls <see cref="IArticleRetentionAuthority.SweepExpired"/>
         /// and <see cref="IArticleRetentionAuthority.BeginShutdown"/> and does not dispose it.
