@@ -888,8 +888,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// Pauses after the 220 line is copied and before that read returns, disposes, then lets payload reading observe the closed transport.
+        /// The body stays unwritten until cleanup, so a payload read that rereads a cleared <c>_reader</c> cannot succeed from bytes already buffered.
         /// </summary>
         /// <param name="useCallback"><see langword="true"/> exercises the callback payload path. <see langword="false"/> exercises the owned-result path.</param>
+        /// <remarks>
+        /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// </remarks>
         private static async Task AssertDisposeDuringArticlePayloadReadAsync(bool useCallback)
         {
             var statusCopied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -925,15 +929,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 await statusCopied.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 await session.DisposeAsync();
                 releaseStatus.TrySetResult();
-                var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
-                using (finished)
-                {
-                    Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
-                    Assert.False(finished.SessionReusable);
-                    Assert.Null(finished.Article);
-                    Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
-                }
-
+                using var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                Assert.False(finished.SessionReusable);
+                Assert.Null(finished.Article);
+                Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.Equal(0, Volatile.Read(ref consumed));
                 Assert.Null(SessionField(session, "_stream"));
                 Assert.Null(SessionField(session, "_reader"));
@@ -944,19 +945,39 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             {
                 releaseStatus.TrySetResult();
                 releaseBody.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
                 await session.DisposeAsync();
             }
         }
 
         /// <summary>
-        /// Pauses after the ARTICLE command is flushed to the peer and before the session flush returns, disposes, then resumes the command.
+        /// Pauses after the ARTICLE command is flushed and before the session flush returns. The peer has the command and has not written a response.
+        /// Disposal runs in that window, then the command resumes on the stream captured before the write.
         /// </summary>
         /// <param name="useCallback"><see langword="true"/> starts ARTICLE through the callback overload. <see langword="false"/> uses the owned-result overload.</param>
+        /// <remarks>
+        /// <see cref="ScriptedNntpServer.BlockArticle"/> stays closed until cleanup, so a resumed read cannot observe a response that was written before disposal.
+        /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// </remarks>
         private static async Task AssertDisposeBetweenArticleWriteAndFlushAsync(bool useCallback)
         {
             var writeFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var server = new ScriptedNntpServer();
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                ArticleStarted = articleStarted,
+                BlockArticle = releaseArticle,
+            };
             server.RespondBytes(static command =>
             {
                 if (!command.StartsWith("ARTICLE ", StringComparison.Ordinal))
@@ -986,17 +1007,15 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             try
             {
                 await writeFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 await session.DisposeAsync();
                 releaseWrite.TrySetResult();
-                var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
-                using (finished)
-                {
-                    Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
-                    Assert.False(finished.SessionReusable);
-                    Assert.Null(finished.Article);
-                    Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
-                }
-
+                using var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                Assert.False(finished.SessionReusable);
+                Assert.Null(finished.Article);
+                Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.Equal(0, Volatile.Read(ref consumed));
                 Assert.Null(SessionField(session, "_stream"));
                 Assert.Null(SessionField(session, "_reader"));
@@ -1006,6 +1025,16 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             finally
             {
                 releaseWrite.TrySetResult();
+                releaseArticle.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
                 await session.DisposeAsync();
             }
         }
