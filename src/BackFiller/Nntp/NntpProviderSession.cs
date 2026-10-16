@@ -218,6 +218,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A closed or retiring session, or one whose reader or stream is missing, returns a non-reusable provider failure without taking the lock and without setting <see cref="_unhealthy"/>.
         /// A status-line timeout becomes <see cref="TimeoutException"/> inside <see cref="ReadStatusAsync"/> and is then classified as provider failure whose reason is that exception's type name.
         /// A payload timeout is classified as provider failure with the reason <c>ARTICLE timed out.</c>
+        /// Disposal during the command clears the session fields and disposes <see cref="_busy"/>. The in-flight call keeps the reader and stream it already captured.
+        /// <see cref="ObjectDisposedException"/> from releasing that disposed gate is ignored so the classified result is what the caller observes.
         /// </remarks>
         internal async Task<ArticleRetrievalResult> DownloadArticleAsync(
             string messageId,
@@ -439,7 +441,15 @@ namespace VectorNNTP.BackFiller.Nntp
                     State = previous;
                 }
 
-                _ = _busy.Release();
+                try
+                {
+                    _ = _busy.Release();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // DisposeAsync disposes this gate while ARTICLE is still inside it.
+                    // The try block already classified the failed read or write. Releasing a disposed gate must not replace that result.
+                }
             }
 
             if (consumerError is not null)

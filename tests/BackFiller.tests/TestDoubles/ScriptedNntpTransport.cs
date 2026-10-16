@@ -158,6 +158,39 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>When set, ARTICLE waits here before the scripted response is written.</summary>
         public TaskCompletionSource? BlockArticle { get; set; }
 
+        /// <summary>
+        /// When set, ARTICLE writes only the 220 status line, signals <see cref="ArticleStatusWritten"/>, then waits here before the body.
+        /// AUTHINFO and other commands still use the installed responder.
+        /// </summary>
+        public TaskCompletionSource? HoldArticleBody { get; set; }
+
+        /// <summary>Set after the 220 status line for a held ARTICLE body has been flushed to the client.</summary>
+        public TaskCompletionSource? ArticleStatusWritten { get; set; }
+
+        /// <summary>
+        /// When set, the next client read that copies a newline waits before <see cref="DuplexPipeStream.ReadAsync"/> returns those bytes.
+        /// Connect reads must finish before this is armed, or the greeting is held too.
+        /// </summary>
+        public TaskCompletionSource? HoldStatusLineReturn { get; set; }
+
+        /// <summary>Set when a status line has been copied into the client buffer and <see cref="HoldStatusLineReturn"/> is waiting.</summary>
+        public TaskCompletionSource? StatusLineCopied { get; set; }
+
+        /// <summary>
+        /// When set, the next non-QUIT client write waits after the pipe flush and before <see cref="DuplexPipeStream.WriteAsync"/> returns.
+        /// QUIT is not held, so session disposal can finish while a command write is paused.
+        /// </summary>
+        public TaskCompletionSource? HoldAfterCommandWrite { get; set; }
+
+        /// <summary>Set when a non-QUIT command has been flushed and <see cref="HoldAfterCommandWrite"/> is waiting.</summary>
+        public TaskCompletionSource? CommandWriteFlushed { get; set; }
+
+        /// <summary>Zero until <see cref="TryBeginStatusLineHold"/> accepts the first completed status line.</summary>
+        private int _statusLineHoldStarted;
+
+        /// <summary>Zero until <see cref="TryBeginCommandWriteHold"/> accepts the first non-QUIT write.</summary>
+        private int _commandWriteHoldStarted;
+
         /// <summary>Set when a DATE command is read, before any optional block.</summary>
         public TaskCompletionSource? DateStarted { get; set; }
 
@@ -207,6 +240,24 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         internal void RecordClientStreamDisposeAsync()
         {
             Interlocked.Increment(ref _clientStreamDisposeAsyncInvocations);
+        }
+
+        /// <summary>
+        /// Accepts the first client read that already copied a newline while <see cref="HoldStatusLineReturn"/> is set.
+        /// </summary>
+        /// <returns><see langword="true"/> when this read must wait before returning the copied bytes.</returns>
+        internal bool TryBeginStatusLineHold()
+        {
+            return HoldStatusLineReturn is not null && Interlocked.Exchange(ref _statusLineHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts the first non-QUIT client write while <see cref="HoldAfterCommandWrite"/> is set.
+        /// </summary>
+        /// <returns><see langword="true"/> when this write must wait after the pipe flush and before <see cref="DuplexPipeStream.WriteAsync"/> returns.</returns>
+        internal bool TryBeginCommandWriteHold()
+        {
+            return HoldAfterCommandWrite is not null && Interlocked.Exchange(ref _commandWriteHoldStarted, 1) == 0;
         }
 
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
@@ -329,6 +380,22 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                         {
                             await BlockArticle.Task.ConfigureAwait(false);
                         }
+
+                        if (HoldArticleBody is not null)
+                        {
+                            _toClient.Writer.Write("220 0 <a@b> article follows\r\n"u8);
+                            var statusFlush = await _toClient.Writer.FlushAsync().ConfigureAwait(false);
+                            ArticleStatusWritten?.TrySetResult();
+                            await HoldArticleBody.Task.ConfigureAwait(false);
+                            _toClient.Writer.Write("From: a@b\r\n\r\nbody\r\n.\r\n"u8);
+                            var bodyFlush = await _toClient.Writer.FlushAsync().ConfigureAwait(false);
+                            if (CompleteAfterResponse || statusFlush.IsCompleted || bodyFlush.IsCompleted)
+                            {
+                                break;
+                            }
+
+                            continue;
+                        }
                     }
                     else if (text.Equals("DATE", StringComparison.OrdinalIgnoreCase))
                     {
@@ -448,6 +515,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
                 result.Buffer.Slice(0, taken).CopyTo(buffer.Span);
                 reader.AdvanceTo(result.Buffer.GetPosition(taken));
+                if (owner is not null
+                    && buffer.Span[..taken].IndexOf((byte)'\n') >= 0
+                    && owner.TryBeginStatusLineHold())
+                {
+                    owner.StatusLineCopied?.TrySetResult();
+                    await owner.HoldStatusLineReturn!.Task.ConfigureAwait(false);
+                }
+
                 return taken;
             }
         }
@@ -482,6 +557,13 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
             writer.Write(buffer.Span);
             await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            if (owner is not null
+                && buffer.Span.IndexOf("QUIT"u8) < 0
+                && owner.TryBeginCommandWriteHold())
+            {
+                owner.CommandWriteFlushed?.TrySetResult();
+                await owner.HoldAfterCommandWrite!.Task.ConfigureAwait(false);
+            }
         }
 
         /// <inheritdoc />

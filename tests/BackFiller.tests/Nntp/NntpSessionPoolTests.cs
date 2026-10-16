@@ -918,7 +918,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// Repeated DATE failures replace the idle session without an acquire.
-        /// Retired sessions leave idle membership immediately, so the queue stays within the live set.
+        /// Each replacement is held in its DATE delay before the counts are read, so retirement cannot run between the two observations.
         /// </summary>
         [Fact]
         public async Task Keepalive_retirement_without_acquire_does_not_accumulate_idle_sessions()
@@ -938,29 +938,144 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Equal(1, pool.IdleSessionCount);
             Assert.Equal(0, pool.ActiveLeaseCount);
 
+            var release = await clock.WaitForKeepAliveAsync();
             for (var attempt = 0; attempt < replacements; attempt++)
             {
-                var release = await clock.WaitForKeepAliveAsync();
                 release();
+                var next = await clock.WaitForKeepAliveAsync();
                 var expectedConnects = attempt + 2;
-                await WaitUntilAsync(() =>
-                {
-                    var idle = pool.IdleSessionCount;
-                    Assert.True(idle <= pool.LiveSessionCount);
-                    Assert.True(pool.LiveSessionCount <= 1);
-                    return idle == 1
-                        && pool.LiveSessionCount == 1
-                        && pool.ActiveSessionCount == 1
-                        && pool.ActiveLeaseCount == 0
-                        && factory.ConnectAttempts.Count == expectedConnects
-                        && CreatedSessionCount(pool) == 1
-                        && ReservedConnectionCount(pool) == 1;
-                });
+                Assert.True(pool.IdleSessionCount <= pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.ActiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(expectedConnects, factory.ConnectAttempts.Count);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.Equal(1, ReservedConnectionCount(pool));
+                release = next;
             }
 
             Assert.Equal(replacements, logger.Messages.Count(static message =>
                 message.Contains("reason=DATE keepalive failed", StringComparison.Ordinal)));
             Assert.Equal(1, pool.IdleSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.True(pool.IdleSessionCount <= pool.LiveSessionCount);
+        }
+
+        /// <summary>
+        /// A DATE helper that already observed a taken session, and the loop it superseded, cannot cancel or remove the keepalive installed when that session is idle again.
+        /// </summary>
+        [Fact]
+        public async Task Superseded_keepalive_cannot_cancel_the_later_idle_registration()
+        {
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(dateStarted: dateStarted));
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 2, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            await warmup.DisposeAsync();
+            _ = await clock.WaitForKeepAliveAsync();
+
+            var firstLoopExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var supersededLoopExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSupersededLoop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var published = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var loopExits = 0;
+            var publishCalls = 0;
+            var stopCalls = 0;
+            pool.KeepAliveLoopExitGate = () =>
+            {
+                var call = Interlocked.Increment(ref loopExits);
+                if (call == 1)
+                {
+                    firstLoopExited.TrySetResult();
+                    return Task.CompletedTask;
+                }
+
+                if (call == 2)
+                {
+                    supersededLoopExited.TrySetResult();
+                    return releaseSupersededLoop.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.AfterKeepAlivePublished = () =>
+            {
+                if (Interlocked.Increment(ref publishCalls) == 1)
+                {
+                    published.TrySetResult();
+                    return releasePublished.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.KeepAliveStopGate = () =>
+            {
+                if (Interlocked.Increment(ref stopCalls) == 1)
+                {
+                    stopEntered.TrySetResult();
+                    return releaseStop.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+
+            Task? returning = null;
+            NntpSessionLease? second = null;
+            var first = await pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await firstLoopExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                returning = first.DisposeAsync().AsTask();
+                await published.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                second = await pool.AcquireAsync(CancellationToken.None);
+                await supersededLoopExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releasePublished.TrySetResult();
+                await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                await second.DisposeAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                releaseSupersededLoop.TrySetResult();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                releaseStop.TrySetResult();
+                await returning.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+
+                _ = await clock.WaitForKeepAliveAsync();
+                var currentTimer = await clock.WaitForKeepAliveAsync();
+                currentTimer();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+            }
+            finally
+            {
+                pool.AfterKeepAlivePublished = null;
+                pool.KeepAliveStopGate = null;
+                pool.KeepAliveLoopExitGate = null;
+                releasePublished.TrySetResult();
+                releaseSupersededLoop.TrySetResult();
+                releaseStop.TrySetResult();
+                if (returning is not null)
+                {
+                    await returning.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                if (second is not null)
+                {
+                    await second.DisposeAsync();
+                }
+
+                await first.DisposeAsync();
+            }
         }
 
         /// <summary>

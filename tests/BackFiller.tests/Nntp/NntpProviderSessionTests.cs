@@ -245,6 +245,46 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Disposal after the 220 status is copied, and before payload reading, still classifies the owned ARTICLE result.
+        /// The payload call uses the reader captured for the command, so clearing <c>_reader</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_owned_article_payload_read_classifies_provider_failure()
+        {
+            await AssertDisposeDuringArticlePayloadReadAsync(useCallback: false);
+        }
+
+        /// <summary>
+        /// Disposal after the 220 status is copied, and before payload reading, still classifies the callback ARTICLE result.
+        /// The callback is not invoked, and clearing <c>_reader</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_callback_article_payload_read_classifies_provider_failure()
+        {
+            await AssertDisposeDuringArticlePayloadReadAsync(useCallback: true);
+        }
+
+        /// <summary>
+        /// Disposal after ARTICLE bytes are written, and before flush, still classifies the owned ARTICLE result.
+        /// Flush uses the stream captured for the command, so clearing <c>_stream</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_between_owned_article_write_and_flush_classifies_provider_failure()
+        {
+            await AssertDisposeBetweenArticleWriteAndFlushAsync(useCallback: false);
+        }
+
+        /// <summary>
+        /// Disposal after ARTICLE bytes are written, and before flush, still classifies the callback ARTICLE result.
+        /// The callback is not invoked, and clearing <c>_stream</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_between_callback_article_write_and_flush_classifies_provider_failure()
+        {
+            await AssertDisposeBetweenArticleWriteAndFlushAsync(useCallback: true);
+        }
+
+        /// <summary>
         /// ARTICLE before connect is ProviderFailure and does not start the article command timer.
         /// </summary>
 
@@ -788,6 +828,130 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.DoesNotContain(".Result;", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Password={", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Username={", text, StringComparison.Ordinal);
+            }
+        }
+
+        /// <summary>
+        /// Pauses after the 220 line is copied and before that read returns, disposes, then lets payload reading observe the closed transport.
+        /// </summary>
+        /// <param name="useCallback"><see langword="true"/> exercises the callback payload path. <see langword="false"/> exercises the owned-result path.</param>
+        private static async Task AssertDisposeDuringArticlePayloadReadAsync(bool useCallback)
+        {
+            var statusCopied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStatus = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseBody = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                HoldArticleBody = releaseBody,
+            };
+            server.Respond(static command =>
+                command.StartsWith("AUTHINFO", StringComparison.OrdinalIgnoreCase)
+                    ? "281 authentication accepted\r\n"
+                    : "500 unknown\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            server.HoldStatusLineReturn = releaseStatus;
+            server.StatusLineCopied = statusCopied;
+            var consumed = 0;
+            var download = useCallback
+                ? session.DownloadArticleAsync(
+                    "<a@b>",
+                    CancellationToken.None,
+                    _ =>
+                    {
+                        Interlocked.Increment(ref consumed);
+                        return default;
+                    })
+                : session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await statusCopied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseStatus.TrySetResult();
+                var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                using (finished)
+                {
+                    Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                    Assert.False(finished.SessionReusable);
+                    Assert.Null(finished.Article);
+                    Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                }
+
+                Assert.Equal(0, Volatile.Read(ref consumed));
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+            }
+            finally
+            {
+                releaseStatus.TrySetResult();
+                releaseBody.TrySetResult();
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Pauses after the ARTICLE command is flushed to the peer and before the session flush returns, disposes, then resumes the command.
+        /// </summary>
+        /// <param name="useCallback"><see langword="true"/> starts ARTICLE through the callback overload. <see langword="false"/> uses the owned-result overload.</param>
+        private static async Task AssertDisposeBetweenArticleWriteAndFlushAsync(bool useCallback)
+        {
+            var writeFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer();
+            server.RespondBytes(static command =>
+            {
+                if (!command.StartsWith("ARTICLE ", StringComparison.Ordinal))
+                {
+                    return "500 unknown\r\n"u8.ToArray();
+                }
+
+                return "220 0 <a@b> article follows\r\nFrom: a@b\r\n\r\nbody\r\n.\r\n"u8.ToArray();
+            });
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            server.HoldAfterCommandWrite = releaseWrite;
+            server.CommandWriteFlushed = writeFlushed;
+            var consumed = 0;
+            var download = useCallback
+                ? session.DownloadArticleAsync(
+                    "<a@b>",
+                    CancellationToken.None,
+                    _ =>
+                    {
+                        Interlocked.Increment(ref consumed);
+                        return default;
+                    })
+                : session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await writeFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseWrite.TrySetResult();
+                var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                using (finished)
+                {
+                    Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                    Assert.False(finished.SessionReusable);
+                    Assert.Null(finished.Article);
+                    Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                }
+
+                Assert.Equal(0, Volatile.Read(ref consumed));
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+            }
+            finally
+            {
+                releaseWrite.TrySetResult();
+                await session.DisposeAsync();
             }
         }
 
