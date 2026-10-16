@@ -173,6 +173,24 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// </summary>
         public bool FaultClientDateWrite { get; set; }
 
+        /// <summary>
+        /// When set, the client stream throws <see cref="SocketException"/> on a QUIT write.
+        /// Connect and other commands are unaffected.
+        /// </summary>
+        public bool FaultClientQuitWrite { get; set; }
+
+        /// <summary>How many times the accepted client stream has entered disposal.</summary>
+        private int _clientStreamDisposals;
+
+        /// <summary>How many times the accepted client stream has recorded disposal. The stream records that once.</summary>
+        internal int ClientStreamDisposeCount => Volatile.Read(ref _clientStreamDisposals);
+
+        /// <summary>Records the first disposal of the client stream returned by <see cref="AcceptClientAsync"/>.</summary>
+        internal void RecordClientStreamDisposed()
+        {
+            Interlocked.Increment(ref _clientStreamDisposals);
+        }
+
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
         public string StartTlsCapabilityLabel { get; set; } = "STARTTLS";
 
@@ -366,6 +384,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
     internal sealed class DuplexPipeStream(PipeReader reader, PipeWriter writer, ScriptedNntpServer? owner = null) : Stream
     {
+        /// <summary>One after the first disposing call. Later calls do not complete the pipes again.</summary>
+        private int _disposed;
         /// <inheritdoc />
         public override bool CanRead => true;
 
@@ -423,9 +443,19 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             throw new NotSupportedException();
 
         /// <inheritdoc />
-        /// <remarks>Honors <see cref="ScriptedNntpServer.FaultClientDateWrite"/> on the optional owner.</remarks>
+        /// <remarks>
+        /// Honors <see cref="ScriptedNntpServer.FaultClientDateWrite"/> and
+        /// <see cref="ScriptedNntpServer.FaultClientQuitWrite"/> on the optional owner.
+        /// A QUIT fault throws <see cref="SocketException"/> before any bytes are written.
+        /// </remarks>
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner?.FaultClientQuitWrite == true
+                && buffer.Span.IndexOf("QUIT"u8) >= 0)
+            {
+                throw new SocketException((int)SocketError.ConnectionReset);
+            }
+
             if (owner?.FaultClientDateWrite == true
                 && buffer.Span.IndexOf("DATE"u8) >= 0)
             {
@@ -445,8 +475,9 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
             {
+                owner?.RecordClientStreamDisposed();
                 reader.Complete();
                 writer.Complete();
             }

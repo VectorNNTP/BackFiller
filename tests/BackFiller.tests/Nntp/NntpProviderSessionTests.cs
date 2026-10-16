@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Articles;
@@ -689,6 +690,42 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// A connected session swallows <see cref="SocketException"/> from the QUIT write, disposes the stream once, and closes.
+        /// A second dispose does not touch the stream again.
+        /// </summary>
+
+        [Fact]
+        public async Task Dispose_swallows_socket_exception_from_quit_write_and_second_dispose_is_idempotent()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            Assert.Equal(NntpSessionState.Ready, session.State);
+            Assert.Contains(server.Commands, static command => command.StartsWith("CAPABILITIES", StringComparison.Ordinal));
+
+            server.FaultClientQuitWrite = true;
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.DoesNotContain(server.Commands, static command => command.StartsWith("QUIT", StringComparison.Ordinal));
+            Assert.Contains(
+                logger.Entries,
+                static entry => entry.EventId.Id == 5417
+                    && entry.Message.Contains("QUIT failed during dispose", StringComparison.Ordinal)
+                    && entry.Message.Contains(nameof(SocketException), StringComparison.Ordinal));
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+        }
+
+        /// <summary>
         /// Production Nntp sources under src/BackFiller/Nntp contain no blocking sync waits in async paths.
         /// </summary>
 
@@ -713,14 +750,16 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <param name="useTls">Forwarded to the provider definition and observed on the transport connect attempt.</param>
         /// <param name="user">AUTHINFO user. Null leaves the session anonymous.</param>
         /// <param name="password">AUTHINFO password paired with <paramref name="user"/>.</param>
+        /// <param name="logger">Logger for the session. Null uses <see cref="NullLogger"/>.</param>
         private static NntpProviderSession CreateSession(
             bool useTls = false,
             string? user = null,
-            string? password = null) =>
+            string? password = null,
+            ILogger? logger = null) =>
             new(
                 new BackFillerProviderDefinition("Giganews", "127.0.0.1", 119, useTls, user, password, 0, 1),
                 NntpSessionOptions.Default with { CommandTimeout = TimeSpan.FromSeconds(2), ReceiveTimeout = TimeSpan.FromSeconds(2), ConnectTimeout = TimeSpan.FromSeconds(2) },
-                NullLogger.Instance);
+                logger ?? NullLogger.Instance);
 
         /// <summary>Locates <paramref name="fileName"/> under <see cref="FindSourceDirectory"/>.</summary>
         /// <param name="fileName">Production NNTP source file name.</param>
