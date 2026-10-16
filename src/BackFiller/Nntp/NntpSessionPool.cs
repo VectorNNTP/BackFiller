@@ -73,9 +73,15 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>
         /// Test gate invoked when a DATE loop is leaving, before it removes only its own registration.
-        /// Null in production. The delegate runs outside <see cref="_idleGate"/>.
+        /// The argument is that loop's task. Null in production. The delegate runs outside <see cref="_idleGate"/>.
         /// </summary>
-        private Func<Task>? _keepAliveLoopExitGate;
+        private Func<Task, Task>? _keepAliveLoopExitGate;
+
+        /// <summary>
+        /// Test gate invoked after <see cref="CreateReadySessionAsync"/> returns and before <see cref="TryIssueReusable"/>.
+        /// Null in production. The delegate runs outside <see cref="_idleGate"/> and outside <see cref="_fillGate"/>'s release.
+        /// </summary>
+        private Func<Task>? _beforeCreatedSessionIssue;
 
         /// <summary>
         /// FIFO of sessions waiting for <see cref="AcquireAsync"/>.
@@ -294,12 +300,23 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>
         /// Pauses a DATE loop after it has been cancelled and before it removes its own registration.
-        /// Null unless a test is holding that window. The removal matches the loop's registration, not the session key alone.
+        /// The argument is that loop task. Null unless a test is holding that window.
+        /// The removal matches the loop's registration, not the session key alone.
         /// </summary>
-        internal Func<Task>? KeepAliveLoopExitGate
+        internal Func<Task, Task>? KeepAliveLoopExitGate
         {
             get => _keepAliveLoopExitGate;
             set => _keepAliveLoopExitGate = value;
+        }
+
+        /// <summary>
+        /// Pauses acquisition after a new session is ready and before <see cref="TryIssueReusable"/> accepts it.
+        /// Null unless a test is holding that window. A session retired during the pause is not issued.
+        /// </summary>
+        internal Func<Task>? BeforeCreatedSessionIssue
+        {
+            get => _beforeCreatedSessionIssue;
+            set => _beforeCreatedSessionIssue = value;
         }
 
         /// <summary>Raised after the active session count may have changed.</summary>
@@ -412,16 +429,30 @@ namespace VectorNNTP.BackFiller.Nntp
                     }
 
                     var created = await CreateReadySessionAsync(linked.Token).ConfigureAwait(false);
-                    lock (_idleGate)
+                    if (_beforeCreatedSessionIssue is { } beforeIssue)
                     {
-                        _ = _issued.Add(created);
+                        await beforeIssue().ConfigureAwait(false);
                     }
 
-                    return Issue(created);
+                    if (TryIssueReusable(created) is { } createdLease)
+                    {
+                        return createdLease;
+                    }
+
+                    await RetireSessionAsync(created, "created session was not reusable").ConfigureAwait(false);
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+                    throw new InvalidOperationException("NNTP session was retired before it could be issued.");
                 }
                 finally
                 {
-                    _fillGate.Release();
+                    try
+                    {
+                        _fillGate.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        ShutdownObservations.AlreadyDisposed(_logger, "fill gate release");
+                    }
                 }
             }
             catch (Exception)
@@ -444,7 +475,14 @@ namespace VectorNNTP.BackFiller.Nntp
                 }
                 finally
                 {
-                    _leases.Release();
+                    try
+                    {
+                        _leases.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        ShutdownObservations.AlreadyDisposed(_logger, "lease permit release");
+                    }
                 }
 
                 throw;
@@ -948,7 +986,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Issues <paramref name="session"/> when it is still live and reusable.
         /// The check and <see cref="_issued"/> insert share <see cref="_idleGate"/> with retirement.
         /// </summary>
-        /// <param name="session">Session already removed from <see cref="_idle"/> by <see cref="TryTakeIdleSession"/>.</param>
+        /// <param name="session">Live session removed from <see cref="_idle"/>, or a session just returned by <see cref="CreateReadySessionAsync"/>.</param>
         /// <returns>The new lease, or <see langword="null"/> when the caller must retire <paramref name="session"/>.</returns>
         private NntpSessionLease? TryIssueReusable(NntpProviderSession session)
         {
@@ -1166,7 +1204,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 {
                     if (_keepAliveLoopExitGate is { } gate)
                     {
-                        await gate().ConfigureAwait(false);
+                        await gate(registration.Task).ConfigureAwait(false);
                     }
 
                     _ = _keepAlives.TryRemove(new KeyValuePair<NntpProviderSession, KeepAliveRegistration>(session, registration));

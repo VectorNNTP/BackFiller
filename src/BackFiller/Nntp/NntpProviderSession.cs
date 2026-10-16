@@ -42,6 +42,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Zero until <see cref="DisposeAsync"/> runs. A second dispose returns immediately.</summary>
         private int _disposed;
 
+        /// <summary>
+        /// Test gate invoked after STARTTLS has captured its transport and before the handshake reads that transport.
+        /// Null in production. Disposal during the gate must not make the handshake observe a null field.
+        /// </summary>
+        private Func<Task>? _beforeStartTlsHandshake;
+
         /// <summary>Set when a command failure must keep the session out of the idle pool. Sticky for the session lifetime.</summary>
         private bool _unhealthy;
 
@@ -102,6 +108,16 @@ namespace VectorNNTP.BackFiller.Nntp
         internal byte KeepAliveSeconds => _provider.KeepAliveSeconds;
 
         /// <summary>
+        /// Pauses STARTTLS after the transport is captured and before <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> uses it.
+        /// Null unless a test is holding that window.
+        /// </summary>
+        internal Func<Task>? BeforeStartTlsHandshake
+        {
+            get => _beforeStartTlsHandshake;
+            set => _beforeStartTlsHandshake = value;
+        }
+
+        /// <summary>
         /// Connects, validates the greeting, issues CAPABILITIES, upgrades via STARTTLS
         /// when that capability is advertised and the provider is not already using implicit TLS, and authenticates when configured.
         /// </summary>
@@ -136,8 +152,9 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 connectCts.CancelAfter(_options.ConnectTimeout);
-                _stream = await transport.ConnectAsync(_provider, _options, connectCts.Token).ConfigureAwait(false);
-                _reader = new NntpStreamReader(_stream, _options.ReceiveBufferBytes);
+                var connected = await transport.ConnectAsync(_provider, _options, connectCts.Token).ConfigureAwait(false);
+                _stream = connected;
+                _reader = new NntpStreamReader(connected, _options.ReceiveBufferBytes);
                 State = NntpSessionState.Connected;
 
                 var greeting = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -733,18 +750,21 @@ namespace VectorNNTP.BackFiller.Nntp
             return await UpgradeExistingTransportToTlsAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        /// <summary>Wraps <see cref="_stream"/> with TLS and installs a new reader over the encrypted stream.</summary>
+        /// <summary>Wraps the captured transport with TLS and installs a new reader over the encrypted stream.</summary>
         /// <param name="cancellationToken">Cancels the handshake together with <see cref="NntpSessionOptions.ConnectTimeout"/>.</param>
         /// <returns><see langword="null"/> when the handshake completed. A handshake exception other than cancellation returns a non-reusable provider failure.</returns>
         /// <remarks>
+        /// The transport is read once into a local. The handshake and the replacement reader use that local, not a later read of <see cref="_stream"/>.
+        /// <see cref="BeforeStartTlsHandshake"/> runs after that capture and outside any session lock. It is null in production.
         /// There is no post-handshake greeting read. On failure the fields are cleared.
-        /// <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> closes <see cref="_stream"/> when the handshake throws.
+        /// <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> closes the captured transport when the handshake throws.
         /// Cancellation is rethrown after the fields are cleared so <see cref="ConnectAsync"/> can classify it.
         /// </remarks>
         private async Task<ArticleRetrievalResult?> UpgradeExistingTransportToTlsAsync(
             CancellationToken cancellationToken)
         {
-            if (_stream is null)
+            var stream = _stream;
+            if (stream is null)
             {
                 return FailClosed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -753,18 +773,23 @@ namespace VectorNNTP.BackFiller.Nntp
                     reusable: false);
             }
 
+            if (_beforeStartTlsHandshake is { } beforeHandshake)
+            {
+                await beforeHandshake().ConfigureAwait(false);
+            }
+
             NntpLogMessages.WireTlsHandshakeStarting(_logger, _wireIdentity);
             try
             {
                 var ssl = await NntpTlsClient.AuthenticateAsClientAsync(
-                        _stream,
+                        stream,
                         _provider.Host,
                         _options.ConnectTimeout,
                         _options.ServerCertificateValidationCallback,
                         cancellationToken)
                     .ConfigureAwait(false);
                 _stream = ssl;
-                _reader = new NntpStreamReader(_stream, _options.ReceiveBufferBytes);
+                _reader = new NntpStreamReader(ssl, _options.ReceiveBufferBytes);
                 NntpLogMessages.WireTlsHandshakeCompleted(_logger, _wireIdentity);
                 return null;
             }

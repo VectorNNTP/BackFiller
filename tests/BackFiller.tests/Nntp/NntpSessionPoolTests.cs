@@ -964,6 +964,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// A DATE helper that already observed a taken session, and the loop it superseded, cannot cancel or remove the keepalive installed when that session is idle again.
+        /// The replacement count is read only after the superseded loop task has finished its own registration removal.
         /// </summary>
         [Fact]
         public async Task Superseded_keepalive_cannot_cancel_the_later_idle_registration()
@@ -987,7 +988,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var loopExits = 0;
             var publishCalls = 0;
             var stopCalls = 0;
-            pool.KeepAliveLoopExitGate = () =>
+            Task? supersededLoop = null;
+            pool.KeepAliveLoopExitGate = loopTask =>
             {
                 var call = Interlocked.Increment(ref loopExits);
                 if (call == 1)
@@ -998,6 +1000,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
                 if (call == 2)
                 {
+                    supersededLoop = loopTask;
                     supersededLoopExited.TrySetResult();
                     return releaseSupersededLoop.Task;
                 }
@@ -1040,7 +1043,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
                 await second.DisposeAsync();
                 Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.NotNull(supersededLoop);
                 releaseSupersededLoop.TrySetResult();
+                await supersededLoop.WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.Equal(1, pool.ActiveKeepAliveCount);
                 releaseStop.TrySetResult();
                 await returning.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1058,12 +1063,17 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
             finally
             {
-                pool.AfterKeepAlivePublished = null;
-                pool.KeepAliveStopGate = null;
-                pool.KeepAliveLoopExitGate = null;
                 releasePublished.TrySetResult();
                 releaseSupersededLoop.TrySetResult();
                 releaseStop.TrySetResult();
+                if (supersededLoop is not null)
+                {
+                    await supersededLoop.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                pool.AfterKeepAlivePublished = null;
+                pool.KeepAliveStopGate = null;
+                pool.KeepAliveLoopExitGate = null;
                 if (returning is not null)
                 {
                     await returning.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1075,6 +1085,53 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 }
 
                 await first.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Pool disposal that retires a session after connect and before issuance does not hand that session out.
+        /// Lease, created-session, and connection-number accounting stay at zero, and releasing the fill gate does not throw.
+        /// </summary>
+        [Fact]
+        public async Task Disposal_before_issue_does_not_lease_the_retired_created_session()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(factory, max: 1);
+            var created = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pool.BeforeCreatedSessionIssue = () =>
+            {
+                created.TrySetResult();
+                return releaseIssue.Task;
+            };
+            var acquire = pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await created.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await pool.DisposeAsync();
+                releaseIssue.TrySetResult();
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(() => acquire);
+                Assert.IsNotType<NullReferenceException>(thrown);
+                Assert.IsType<ObjectDisposedException>(thrown);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, CreatedSessionCount(pool));
+                Assert.Equal(0, ReservedConnectionCount(pool));
+            }
+            finally
+            {
+                pool.BeforeCreatedSessionIssue = null;
+                releaseIssue.TrySetResult();
+                try
+                {
+                    await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+                {
+                    _ = ex.GetType();
+                }
             }
         }
 

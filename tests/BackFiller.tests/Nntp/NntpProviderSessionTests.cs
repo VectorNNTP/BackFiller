@@ -285,6 +285,61 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Disposal after STARTTLS has captured the transport, and before the handshake reads it, is a provider failure.
+        /// The handshake keeps that captured stream, so a cleared <c>_stream</c> is not passed as null.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_starttls_handshake_classifies_provider_failure()
+        {
+            var handshakeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHandshake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            session.BeforeStartTlsHandshake = () =>
+            {
+                handshakeEntered.TrySetResult();
+                return releaseHandshake.Task;
+            };
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await handshakeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseHandshake.TrySetResult();
+                var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.DoesNotContain("ArgumentNull", result.Reason, StringComparison.Ordinal);
+                Assert.DoesNotContain("NullReference", result.Reason, StringComparison.Ordinal);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+            }
+            finally
+            {
+                session.BeforeStartTlsHandshake = null;
+                releaseHandshake.TrySetResult();
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// ARTICLE before connect is ProviderFailure and does not start the article command timer.
         /// </summary>
 
