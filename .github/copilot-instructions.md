@@ -20,7 +20,7 @@ Authoritative contracts: `docs/architecture.md`, `docs/configuration.md`, and `d
 - systemd `READY=1` is sent at most once after Generic Host `ApplicationStarted` (`SystemdLifecycleNotifier`). Do not infer readiness from DI registration order.
 - Article Work settlement is specified in `docs/architecture.md`. Terminal outcomes ACK. Retryable outcomes NACK with requeue. The settlement lease makes one attempt on the original channel. A failed broker RPC is not retried on that lease. A stale or closed channel is left for broker redelivery.
 - Treat external NNTP, RabbitMQ, DNS, Cloudflare, ACME, and database input as untrusted or failure-prone. Preserve cancellation and disposal ownership across asynchronous boundaries.
-- The cache listener is TLS-only (`BackFiller:BindPortTls`). There is no `BackFiller:BindPort` and no cleartext NNTP listener. After TLS it speaks a partial RFC 3977 session: a `201` greeting, `ARTICLE` by Message-ID, and `QUIT`. Upstream NNTP remains a client: `CAPABILITIES`, conditional `STARTTLS`, `AUTHINFO`, `ARTICLE`, and idle `DATE`.
+- The cache listener is TLS-only (`BackFiller:BindPortTls`). There is no `BackFiller:BindPort` and no cleartext NNTP listener. After TLS it speaks a partial RFC 3977 session: a `201` greeting, `ARTICLE` by Message-ID, `DATE`, and `QUIT`. Upstream NNTP remains a client: `CAPABILITIES`, conditional `STARTTLS`, `AUTHINFO`, `ARTICLE`, and idle `DATE`.
 - Use source-generated structured logging. Do not log secrets or article payloads.
 
 ## Build and test

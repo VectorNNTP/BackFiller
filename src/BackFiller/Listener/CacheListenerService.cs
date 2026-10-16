@@ -43,6 +43,9 @@ namespace VectorNNTP.BackFiller.Listener
         /// <summary>Retention authority passed to each <see cref="NntpCacheListenerSession"/>. This service does not retain articles.</summary>
         private readonly IArticleRetentionAuthority _retention;
 
+        /// <summary>Clock passed to each session for <c>DATE</c>. The same instance retention uses for admission.</summary>
+        private readonly TimeProvider _time;
+
         /// <summary>ACME readiness gate. Start throws when <see cref="IAcmeCertificateReadiness.IsReady"/> is false.</summary>
         private readonly IAcmeCertificateReadiness _readiness;
 
@@ -112,6 +115,10 @@ namespace VectorNNTP.BackFiller.Listener
         /// <param name="readiness">Certificate readiness gate consulted by <see cref="StartAsync"/>.</param>
         /// <param name="journal">Startup journal that records listener start.</param>
         /// <param name="logger">Listener logger. Must not be null.</param>
+        /// <param name="time">
+        /// Clock for listener <c>DATE</c>. Null uses <see cref="TimeProvider.System"/>.
+        /// Production passes the retention <see cref="TimeProvider"/>.
+        /// </param>
         /// <exception cref="ArgumentNullException">Thrown when any argument is null.</exception>
         internal CacheListenerService(
             BackFillerRuntimeOptions runtime,
@@ -119,7 +126,8 @@ namespace VectorNNTP.BackFiller.Listener
             IArticleRetentionAuthority retention,
             IAcmeCertificateReadiness readiness,
             IBackFillerStartupJournal journal,
-            ILogger<CacheListenerService> logger)
+            ILogger<CacheListenerService> logger,
+            TimeProvider? time = null)
         {
             ArgumentNullException.ThrowIfNull(runtime);
             ArgumentNullException.ThrowIfNull(certificates);
@@ -133,6 +141,7 @@ namespace VectorNNTP.BackFiller.Listener
             _readiness = readiness;
             _journal = journal;
             _logger = logger;
+            _time = time ?? TimeProvider.System;
         }
 
         /// <summary>Builds a readiness gate that is already marked ready for the test constructor.</summary>
@@ -505,7 +514,7 @@ namespace VectorNNTP.BackFiller.Listener
                     ssl,
                     _runtime.Listener.IoProgressTimeout,
                     leaveInnerStreamOpen: true);
-                var session = new NntpCacheListenerSession(transport, _retention);
+                var session = new NntpCacheListenerSession(transport, _retention, _time);
                 await session.RunAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

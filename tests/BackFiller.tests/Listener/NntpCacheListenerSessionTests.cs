@@ -10,7 +10,7 @@ using VectorNNTP.BackFiller.Tests.Retention;
 namespace VectorNNTP.BackFiller.Tests.Listener
 {
     /// <summary>
-    /// Cache listener NNTP subset: ARTICLE framing, 403/430/501 responses, pipelining, and delivery claims.
+    /// Cache listener NNTP subset: ARTICLE framing, DATE, QUIT, 403/430/501 responses, pipelining, and delivery claims.
     /// </summary>
 
     public sealed class NntpCacheListenerSessionTests
@@ -662,14 +662,133 @@ namespace VectorNNTP.BackFiller.Tests.Listener
             Assert.Equal(0, authority.RetainedCount);
         }
 
+        /// <summary>
+        /// DATE returns RFC 3977 111 yyyymmddhhmmss from the retention clock and does not claim an article.
+        /// </summary>
+        [Fact]
+        public async Task Date_returns_utc_timestamp_from_the_retention_clock()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-03-04T05:06:07Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            _ = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
+
+            var written = await RunAsync(authority, "DATE\r\nQUIT\r\n", time: time);
+
+            Assert.Equal(
+                Greeting.ToArray()
+                    .Concat("111 20260304050607\r\n"u8.ToArray())
+                    .Concat("205 Connection closing\r\n"u8.ToArray())
+                    .ToArray(),
+                written);
+            Assert.Equal(1, authority.RetainedCount);
+        }
+
+        /// <summary>DATE matching ignores ASCII case. Trailing tabs are not an argument.</summary>
+        [Theory]
+        [InlineData("date\r\n")]
+        [InlineData("Date\r\n")]
+        [InlineData("DATE\t\r\n")]
+        public async Task Date_keyword_is_case_insensitive(string command)
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+
+            var written = await RunAsync(authority, command + "QUIT\r\n", time: time);
+
+            Assert.Equal(
+                Greeting.ToArray()
+                    .Concat("111 20260101000000\r\n"u8.ToArray())
+                    .Concat("205 Connection closing\r\n"u8.ToArray())
+                    .ToArray(),
+                written);
+        }
+
+        /// <summary>DATE with an argument is 501 and leaves the session open for a later ARTICLE.</summary>
+        [Fact]
+        public async Task Date_with_an_argument_is_a_syntax_error_and_does_not_block_article()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
+
+            var written = await RunAsync(authority, "DATE extra\r\nARTICLE <a@b>\r\n", time: time);
+
+            Assert.Contains("501 Syntax error\r\n"u8, written);
+            Assert.Contains("220 0 <a@b> article follows\r\n"u8, written);
+            Assert.Contains(prepared.ArtData, written);
+            Assert.Equal(0, authority.RetainedCount);
+        }
+
+        /// <summary>
+        /// Commands outside ARTICLE, DATE, and QUIT are 500 and do not claim or remove a retained article.
+        /// </summary>
+        [Theory]
+        [InlineData("CAPABILITIES")]
+        [InlineData("capabilities")]
+        [InlineData("MODE READER")]
+        [InlineData("GROUP misc.test")]
+        [InlineData("LIST")]
+        [InlineData("STAT <a@b>")]
+        [InlineData("HEAD <a@b>")]
+        [InlineData("BODY <a@b>")]
+        [InlineData("POST")]
+        [InlineData("IHAVE <a@b>")]
+        [InlineData("HELP")]
+        [InlineData("AUTHINFO USER name")]
+        [InlineData("STARTTLS")]
+        [InlineData("COMPRESS DEFLATE")]
+        [InlineData("NEWNEWS misc.test")]
+        public async Task Unsupported_commands_are_rejected_without_article_side_effects(string command)
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+            var prepared = RetentionTestArticles.RetainPrepared(authority, "<a@b>");
+
+            var written = await RunAsync(authority, command + "\r\nQUIT\r\n", time: time);
+
+            Assert.Equal(
+                Greeting.ToArray()
+                    .Concat("500 Unknown command\r\n"u8.ToArray())
+                    .Concat("205 Connection closing\r\n"u8.ToArray())
+                    .ToArray(),
+                written);
+            Assert.Equal(1, authority.RetainedCount);
+            Assert.Equal(prepared.ArtData.Length, authority.RetainedPayloadBytes);
+        }
+
+        /// <summary>Empty and whitespace-only lines are unknown commands and do not end the session.</summary>
+        [Theory]
+        [InlineData("\r\n")]
+        [InlineData(" \r\n")]
+        [InlineData("\t\r\n")]
+        public async Task Empty_or_whitespace_command_lines_are_unknown_and_do_not_crash(string command)
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+            await using var authority = ArticleRetentionAuthorityTests.Create(time, 1_000_000);
+
+            var written = await RunAsync(authority, command + "QUIT\r\n", time: time);
+
+            Assert.Equal(
+                Greeting.ToArray()
+                    .Concat("500 Unknown command\r\n"u8.ToArray())
+                    .Concat("205 Connection closing\r\n"u8.ToArray())
+                    .ToArray(),
+                written);
+        }
+
         /// <summary>Runs the cache listener session against a scripted transport and returns wire bytes sent to the client.</summary>
         /// <param name="authority">Retention store backing article lookup and delivery claims.</param>
         /// <param name="commands">Inbound client command script (ASCII, CRLF-terminated).</param>
         /// <param name="maxRead">Maximum bytes copied per transport read to simulate partial socket reads.</param>
-        private static async Task<byte[]> RunAsync(ArticleRetentionAuthority authority, string commands, int maxRead = int.MaxValue)
+        /// <param name="time">Clock for DATE. Null uses <see cref="TimeProvider.System"/>.</param>
+        private static async Task<byte[]> RunAsync(
+            ArticleRetentionAuthority authority,
+            string commands,
+            int maxRead = int.MaxValue,
+            TimeProvider? time = null)
         {
             var transport = new ScriptedTransport(Encoding.ASCII.GetBytes(commands), maxRead);
-            await new NntpCacheListenerSession(transport, authority).RunAsync(CancellationToken.None);
+            await new NntpCacheListenerSession(transport, authority, time).RunAsync(CancellationToken.None);
             return transport.Written;
         }
 
