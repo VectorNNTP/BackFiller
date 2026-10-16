@@ -91,8 +91,17 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Zero until <see cref="StartPeriodicReplenish"/> publishes <see cref="_replenishTask"/>.</summary>
         private int _replenishStarted;
 
-        /// <summary>Periodic deficit loop. Null before the first start.</summary>
+        /// <summary>
+        /// Periodic deficit supervisor. Null before the first start.
+        /// It stays incomplete across failed fill attempts and completes when shutdown stops the loop.
+        /// </summary>
         private Task? _replenishTask;
+
+        /// <summary>
+        /// One while <see cref="NotifyActiveSessionCountChanged"/> is invoking subscribers.
+        /// A reentrant call returns without invoking them again, so a subscriber cannot recurse into retirement.
+        /// </summary>
+        private int _notifyingActiveCount;
 
         /// <summary>
         /// Completes when no lease is outstanding. Replaced with a new incomplete source when <see cref="Issue"/> raises the count from zero.
@@ -185,8 +194,14 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Outstanding <see cref="NntpSessionLease"/> instances that have not yet been disposed.</summary>
         internal int ActiveLeaseCount => Volatile.Read(ref _activeLeases);
 
-        /// <summary>Raised after ACTIVE session count may have changed.</summary>
-        /// <remarks>Invoked synchronously on the caller that changed membership or finished a successful connect.</remarks>
+        /// <summary>Raised after the active session count may have changed.</summary>
+        /// <remarks>
+        /// Invoked synchronously on the caller that changed membership or finished a successful connect.
+        /// A subscriber exception during successful publication fails that publication: the pool retires the session
+        /// and the caller does not receive it. A subscriber exception during retirement is contained after the
+        /// reservation is released, so disposal still runs and the reservation is not released twice.
+        /// A reentrant invocation from a subscriber is ignored.
+        /// </remarks>
         internal event Action? ActiveSessionCountChanged;
 
         /// <summary>
@@ -234,6 +249,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Each idle candidate dequeued before the fill gate is held, if it is <see cref="NntpSessionState.Busy"/>, is waited on until it leaves that state, then kept only when <see cref="NntpProviderSession.IsReusable"/>.
         /// An idle candidate taken later, while the fill gate is held, is retired as soon as it is not reusable, including when it is still busy.
         /// A failed acquire releases the permit. A successful acquire holds it until <see cref="ReturnAsync"/>.
+        /// A publication failure inside <see cref="CreateReadySessionAsync"/> retires the new session before this method returns, so the caller does not receive a lease.
         /// </remarks>
         internal async Task<NntpSessionLease> AcquireAsync(CancellationToken cancellationToken)
         {
@@ -444,7 +460,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="cancellationToken">Drain budget when <paramref name="forceAfterGrace"/> is false. Ignored for the lease wait when it is true.</param>
         /// <remarks>
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
-        /// An unexpected replenish-task failure is logged and does not skip retirement.
+        /// <see cref="SuperviseReplenishAsync"/> logs an unexpected fill failure and keeps the replenish task alive until shutdown.
+        /// A failure of that supervisor task itself is logged here and does not skip retirement.
         /// Keepalive tasks are given <see cref="_shutdownGrace"/> and then abandoned if they are still running.
         /// </remarks>
         private async Task DisposeCoreAsync(bool forceAfterGrace, CancellationToken cancellationToken)
@@ -527,7 +544,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Cancels the establishment-gate wait and <see cref="NntpProviderSession.ConnectAsync"/>.
         /// </param>
         /// <returns>The ready session. It is in <see cref="_live"/> and is not yet idle.</returns>
-        /// <exception cref="InvalidOperationException"><see cref="_created"/> would exceed <see cref="BackFillerProviderDefinition.MaxSessions"/>, or no connection number is free.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="_created"/> would exceed <see cref="BackFillerProviderDefinition.MaxSessions"/>, no connection number is free,
+        /// or a subscriber retired the session during publication before this method returned it.
+        /// </exception>
         /// <exception cref="NntpProviderConnectException">
         /// Connect returned a failure, the session is not ready, or the transport threw <see cref="SocketException"/>.
         /// The created-count, connection number, and live membership for this attempt are released before this exception propagates.
@@ -544,7 +564,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <see cref="NntpProviderSession.ConnectAsync"/> classifies <see cref="SocketException"/> as a provider failure.
         /// A socket exception that still escapes is translated to <see cref="NntpProviderConnectException"/> here so
         /// replenishment treats it as a failed attempt. The gate is released once, and only after this attempt acquired it.
-        /// A session that already became ready is left in <see cref="_live"/> if publication of that success throws.
+        /// This method owns the reservation until it returns the session. The completion log and
+        /// <see cref="ActiveSessionCountChanged"/> run before that return. If either throws, or a subscriber retires
+        /// the session before the return, the session is retired when this method still owns it and the exception
+        /// propagates. The caller does not receive the session. Expected disposal failures during that rollback are
+        /// logged and do not replace the original exception. Accounting is committed before those observers run, so a
+        /// later observer failure cannot skip the release or apply it twice.
         /// </remarks>
         private async Task<NntpProviderSession> CreateReadySessionAsync(CancellationToken cancellationToken)
         {
@@ -577,7 +602,6 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             var registered = false;
-            var published = false;
             var gateHeld = false;
             try
             {
@@ -592,23 +616,23 @@ namespace VectorNNTP.BackFiller.Nntp
                 var failure = await session.ConnectAsync(_transport, cancellationToken).ConfigureAwait(false);
                 if (failure is null && session.State == NntpSessionState.Ready)
                 {
-                    published = true;
                     NntpLogMessages.SessionEstablishmentCompleted(_logger, _provider.Backbone, connectionNumber);
                     NotifyActiveSessionCountChanged();
-                    return session;
+                    if (session.State == NntpSessionState.Ready && _live.ContainsKey(session))
+                    {
+                        return session;
+                    }
+
+                    throw new InvalidOperationException("NNTP session was retired during publication.");
                 }
 
                 if (failure?.Kind == ArticleRetrievalKind.Cancelled)
                 {
-                    NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
+                    TryLogSessionEstablishmentCancelled(connectionNumber);
                 }
                 else
                 {
-                    NntpLogMessages.SessionEstablishmentFailed(
-                        _logger,
-                        _provider.Backbone,
-                        connectionNumber,
-                        failure?.Reason ?? "connect failed");
+                    TryLogSessionEstablishmentFailed(connectionNumber, failure?.Reason ?? "connect failed");
                 }
 
                 throw new NntpProviderConnectException(
@@ -619,24 +643,15 @@ namespace VectorNNTP.BackFiller.Nntp
             // codeql[cs/catch-of-all-exceptions] Failed creation must release its own reservation for every exception type and must not leave the session in the live set.
             catch (Exception ex)
             {
-                if (published)
-                {
-                    throw;
-                }
-
                 if (registered && ex is not NntpProviderConnectException)
                 {
                     if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
                     {
-                        NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
+                        TryLogSessionEstablishmentCancelled(connectionNumber);
                     }
                     else
                     {
-                        NntpLogMessages.SessionEstablishmentFailed(
-                            _logger,
-                            _provider.Backbone,
-                            connectionNumber,
-                            ex.GetType().Name);
+                        TryLogSessionEstablishmentFailed(connectionNumber, ex.GetType().Name);
                     }
                 }
 
@@ -649,14 +664,9 @@ namespace VectorNNTP.BackFiller.Nntp
                             CreationFailureReason(ex, cancellationToken))
                         .ConfigureAwait(false);
                 }
-                // codeql[cs/catch-of-all-exceptions] Rollback already released capacity or observed that another owner did. Cleanup must not replace the creation failure or decrement a second time.
-                catch (Exception cleanup)
+                catch (Exception cleanup) when (IsExpectedSessionCleanupFailure(cleanup))
                 {
-                    NntpLogMessages.SessionEstablishmentFailed(
-                        _logger,
-                        _provider.Backbone,
-                        connectionNumber,
-                        cleanup.GetType().Name);
+                    TryLogSessionEstablishmentFailed(connectionNumber, cleanup.GetType().Name);
                 }
 
                 if (ex is SocketException)
@@ -691,8 +701,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A registered session is removed through <see cref="RetireSessionAsync"/>, which decrements <see cref="_created"/>
         /// and frees the connection number only when this call wins <c>TryRemove</c>.
         /// A concurrent retire or dispose that already removed the session leaves the counters unchanged.
-        /// An unregistered reservation is released by <see cref="ReleaseUnregisteredReservation"/> and the session is disposed here.
-        /// Replenishment is not requested. The periodic loop retries on its existing interval.
+        /// An unregistered reservation is released by <see cref="ReleaseUnregisteredReservation"/> before the session is disposed.
+        /// Expected disposal failures are logged and do not propagate. Replenishment is not requested.
+        /// The periodic loop retries on its existing interval.
         /// </remarks>
         private async Task AbandonFailedCreationAsync(
             NntpProviderSession session,
@@ -707,7 +718,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             ReleaseUnregisteredReservation(connectionNumber);
-            await session.DisposeAsync().ConfigureAwait(false);
+            await DisposeDetachedSessionAsync(session, connectionNumber).ConfigureAwait(false);
         }
 
         /// <summary>Chooses the retirement text for a creation attempt that threw.</summary>
@@ -888,16 +899,31 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="session">Live session to drop. A session that is already absent is left alone.</param>
         /// <param name="reason">Text passed to <see cref="NntpLogMessages.SessionRetired"/>.</param>
         /// <param name="replenish"><see langword="true"/> schedules <see cref="RequestReplenish"/> after a session was actually removed.</param>
+        /// <remarks>
+        /// <c>TryRemove</c> wins the decrement and connection-number release. A second retire, dispose, or creation rollback
+        /// observes the loss and does not change the counters again. Those releases run before the retirement log,
+        /// the active-count notification, and disposal. Observer failures are contained by <see cref="SignalSessionRetired"/>
+        /// so they cannot skip disposal, decrement twice, or recurse through another retire. Expected disposal failures
+        /// are logged. Any other disposal exception still requests replenishment when <paramref name="replenish"/> is
+        /// <see langword="true"/>, then propagates.
+        /// </remarks>
         private async Task RetireSessionAsync(NntpProviderSession session, string reason, bool replenish = true)
         {
             StopKeepAlive(session);
-            if (_live.TryRemove(session, out _))
+            if (!_live.TryRemove(session, out _))
             {
-                Interlocked.Decrement(ref _created);
-                ReleaseConnectionNumber(session.ConnectionNumber);
-                NntpLogMessages.SessionRetired(_logger, _provider.Backbone, reason);
-                NotifyActiveSessionCountChanged();
-                await session.DisposeAsync().ConfigureAwait(false);
+                return;
+            }
+
+            Interlocked.Decrement(ref _created);
+            ReleaseConnectionNumber(session.ConnectionNumber);
+            SignalSessionRetired(session, reason);
+            try
+            {
+                await DisposeDetachedSessionAsync(session, session.ConnectionNumber).ConfigureAwait(false);
+            }
+            finally
+            {
                 if (replenish)
                 {
                     RequestReplenish();
@@ -905,7 +931,79 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Starts <see cref="RunReplenishAsync"/> once for this pool.</summary>
+        /// <summary>
+        /// Logs retirement and notifies <see cref="ActiveSessionCountChanged"/> after the session has left <see cref="_live"/>.
+        /// </summary>
+        /// <param name="session">Session already removed from <see cref="_live"/>. Its connection number is used only in a diagnostic.</param>
+        /// <param name="reason">Text passed to <see cref="NntpLogMessages.SessionRetired"/>.</param>
+        /// <remarks>
+        /// Both calls are observers and may throw any exception. The exceptions are contained here so
+        /// <see cref="RetireSessionAsync"/> still disposes the session once and does not enter retirement again.
+        /// A logger that fails is not asked to record its own failure. A subscriber failure is recorded when the logger still works.
+        /// </remarks>
+        private void SignalSessionRetired(NntpProviderSession session, string reason)
+        {
+            try
+            {
+                NntpLogMessages.SessionRetired(_logger, _provider.Backbone, reason);
+            }
+            // codeql[cs/catch-of-all-exceptions] Retirement accounting is already committed. A logger failure must not skip disposal or replace the caller's exception.
+            catch (Exception)
+            {
+                // The failing logger cannot record this diagnostic. Disposal still runs.
+            }
+
+            try
+            {
+                NotifyActiveSessionCountChanged();
+            }
+            // codeql[cs/catch-of-all-exceptions] Subscribers are an open set. Containing this call prevents recursive retirement and a second decrement.
+            catch (Exception observer)
+            {
+                TryLogSessionEstablishmentFailed(session.ConnectionNumber, observer.GetType().Name);
+            }
+        }
+
+        /// <summary>
+        /// Disposes a session whose created-count and connection number have already been released.
+        /// </summary>
+        /// <param name="session">Detached session.</param>
+        /// <param name="connectionNumber">Connection number already returned to the free set. Used only in the cleanup diagnostic.</param>
+        /// <remarks>
+        /// <see cref="OperationCanceledException"/>, <see cref="SocketException"/>, <see cref="IOException"/>, and
+        /// <see cref="ObjectDisposedException"/> are logged and do not propagate.
+        /// <see cref="ObjectDisposedException"/> is expected when pool dispose and session dispose close the same
+        /// transport, and <see cref="StopKeepAlive"/> already treats it as shutdown. Other exceptions propagate so a
+        /// programming error is not hidden. This method does not change pool accounting.
+        /// </remarks>
+        private async Task DisposeDetachedSessionAsync(NntpProviderSession session, int connectionNumber)
+        {
+            try
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception cleanup) when (IsExpectedSessionCleanupFailure(cleanup))
+            {
+                TryLogSessionEstablishmentFailed(connectionNumber, cleanup.GetType().Name);
+            }
+        }
+
+        /// <summary>Reports whether <paramref name="exception"/> is an expected failure while disposing a detached session.</summary>
+        /// <param name="exception">Exception thrown by session disposal or another cleanup call on that session.</param>
+        /// <returns>
+        /// <see langword="true"/> for <see cref="OperationCanceledException"/>, <see cref="SocketException"/>,
+        /// <see cref="IOException"/>, and <see cref="ObjectDisposedException"/>.
+        /// </returns>
+        /// <remarks>
+        /// <see cref="ObjectDisposedException"/> is included because concurrent pool and session disposal close the same
+        /// transport and cancellation source. Programming errors are excluded so they still propagate after the reservation
+        /// has been released.
+        /// </remarks>
+        private static bool IsExpectedSessionCleanupFailure(Exception exception) =>
+            exception is OperationCanceledException or SocketException or IOException or ObjectDisposedException;
+
+        /// <summary>Starts <see cref="SuperviseReplenishAsync"/> once for this pool.</summary>
+        /// <remarks>A later fill failure does not start a second supervisor. The running supervisor waits one interval and tries again.</remarks>
         private void StartPeriodicReplenish()
         {
             if (Interlocked.Exchange(ref _replenishStarted, 1) == 1)
@@ -913,7 +1011,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 return;
             }
 
-            _replenishTask = RunReplenishAsync(_shutdown.Token);
+            _replenishTask = SuperviseReplenishAsync(_shutdown.Token);
         }
 
         /// <summary>Starts the periodic loop if needed and runs one observed fill unless the pool is disposed or shutting down.</summary>
@@ -930,38 +1028,57 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>Fills the deficit once every <see cref="ReplenishInterval"/> until <paramref name="cancellationToken"/> is cancelled.</summary>
-        /// <param name="cancellationToken">Shutdown token. Cancellation ends the loop and is not rethrown.</param>
+        /// <param name="cancellationToken">Shutdown token. Cancellation propagates to <see cref="SuperviseReplenishAsync"/>.</param>
         /// <remarks>
-        /// One failed fill does not end the loop. Connect failures surface as <see cref="NntpProviderConnectException"/>
-        /// and stop only the current round. Any other exception from that round is logged and the next interval still runs.
+        /// Connect failures do not reach this method. <see cref="TryCreateIdleSessionAsync"/> consumes
+        /// <see cref="NntpProviderConnectException"/> and <see cref="InvalidOperationException"/>, and
+        /// <see cref="CreateReadySessionAsync"/> translates an escaping <see cref="SocketException"/> into
+        /// <see cref="NntpProviderConnectException"/> before it leaves. Those attempts end the current round only.
+        /// Any other exception, including shutdown cancellation, propagates to <see cref="SuperviseReplenishAsync"/>.
         /// The wait is <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/> on <see cref="_time"/>.
-        /// <see cref="TimeProvider.System"/> keeps <see cref="ReplenishInterval"/>. Shutdown cancellation of the wait or the fill leaves the loop and is logged as session-fill shutdown.
+        /// <see cref="TimeProvider.System"/> keeps <see cref="ReplenishInterval"/>.
         /// </remarks>
         private async Task RunReplenishAsync(CancellationToken cancellationToken)
         {
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    await Task.Delay(ReplenishInterval, _time, cancellationToken).ConfigureAwait(false);
-                    try
-                    {
-                        await FillDeficitAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    // codeql[cs/catch-of-all-exceptions] A transient connect failure must not permanently stop periodic replenishment. The next interval retries the same deficit.
-                    catch (Exception ex)
-                    {
-                        NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
-                    }
-                }
+                await Task.Delay(ReplenishInterval, _time, cancellationToken).ConfigureAwait(false);
+                await FillDeficitAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        }
+
+        /// <summary>
+        /// Restarts <see cref="RunReplenishAsync"/> after an unexpected fill failure and stops it on shutdown.
+        /// </summary>
+        /// <param name="cancellationToken">Shutdown token. Cancellation returns without another pass.</param>
+        /// <remarks>
+        /// <see cref="NntpProviderConnectException"/> and <see cref="SocketException"/> do not escape
+        /// <see cref="FillDeficitAsync"/>: the session classifies a socket failure, and
+        /// <see cref="TryCreateIdleSessionAsync"/> consumes the resulting connect exception. Catching them here would
+        /// not run. An exception that does escape is an open set. It is logged at warning and the next pass begins
+        /// with another <see cref="ReplenishInterval"/> wait inside <see cref="RunReplenishAsync"/>, so the retry is
+        /// not immediate. Shutdown returns without that wait. <see cref="DisposeCoreAsync"/> still observes this task
+        /// if the supervisor itself fails.
+        /// </remarks>
+        private async Task SuperviseReplenishAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
             {
-                ShutdownObservations.Canceled(_logger, "session fill");
+                try
+                {
+                    await RunReplenishAsync(cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    ShutdownObservations.Canceled(_logger, "session fill");
+                    return;
+                }
+                // codeql[cs/catch-of-all-exceptions] Unexpected fill failures are an open set. This supervisor logs each one and waits one replenish interval before the next pass. Shutdown does not retry.
+                catch (Exception ex)
+                {
+                    NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
+                }
             }
         }
 
@@ -993,7 +1110,7 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>
         /// Creates idle sessions until the live count reaches the bound max or one create fails.
-        /// A failed attempt does not stop <see cref="RunReplenishAsync"/>; that loop waits <see cref="ReplenishInterval"/> and tries again.
+        /// A connect failure ends this round. <see cref="SuperviseReplenishAsync"/> waits <see cref="ReplenishInterval"/> before the next pass.
         /// </summary>
         /// <param name="cancellationToken">Cancels the fill-gate wait and session creation. A disposed pool returns without creating.</param>
         private async Task FillDeficitAsync(CancellationToken cancellationToken)
@@ -1031,8 +1148,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <exception cref="ObjectDisposedException">The pool is disposed.</exception>
         /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
         /// <remarks>
-        /// Other exceptions propagate. <see cref="RunReplenishAsync"/> logs them and continues on the next interval.
-        /// <see cref="FillDeficitObservedAsync"/> logs them for an unawaited fill.
+        /// <see cref="NntpProviderConnectException"/> and <see cref="InvalidOperationException"/> end the attempt and return
+        /// <see langword="false"/>. <see cref="SocketException"/> is translated before it leaves
+        /// <see cref="CreateReadySessionAsync"/>, so it does not reach <see cref="RunReplenishAsync"/>.
+        /// Any other exception propagates to <see cref="SuperviseReplenishAsync"/>, which logs it and waits one
+        /// <see cref="ReplenishInterval"/> before the next pass. <see cref="FillDeficitObservedAsync"/> logs the same
+        /// exception for an unawaited fill.
         /// </remarks>
         private async Task<bool> TryCreateIdleSessionAsync(CancellationToken cancellationToken)
         {
@@ -1057,10 +1178,68 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Invokes <see cref="ActiveSessionCountChanged"/> synchronously.</summary>
+        /// <summary>
+        /// Invokes <see cref="ActiveSessionCountChanged"/> synchronously.
+        /// A call made while a subscriber is already running returns without invoking subscribers again.
+        /// </summary>
+        /// <remarks>
+        /// The guard is cleared when the invocation returns or throws. A later retirement notification still runs.
+        /// The guard only blocks a nested invocation, so a subscriber cannot re-enter cleanup through this method.
+        /// </remarks>
         private void NotifyActiveSessionCountChanged()
         {
-            ActiveSessionCountChanged?.Invoke();
+            if (Interlocked.CompareExchange(ref _notifyingActiveCount, 1, 0) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                ActiveSessionCountChanged?.Invoke();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _notifyingActiveCount, 0);
+            }
+        }
+
+        /// <summary>Writes a cancelled-establishment diagnostic. A logger failure is ignored.</summary>
+        /// <param name="connectionNumber">Connection number for the attempt being abandoned.</param>
+        /// <remarks>
+        /// Called before reservation release. Swallowing the logger failure lets that release run and preserves the
+        /// original creation exception. A second log would call the same failing logger.
+        /// </remarks>
+        private void TryLogSessionEstablishmentCancelled(int connectionNumber)
+        {
+            try
+            {
+                NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
+            }
+            // codeql[cs/catch-of-all-exceptions] The logger is an observer. Its failure must not skip reservation release or replace the creation exception.
+            catch (Exception)
+            {
+                // The failing logger cannot record this diagnostic.
+            }
+        }
+
+        /// <summary>Writes an establishment-failure diagnostic. A logger failure is ignored.</summary>
+        /// <param name="connectionNumber">Connection number for the attempt. Already released when this records cleanup.</param>
+        /// <param name="reason">Exception type name or connect-failure text. No credentials or socket message.</param>
+        /// <remarks>
+        /// Used both before rollback and after accounting is committed. Swallowing the logger failure keeps the
+        /// original exception and lets disposal continue. A second log would call the same failing logger.
+        /// </remarks>
+        private void TryLogSessionEstablishmentFailed(int connectionNumber, string reason)
+        {
+            try
+            {
+                NntpLogMessages.SessionEstablishmentFailed(_logger, _provider.Backbone, connectionNumber, reason);
+            }
+            // codeql[cs/catch-of-all-exceptions] The logger is an observer. Its failure must not skip reservation release or replace the creation exception.
+            catch (Exception)
+            {
+                // The failing logger cannot record this diagnostic.
+            }
         }
 
         /// <summary>Reserves the lowest unused connection number from 1 through the current max.</summary>

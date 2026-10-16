@@ -341,20 +341,22 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
-        /// A socket failure inside periodic replenishment cleans up that attempt and leaves the loop running.
-        /// A later interval creates the missing session instead of leaving the pool short for the process lifetime.
+        /// The first periodic tick keeps a socket failure inside session creation and does not log a replenish failure.
+        /// The second tick throws <see cref="NotSupportedException"/>, which the replenish supervisor logs, and rolls the reservation back.
+        /// The third tick restores one ready session. Shutdown then completes the loop without entering another delay.
         /// </summary>
 
         [Fact]
 
-        public async Task Periodic_replenish_survives_socket_failure_and_restores_capacity()
+        public async Task Periodic_replenish_logs_unexpected_failure_and_restores_capacity()
         {
+            var logger = new CollectingLogger<NntpSessionPool>();
             var delays = new ReplenishDelaySource();
             var factory = new ScriptedNntpTransportFactory
             {
                 ConnectException = new SocketException((int)SocketError.ConnectionRefused),
             };
-            await using var pool = CreatePool(factory, max: 1, time: delays);
+            await using var pool = CreatePool(factory, max: 1, time: delays, logger: logger);
 
             await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
             AssertNoReservedCapacity(pool);
@@ -364,25 +366,114 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var releaseSecond = await delays.WaitForNextAsync();
             Assert.False(ReplenishTask(pool).IsCompleted);
             AssertNoReservedCapacity(pool);
+            Assert.DoesNotContain(
+                logger.Entries,
+                static entry => entry.EventId.Id == 5404);
 
+            factory.ConnectException = new NotSupportedException("replenish tick fault");
             releaseSecond();
             var releaseThird = await delays.WaitForNextAsync();
+            Assert.False(ReplenishTask(pool).IsCompleted);
             Assert.False(ReplenishTask(pool).IsFaulted);
             AssertNoReservedCapacity(pool);
+            Assert.Contains(
+                logger.Entries,
+                static entry => entry.Level == LogLevel.Warning
+                    && entry.EventId.Id == 5404
+                    && entry.Message.Contains("replenish tick fault", StringComparison.Ordinal));
 
             factory.ConnectException = null;
             EnqueueReadyServers(factory, count: 1);
             releaseThird();
             await WaitUntilAsync(() => pool.ActiveSessionCount == 1);
-
             Assert.Equal(1, pool.LiveSessionCount);
             Assert.Equal(1, CreatedSessionCount(pool));
             Assert.Equal(1, ReservedConnectionCount(pool));
-            Assert.False(ReplenishTask(pool).IsCompleted);
 
-            await using var lease = await pool.AcquireAsync(CancellationToken.None);
-            Assert.Equal(1, lease.Session.ConnectionNumber);
-            Assert.Equal(NntpSessionState.Ready, lease.Session.State);
+            await using (var lease = await pool.AcquireAsync(CancellationToken.None))
+            {
+                Assert.Equal(1, lease.Session.ConnectionNumber);
+                Assert.Equal(NntpSessionState.Ready, lease.Session.State);
+            }
+
+            _ = await delays.WaitForNextAsync();
+            Assert.False(ReplenishTask(pool).IsCompleted);
+            var timersAtCapacity = delays.TimersCreated;
+            var shutdownField = typeof(NntpSessionPool).GetField(
+                "_shutdown",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var shutdown = Assert.IsType<CancellationTokenSource>(shutdownField?.GetValue(pool));
+            await shutdown.CancelAsync();
+            await WaitUntilAsync(() => ReplenishTask(pool).IsCompleted);
+            Assert.Equal(TaskStatus.RanToCompletion, ReplenishTask(pool).Status);
+            Assert.Equal(timersAtCapacity, delays.TimersCreated);
+        }
+
+        /// <summary>
+        /// A throwing active-count subscriber on a successful connect retires that session once.
+        /// With one permitted session, the next acquire reuses connection number 1.
+        /// </summary>
+
+        [Fact]
+
+        public async Task Success_notification_failure_releases_capacity_and_the_next_acquire_succeeds()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            using var gate = CreateEstablishmentGate(1);
+            await using var pool = CreatePool(factory, max: 1, establishment: gate);
+            var notifications = 0;
+            pool.ActiveSessionCountChanged += () =>
+            {
+                if (Interlocked.Increment(ref notifications) == 1)
+                {
+                    throw new InvalidOperationException("active count subscriber");
+                }
+            };
+
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => pool.AcquireAsync(CancellationToken.None));
+            Assert.Equal("active count subscriber", failure.Message);
+            AssertNoReservedCapacity(pool);
+
+            await using var recovered = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, recovered.Session.ConnectionNumber);
+            Assert.Equal(NntpSessionState.Ready, recovered.Session.State);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(1, pool.ActiveLeaseCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+            Assert.Equal(3, Volatile.Read(ref notifications));
+        }
+
+        /// <summary>
+        /// A completion-log failure after a ready connect retires that session once and leaves the establishment permit free.
+        /// The same logger accepts the next completion, and the next acquire gets connection number 1.
+        /// </summary>
+
+        [Fact]
+
+        public async Task Completion_log_failure_releases_capacity_and_the_next_acquire_succeeds()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            using var gate = CreateEstablishmentGate(1);
+            var logger = new ThrowOnceOnCompletionLogger();
+            await using var pool = CreatePool(factory, max: 1, establishment: gate, logger: logger);
+
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => pool.AcquireAsync(CancellationToken.None));
+            Assert.Equal("completion log failed", failure.Message);
+            AssertNoReservedCapacity(pool);
+
+            await using var recovered = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, recovered.Session.ConnectionNumber);
+            Assert.Equal(NntpSessionState.Ready, recovered.Session.State);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(1, pool.ActiveLeaseCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+            Assert.Equal(1, logger.CompletionFailures);
         }
 
         /// <summary>
@@ -798,6 +889,12 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             /// <summary>Replenish timers entered and not yet observed by the test, in entry order.</summary>
             private readonly ConcurrentQueue<HeldTimer> _pending = new();
 
+            /// <summary>How many replenish delays have been entered, including one the test has already observed.</summary>
+            private int _timersCreated;
+
+            /// <summary>How many replenish delays <see cref="CreateTimer"/> has captured.</summary>
+            internal int TimersCreated => Volatile.Read(ref _timersCreated);
+
             /// <summary>Waits until the replenish loop enters its next delay.</summary>
             /// <returns>A callback that fires that delay.</returns>
             /// <exception cref="TimeoutException">The loop does not enter another delay within five seconds.</exception>
@@ -827,6 +924,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             {
                 _ = dueTime;
                 _ = period;
+                Interlocked.Increment(ref _timersCreated);
                 var timer = new HeldTimer(callback, state);
                 _pending.Enqueue(timer);
                 return timer;
@@ -867,6 +965,58 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 {
                     Dispose();
                     return ValueTask.CompletedTask;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Logger that throws once from the establishment-completed event and then accepts every later call.
+        /// </summary>
+        private sealed class ThrowOnceOnCompletionLogger : ILogger
+        {
+            /// <summary>How many establishment-completed logs have thrown.</summary>
+            private int _completionFailures;
+
+            /// <summary>How many establishment-completed logs have thrown.</summary>
+            internal int CompletionFailures => Volatile.Read(ref _completionFailures);
+
+            /// <inheritdoc />
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => EmptyScope.Instance;
+
+            /// <inheritdoc />
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            /// <summary>
+            /// Throws <see cref="InvalidOperationException"/> the first time the establishment-completed message is logged.
+            /// Later calls, including retirement diagnostics, are ignored.
+            /// </summary>
+            /// <inheritdoc />
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                ArgumentNullException.ThrowIfNull(formatter);
+                var message = formatter(state, exception);
+                if (message.Contains("establishment completed", StringComparison.Ordinal)
+                    && Interlocked.CompareExchange(ref _completionFailures, 1, 0) == 0)
+                {
+                    throw new InvalidOperationException("completion log failed");
+                }
+            }
+
+            /// <summary>Scope returned by <see cref="BeginScope{TState}"/>. Disposal does nothing.</summary>
+            private sealed class EmptyScope : IDisposable
+            {
+                /// <summary>Shared scope instance.</summary>
+                internal static EmptyScope Instance { get; } = new();
+
+                /// <inheritdoc />
+                public void Dispose()
+                {
                 }
             }
         }
