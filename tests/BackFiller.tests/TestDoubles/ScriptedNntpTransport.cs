@@ -179,16 +179,34 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// </summary>
         public bool FaultClientQuitWrite { get; set; }
 
-        /// <summary>How many times the accepted client stream has entered disposal.</summary>
+        /// <summary>Pipe-cleanup entries. Incremented only when <see cref="DuplexPipeStream"/> completes the pipes.</summary>
         private int _clientStreamDisposals;
 
-        /// <summary>How many times the accepted client stream has recorded disposal. The stream records that once.</summary>
+        /// <summary>Entries to <see cref="DuplexPipeStream.DisposeAsync"/>, including calls that skip pipe cleanup.</summary>
+        private int _clientStreamDisposeAsyncInvocations;
+
+        /// <summary>
+        /// How many times the accepted client stream completed its pipes.
+        /// A repeated <see cref="DuplexPipeStream.DisposeAsync"/> does not increment this.
+        /// </summary>
         internal int ClientStreamDisposeCount => Volatile.Read(ref _clientStreamDisposals);
 
-        /// <summary>Records the first disposal of the client stream returned by <see cref="AcceptClientAsync"/>.</summary>
+        /// <summary>
+        /// How many times <see cref="DuplexPipeStream.DisposeAsync"/> was entered.
+        /// This counts every session disposal call, including ones the stream's own cleanup guard ignores.
+        /// </summary>
+        internal int ClientStreamDisposeAsyncCount => Volatile.Read(ref _clientStreamDisposeAsyncInvocations);
+
+        /// <summary>Records one pipe cleanup of the client stream returned by <see cref="AcceptClientAsync"/>.</summary>
         internal void RecordClientStreamDisposed()
         {
             Interlocked.Increment(ref _clientStreamDisposals);
+        }
+
+        /// <summary>Records one entry to <see cref="DuplexPipeStream.DisposeAsync"/> before once-only pipe cleanup.</summary>
+        internal void RecordClientStreamDisposeAsync()
+        {
+            Interlocked.Increment(ref _clientStreamDisposeAsyncInvocations);
         }
 
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
@@ -471,6 +489,16 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <inheritdoc />
         public override void SetLength(long value) => throw new NotSupportedException();
+
+        /// <summary>
+        /// Counts every disposal entry, then lets <see cref="Dispose(bool)"/> complete the pipes once.
+        /// </summary>
+        /// <returns>The completed disposal task from <see cref="Stream.DisposeAsync"/>.</returns>
+        public override ValueTask DisposeAsync()
+        {
+            owner?.RecordClientStreamDisposeAsync();
+            return base.DisposeAsync();
+        }
 
         /// <inheritdoc />
         protected override void Dispose(bool disposing)

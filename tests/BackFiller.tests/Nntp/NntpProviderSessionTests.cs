@@ -691,7 +691,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// A connected session swallows <see cref="SocketException"/> from the QUIT write, disposes the stream once, and closes.
-        /// A second dispose does not touch the stream again.
+        /// A second dispose returns before another stream disposal or another retirement log.
         /// </summary>
 
         [Fact]
@@ -712,17 +712,21 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             Assert.Equal(NntpSessionState.Closed, session.State);
             Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
             Assert.DoesNotContain(server.Commands, static command => command.StartsWith("QUIT", StringComparison.Ordinal));
             Assert.Contains(
                 logger.Entries,
                 static entry => entry.EventId.Id == 5417
                     && entry.Message.Contains("QUIT failed during dispose", StringComparison.Ordinal)
                     && entry.Message.Contains(nameof(SocketException), StringComparison.Ordinal));
+            var logCount = logger.Entries.Count;
 
             await session.DisposeAsync();
 
             Assert.Equal(NntpSessionState.Closed, session.State);
             Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+            Assert.Equal(logCount, logger.Entries.Count);
         }
 
         /// <summary>
