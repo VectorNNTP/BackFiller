@@ -11,6 +11,8 @@ namespace VectorNNTP.BackFiller.Nntp
     /// <remarks>
     /// Idle sessions are reused by <see cref="AcquireAsync"/>. DATE keepalive runs only while a session sits idle and <see cref="BackFillerProviderDefinition.DateKeepAliveEnabled"/> is set.
     /// A background fill replaces retired sessions up to the bound <see cref="BackFillerProviderDefinition.MaxSessions"/>.
+    /// A session remains in <see cref="_idle"/> only while it is also in <see cref="_live"/> and waiting to be leased.
+    /// Retirement, dequeue, and lease return move that membership under <see cref="_idleGate"/> before any await, so a retired session is not kept until a later acquire.
     /// </remarks>
     internal sealed class NntpSessionPool : IAsyncDisposable
     {
@@ -56,8 +58,31 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>DATE loop for each idle session that has keepalive enabled. Absent while the session is leased.</summary>
         private readonly ConcurrentDictionary<NntpProviderSession, KeepAliveRegistration> _keepAlives = new();
 
-        /// <summary>Sessions waiting for <see cref="AcquireAsync"/>.</summary>
-        private readonly ConcurrentQueue<NntpProviderSession> _idle = new();
+        /// <summary>
+        /// FIFO of sessions waiting for <see cref="AcquireAsync"/>.
+        /// Guarded by <see cref="_idleGate"/> with <see cref="_idleNodes"/> and <see cref="_issued"/>.
+        /// Count is the number of live idle sessions, not a history of retired ones.
+        /// </summary>
+        private readonly LinkedList<NntpProviderSession> _idle = new();
+
+        /// <summary>
+        /// Nodes in <see cref="_idle"/>, for removal of one retired session.
+        /// Guarded by <see cref="_idleGate"/>. A session is entered here only while it is also in <see cref="_live"/>.
+        /// </summary>
+        private readonly Dictionary<NntpProviderSession, LinkedListNode<NntpProviderSession>> _idleNodes = new();
+
+        /// <summary>
+        /// Sessions removed from <see cref="_idle"/> and handed to a lease by <see cref="TryIssueReusable"/>.
+        /// Guarded by <see cref="_idleGate"/>. An idle-keeper retirement does not dispose these.
+        /// <see cref="ReturnAsync"/> and pool disposal clear the mark and then enqueue or retire.
+        /// </summary>
+        private readonly HashSet<NntpProviderSession> _issued = new();
+
+        /// <summary>
+        /// Serializes idle membership, issue, and the live-removal half of retirement.
+        /// Not held across awaits, keepalive callbacks, or subscriber notification.
+        /// </summary>
+        private readonly Lock _idleGate = new();
 
         /// <summary>Sessions created and not yet retired. The byte value is unused.</summary>
         private readonly ConcurrentDictionary<NntpProviderSession, byte> _live = new();
@@ -208,6 +233,21 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Outstanding <see cref="NntpSessionLease"/> instances that have not yet been disposed.</summary>
         internal int ActiveLeaseCount => Volatile.Read(ref _activeLeases);
 
+        /// <summary>
+        /// Sessions currently waiting in <see cref="_idle"/>.
+        /// Retired sessions are not included. The count is therefore bounded by <see cref="LiveSessionCount"/>.
+        /// </summary>
+        internal int IdleSessionCount
+        {
+            get
+            {
+                lock (_idleGate)
+                {
+                    return _idle.Count;
+                }
+            }
+        }
+
         /// <summary>Raised after the active session count may have changed.</summary>
         /// <remarks>
         /// Invoked synchronously on the caller that changed membership or finished a successful connect.
@@ -265,6 +305,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Each idle candidate dequeued before the fill gate is held, if it is <see cref="NntpSessionState.Busy"/>, is waited on until it leaves that state, then kept only when <see cref="NntpProviderSession.IsReusable"/>.
         /// An idle candidate taken later, while the fill gate is held, is retired as soon as it is not reusable, including when it is still busy.
         /// A failed acquire releases the permit. A successful acquire holds it until <see cref="ReturnAsync"/>.
+        /// A session taken from <see cref="_idle"/> is issued or retired before the permit is released.
+        /// Cancellation while that session is still busy retires it, because the DATE loop will not retire a session that has already left the idle list.
         /// A publication failure inside <see cref="CreateReadySessionAsync"/> retires the new session before this method returns, so the caller does not receive a lease.
         /// </remarks>
         internal async Task<NntpSessionLease> AcquireAsync(CancellationToken cancellationToken)
@@ -272,37 +314,42 @@ namespace VectorNNTP.BackFiller.Nntp
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
             await _leases.WaitAsync(linked.Token).ConfigureAwait(false);
+            NntpProviderSession? taken = null;
             try
             {
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
-                while (_idle.TryDequeue(out var idle))
+                while (TryTakeIdleSession() is { } idle)
                 {
+                    taken = idle;
                     StopKeepAlive(idle);
                     if (idle.State == NntpSessionState.Busy)
                     {
                         await WaitUntilNotBusyAsync(idle, linked.Token).ConfigureAwait(false);
                     }
 
-                    if (idle.IsReusable)
+                    if (TryIssueReusable(idle) is { } lease)
                     {
-                        return Issue(idle);
+                        return lease;
                     }
 
                     await RetireSessionAsync(idle, "idle session was not reusable").ConfigureAwait(false);
+                    taken = null;
                 }
 
                 await _fillGate.WaitAsync(linked.Token).ConfigureAwait(false);
                 try
                 {
-                    while (_idle.TryDequeue(out var idle))
+                    while (TryTakeIdleSession() is { } idle)
                     {
+                        taken = idle;
                         StopKeepAlive(idle);
-                        if (idle.IsReusable)
+                        if (TryIssueReusable(idle) is { } lease)
                         {
-                            return Issue(idle);
+                            return lease;
                         }
 
                         await RetireSessionAsync(idle, "idle session was not reusable").ConfigureAwait(false);
+                        taken = null;
                     }
 
                     if (Volatile.Read(ref _created) >= _provider.MaxSessions)
@@ -311,6 +358,11 @@ namespace VectorNNTP.BackFiller.Nntp
                     }
 
                     var created = await CreateReadySessionAsync(linked.Token).ConfigureAwait(false);
+                    lock (_idleGate)
+                    {
+                        _ = _issued.Add(created);
+                    }
+
                     return Issue(created);
                 }
                 finally
@@ -318,9 +370,29 @@ namespace VectorNNTP.BackFiller.Nntp
                     _fillGate.Release();
                 }
             }
-            catch
+            catch (Exception)
             {
-                _leases.Release();
+                try
+                {
+                    if (taken is not null)
+                    {
+                        var connectionNumber = taken.ConnectionNumber;
+                        try
+                        {
+                            // The DATE loop retires only a session that is still idle. This one was already removed.
+                            await RetireSessionAsync(taken, "idle session was not reusable").ConfigureAwait(false);
+                        }
+                        catch (Exception cleanup) when (IsExpectedSessionCleanupFailure(cleanup))
+                        {
+                            TryLogSessionEstablishmentFailed(connectionNumber, cleanup.GetType().Name);
+                        }
+                    }
+                }
+                finally
+                {
+                    _leases.Release();
+                }
+
                 throw;
             }
         }
@@ -344,21 +416,22 @@ namespace VectorNNTP.BackFiller.Nntp
                     await RetireSessionAsync(session, retire ? "lease requested retirement" : "pool is shutting down")
                         .ConfigureAwait(false);
                 }
-                else if (session.IsReusable)
-                {
-                    if (_live.Count > _provider.MaxSessions)
-                    {
-                        await RetireSessionAsync(session, "max sessions shrink", replenish: false)
-                            .ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        EnqueueIdle(session);
-                    }
-                }
                 else
                 {
-                    await RetireSessionAsync(session, "session is no longer reusable").ConfigureAwait(false);
+                    switch (TryAdmitIdle(session, enforceBound: true))
+                    {
+                        case IdleAdmission.Admitted:
+                            StartKeepAlive(session);
+                            StopKeepAliveUnlessIdle(session);
+                            break;
+                        case IdleAdmission.OverBound:
+                            await RetireSessionAsync(session, "max sessions shrink", replenish: false)
+                                .ConfigureAwait(false);
+                            break;
+                        default:
+                            await RetireSessionAsync(session, "session is no longer reusable").ConfigureAwait(false);
+                            break;
+                    }
                 }
             }
             finally
@@ -423,7 +496,7 @@ namespace VectorNNTP.BackFiller.Nntp
             try
             {
                 var bound = _provider.MaxSessions;
-                while (_live.Count > bound && _idle.TryDequeue(out var idle))
+                while (_live.Count > bound && TryTakeIdleSession() is { } idle)
                 {
                     StopKeepAlive(idle);
                     await RetireSessionAsync(idle, "max sessions shrink", replenish: false).ConfigureAwait(false);
@@ -527,7 +600,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 ShutdownObservations.Canceled(_logger, "pool dispose grace");
             }
 
-            while (_idle.TryDequeue(out var idle))
+            while (TryTakeIdleSession() is { } idle)
             {
                 await RetireSessionAsync(idle, "pool dispose").ConfigureAwait(false);
             }
@@ -774,12 +847,115 @@ namespace VectorNNTP.BackFiller.Nntp
             Interlocked.Decrement(ref _created);
         }
 
-        /// <summary>Queues <paramref name="session"/> for acquire and starts its DATE loop when keepalive is enabled.</summary>
-        /// <param name="session">Reusable session that is no longer leased.</param>
-        private void EnqueueIdle(NntpProviderSession session)
+        /// <summary>
+        /// Result of trying to place a live session into <see cref="_idle"/> under <see cref="_idleGate"/>.
+        /// </summary>
+        private enum IdleAdmission
         {
-            _idle.Enqueue(session);
-            StartKeepAlive(session);
+            /// <summary>The session is in <see cref="_idle"/> and may start DATE keepalive.</summary>
+            Admitted,
+
+            /// <summary>The session is reusable and live, and the live count is above the bound max. The caller retires it.</summary>
+            OverBound,
+
+            /// <summary>The session is already retired or not reusable. The caller retires it; a second retire is a no-op.</summary>
+            NotReusable,
+        }
+
+        /// <summary>
+        /// Removes the oldest idle session from <see cref="_idle"/>.
+        /// The caller then issues it or retires it. Keepalive retirement will not dispose it after this returns.
+        /// </summary>
+        /// <returns>The session that left the idle list, or <see langword="null"/> when the list is empty.</returns>
+        private NntpProviderSession? TryTakeIdleSession()
+        {
+            lock (_idleGate)
+            {
+                var first = _idle.First;
+                if (first is null)
+                {
+                    return null;
+                }
+
+                var session = first.Value;
+                _idle.RemoveFirst();
+                _ = _idleNodes.Remove(session);
+                return session;
+            }
+        }
+
+        /// <summary>
+        /// Issues <paramref name="session"/> when it is still live and reusable.
+        /// The check and <see cref="_issued"/> insert share <see cref="_idleGate"/> with retirement.
+        /// </summary>
+        /// <param name="session">Session already removed from <see cref="_idle"/> by <see cref="TryTakeIdleSession"/>.</param>
+        /// <returns>The new lease, or <see langword="null"/> when the caller must retire <paramref name="session"/>.</returns>
+        private NntpSessionLease? TryIssueReusable(NntpProviderSession session)
+        {
+            lock (_idleGate)
+            {
+                if (!_live.ContainsKey(session) || !session.IsReusable)
+                {
+                    return null;
+                }
+
+                _ = _issued.Add(session);
+                return Issue(session);
+            }
+        }
+
+        /// <summary>
+        /// Puts <paramref name="session"/> at the tail of <see cref="_idle"/> when retirement has not already won.
+        /// </summary>
+        /// <param name="session">Session that was leased or just created.</param>
+        /// <param name="enforceBound">
+        /// <see langword="true"/> refuses a reusable session while <see cref="_live"/> is above the bound max.
+        /// Creation passes <see langword="false"/> because the new session is already within the bound.
+        /// </param>
+        /// <returns>Whether the session is now idle, must be retired for shrink, or is not reusable.</returns>
+        /// <remarks>
+        /// Clears <see cref="_issued"/> for this session. A retirement that already removed it from <see cref="_live"/>
+        /// cannot be undone by a late return. The idle lock is not held while DATE keepalive starts.
+        /// </remarks>
+        private IdleAdmission TryAdmitIdle(NntpProviderSession session, bool enforceBound)
+        {
+            lock (_idleGate)
+            {
+                _ = _issued.Remove(session);
+                if (!_live.ContainsKey(session) || !session.IsReusable)
+                {
+                    return IdleAdmission.NotReusable;
+                }
+
+                if (enforceBound && _live.Count > _provider.MaxSessions)
+                {
+                    return IdleAdmission.OverBound;
+                }
+
+                if (!_idleNodes.ContainsKey(session))
+                {
+                    var node = _idle.AddLast(session);
+                    _idleNodes.Add(session, node);
+                }
+
+                return IdleAdmission.Admitted;
+            }
+        }
+
+        /// <summary>Stops DATE keepalive when <paramref name="session"/> left <see cref="_idle"/> after <see cref="StartKeepAlive"/>.</summary>
+        /// <param name="session">Session that was just admitted.</param>
+        private void StopKeepAliveUnlessIdle(NntpProviderSession session)
+        {
+            var stillIdle = false;
+            lock (_idleGate)
+            {
+                stillIdle = _idleNodes.ContainsKey(session);
+            }
+
+            if (!stillIdle)
+            {
+                StopKeepAlive(session);
+            }
         }
 
         /// <summary>Starts a DATE loop for <paramref name="session"/> unless keepalive is disabled, the pool is disposed, or shutdown has started.</summary>
@@ -835,7 +1011,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="session">Idle session this loop owns.</param>
         /// <param name="cts">Loop cancellation, linked to <see cref="_shutdown"/>. Disposed when the loop exits.</param>
         /// <remarks>
-        /// A non-reusable session or a failed DATE retires <paramref name="session"/>.
+        /// A non-reusable session or a failed DATE retires <paramref name="session"/> only when it is still idle.
+        /// A dequeue that already removed it keeps the session and retires it itself when it is not reusable.
         /// <see cref="NntpProviderSession.SendDateKeepAliveAsync"/> is called with <see cref="_shutdown"/> and without waiting for the busy lock, so an in-use session skips DATE and stays leased.
         /// Cancellation of <paramref name="cts"/> ends the loop without retirement. Any other exception retires the session.
         /// The registration is removed and <paramref name="cts"/> is disposed on the way out.
@@ -857,13 +1034,15 @@ namespace VectorNNTP.BackFiller.Nntp
 
                         if (!session.IsReusable)
                         {
-                            await RetireSessionAsync(session, "keepalive found a non-reusable session").ConfigureAwait(false);
+                            await RetireSessionAsync(session, "keepalive found a non-reusable session", onlyIfIdle: true)
+                                .ConfigureAwait(false);
                             return;
                         }
 
                         if (!await session.SendDateKeepAliveAsync(_shutdown.Token).ConfigureAwait(false))
                         {
-                            await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
+                            await RetireSessionAsync(session, "DATE keepalive failed", onlyIfIdle: true)
+                                .ConfigureAwait(false);
                             return;
                         }
                     }
@@ -875,9 +1054,9 @@ namespace VectorNNTP.BackFiller.Nntp
                 // codeql[cs/catch-of-all-exceptions] Keepalive and replenishment failures must retire or log the session and must not escape the background task.
                 catch (Exception)
                 {
-                    // DATE keepalive owns this session. Any transport or clock failure retires it here so the
-                    // loop task stays observed and the pool can replace the session. Cancellation is handled above.
-                    await RetireSessionAsync(session, "DATE keepalive failed").ConfigureAwait(false);
+                    // The loop still owns the session only while it remains idle. A dequeue that already
+                    // took it retires or leases it, so this call must not dispose that session too.
+                    await RetireSessionAsync(session, "DATE keepalive failed", onlyIfIdle: true).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -915,22 +1094,59 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="session">Live session to drop. A session that is already absent is left alone.</param>
         /// <param name="reason">Text passed to <see cref="NntpLogMessages.SessionRetired"/>.</param>
         /// <param name="replenish"><see langword="true"/> schedules <see cref="RequestReplenish"/> after a session was actually removed.</param>
+        /// <param name="onlyIfIdle">
+        /// <see langword="true"/> when the caller is the DATE loop. The session is disposed only if it is still in
+        /// <see cref="_idle"/>. A dequeue or lease that already took it keeps ownership and is not disposed here.
+        /// </param>
         /// <remarks>
         /// <c>TryRemove</c> wins the decrement and connection-number release. A second retire, dispose, or creation rollback
-        /// observes the loss and does not change the counters again. Those releases run before the retirement log,
-        /// the active-count notification, and disposal. Observer failures are contained by <see cref="SignalSessionRetired"/>
+        /// observes the loss and does not change the counters again. Idle membership is removed under <see cref="_idleGate"/>
+        /// before those releases, and before the retirement log, the active-count notification, and disposal. A retired
+        /// session therefore does not stay reachable from <see cref="_idle"/> until a later <see cref="AcquireAsync"/>.
+        /// An issued session stays in <see cref="_live"/> when <paramref name="onlyIfIdle"/> is set, so <see cref="ReturnAsync"/>
+        /// is the one retire or re-enqueue. Observer failures are contained by <see cref="SignalSessionRetired"/>
         /// so they cannot skip disposal, decrement twice, or recurse through another retire. Expected disposal failures
         /// are logged. Any other disposal exception still requests replenishment when <paramref name="replenish"/> is
         /// <see langword="true"/>, then propagates.
         /// </remarks>
-        private async Task RetireSessionAsync(NntpProviderSession session, string reason, bool replenish = true)
+        private async Task RetireSessionAsync(
+            NntpProviderSession session,
+            string reason,
+            bool replenish = true,
+            bool onlyIfIdle = false)
         {
-            StopKeepAlive(session);
-            if (!_live.TryRemove(session, out _))
+            var won = false;
+            lock (_idleGate)
+            {
+                if (onlyIfIdle && !_idleNodes.ContainsKey(session))
+                {
+                    return;
+                }
+
+                if (_issued.Contains(session))
+                {
+                    if (onlyIfIdle)
+                    {
+                        return;
+                    }
+
+                    _ = _issued.Remove(session);
+                }
+
+                if (_idleNodes.Remove(session, out var node))
+                {
+                    _idle.Remove(node);
+                }
+
+                won = _live.TryRemove(session, out _);
+            }
+
+            if (!won)
             {
                 return;
             }
 
+            StopKeepAlive(session);
             Interlocked.Decrement(ref _created);
             ReleaseConnectionNumber(session.ConnectionNumber);
             SignalSessionRetired(session, reason);
@@ -1175,7 +1391,14 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
                 var session = await CreateReadySessionAsync(cancellationToken).ConfigureAwait(false);
-                EnqueueIdle(session);
+                if (TryAdmitIdle(session, enforceBound: false) != IdleAdmission.Admitted)
+                {
+                    await RetireSessionAsync(session, "session is no longer reusable").ConfigureAwait(false);
+                    return false;
+                }
+
+                StartKeepAlive(session);
+                StopKeepAliveUnlessIdle(session);
                 return true;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

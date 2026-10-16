@@ -232,7 +232,8 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
-            if (_reader is null || _stream is null || State is NntpSessionState.Closed or NntpSessionState.Retiring)
+            var reader = _reader;
+            if (reader is null || _stream is null || State is NntpSessionState.Closed or NntpSessionState.Retiring)
             {
                 return WithCommandTimestamp(ArticleRetrievalResult.Failed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -293,7 +294,7 @@ namespace VectorNNTP.BackFiller.Nntp
                         byte[] payload;
                         try
                         {
-                            payload = await _reader
+                            payload = await reader
                                 .ReadArticlePayloadAsync(maxArticleBytes, _options.ReceiveTimeout, cancellationToken)
                                 .ConfigureAwait(false);
                             NntpLogMessages.WireArticlePayloadComplete(_logger, _wireIdentity, payload.Length);
@@ -334,7 +335,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     var accepted = false;
                     try
                     {
-                        _ = await _reader.ReadArticlePayloadAsync(
+                        _ = await reader.ReadArticlePayloadAsync(
                                 maxArticleBytes,
                                 _options.ReceiveTimeout,
                                 memory =>
@@ -564,6 +565,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read.
         /// Write and flush failures, including <see cref="SocketException"/>, are logged and do not escape.
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
+        /// After the transport dispose is attempted, <see cref="_stream"/> and <see cref="_reader"/> are cleared.
+        /// That drops the receive buffer and the article scratch buffer owned by the reader.
+        /// Bytes already copied into a <see cref="RetrievedArticle"/> stay with that article.
+        /// An in-flight read holds the reader on its own stack until it returns; clearing the fields does not mutate that reader.
         /// <see cref="_busy"/> is disposed. <see cref="State"/> ends as <see cref="NntpSessionState.Closed"/>.
         /// </remarks>
         public async ValueTask DisposeAsync()
@@ -575,21 +580,37 @@ namespace VectorNNTP.BackFiller.Nntp
 
             State = NntpSessionState.Retiring;
             NntpLogMessages.WireRetiring(_logger, _wireIdentity);
-            if (_stream is not null)
+            var stream = _stream;
+            if (stream is not null)
             {
                 try
                 {
                     NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await _stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
-                    await _stream.FlushAsync(cts.Token).ConfigureAwait(false);
+                    await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
+                    await stream.FlushAsync(cts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException)
                 {
                     NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
                 }
 
-                await _stream.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (ReferenceEquals(_stream, stream))
+                    {
+                        _stream = null;
+                        _reader = null;
+                    }
+                }
+            }
+            else
+            {
+                _reader = null;
             }
 
             _busy.Dispose();
@@ -690,7 +711,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, code, text, reusable: false);
             }
 
-            if (_reader is not null && _reader.BufferedByteCount != 0)
+            if (_reader is { } buffered && buffered.BufferedByteCount != 0)
             {
                 return FailClosed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -860,14 +881,15 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         private async Task<byte[]?> ReadStatusAsync(CancellationToken cancellationToken)
         {
-            if (_reader is null)
+            var reader = _reader;
+            if (reader is null)
             {
                 return null;
             }
 
             try
             {
-                var line = await _reader
+                var line = await reader
                     .ReadLineAsync(_options.MaxStatusLineBytes, _options.CommandTimeout, cancellationToken)
                     .ConfigureAwait(false);
                 if (line is null || !_logger.IsEnabled(LogLevel.Debug))
@@ -933,15 +955,16 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>Both the timeout and caller cancellation surface as <see cref="OperationCanceledException"/>.</remarks>
         private async Task WriteAsync(ReadOnlyMemory<byte> bytes, TimeSpan timeout, CancellationToken cancellationToken)
         {
-            if (_stream is null)
+            var stream = _stream;
+            if (stream is null)
             {
                 throw new InvalidOperationException("NNTP stream is not open.");
             }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(timeout);
-            await _stream.WriteAsync(bytes, timeoutCts.Token).ConfigureAwait(false);
-            await _stream.FlushAsync(timeoutCts.Token).ConfigureAwait(false);
+            await stream.WriteAsync(bytes, timeoutCts.Token).ConfigureAwait(false);
+            await stream.FlushAsync(timeoutCts.Token).ConfigureAwait(false);
         }
 
         /// <summary>Marks the session unhealthy and retiring, and returns a non-reusable failure.</summary>

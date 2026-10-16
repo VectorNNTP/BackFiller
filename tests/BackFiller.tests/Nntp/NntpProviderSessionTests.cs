@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
@@ -199,6 +200,48 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.NotEqual(0, result.CommandStartedTimestamp);
             Assert.Equal(result.CommandStartedTimestamp, session.ArticleCommandStartedTimestamp);
             await session.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Disposal drops the session's stream and reader after QUIT, and does not change article bytes already returned.
+        /// A second disposal stays on the idempotent path.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_releases_stream_and_reader_without_invalidating_returned_article_bytes()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            server.RespondBytes(static command =>
+            {
+                if (!command.StartsWith("ARTICLE ", StringComparison.Ordinal))
+                {
+                    return "500 unknown\r\n"u8.ToArray();
+                }
+
+                return "220 0 <a@b> article follows\r\nFrom: a@b\r\n\r\nbody\r\n.\r\n"u8.ToArray();
+            });
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            Assert.NotNull(SessionField(session, "_stream"));
+            Assert.NotNull(SessionField(session, "_reader"));
+
+            using var result = await session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            var payload = result.Article!.Memory.ToArray();
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Null(SessionField(session, "_stream"));
+            Assert.Null(SessionField(session, "_reader"));
+            Assert.Equal(payload, result.Article.Memory.ToArray());
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(payload, result.Article.Memory.ToArray());
         }
 
         /// <summary>
@@ -746,6 +789,17 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.DoesNotContain("Password={", text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Username={", text, StringComparison.Ordinal);
             }
+        }
+
+        /// <summary>Reads a private instance field from <paramref name="session"/> after the operation under test has quiesced.</summary>
+        /// <param name="session">Session whose field is observed.</param>
+        /// <param name="name">Field name, including its underscore prefix.</param>
+        /// <returns>The field value, or null when the session has released it.</returns>
+        private static object? SessionField(NntpProviderSession session, string name)
+        {
+            var field = typeof(NntpProviderSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return field.GetValue(session);
         }
 
         /// <summary>
