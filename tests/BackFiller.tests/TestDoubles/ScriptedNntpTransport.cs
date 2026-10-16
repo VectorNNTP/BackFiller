@@ -551,6 +551,26 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         {
         }
 
+        /// <summary>
+        /// Completes when this stream is still open. Flushing after disposal throws <see cref="ObjectDisposedException"/>.
+        /// </summary>
+        /// <param name="cancellationToken">Ignored. This flush does not write to the pipes.</param>
+        /// <returns>A completed task when the stream has not been disposed.</returns>
+        /// <exception cref="ObjectDisposedException">The stream was already disposed.</exception>
+        /// <remarks>
+        /// Command bytes are pushed in <see cref="WriteAsync"/>. The session calls this method afterward.
+        /// A disposed flush fails the caller with <see cref="ObjectDisposedException"/>, which is distinct from an empty status read.
+        /// </remarks>
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                throw new ObjectDisposedException(nameof(DuplexPipeStream));
+            }
+
+            return Task.CompletedTask;
+        }
+
         /// <inheritdoc />
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {

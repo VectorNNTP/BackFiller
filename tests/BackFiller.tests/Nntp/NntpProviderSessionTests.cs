@@ -1132,6 +1132,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <param name="useCallback"><see langword="true"/> exercises the callback payload path. <see langword="false"/> exercises the owned-result path.</param>
         /// <remarks>
         /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// The classified reason is <see cref="InvalidOperationException"/> from reading the captured reader after the pipe is completed.
+        /// A payload call that rereads a cleared <c>_reader</c> throws <see cref="NullReferenceException"/>, which this helper does not classify.
         /// </remarks>
         private static async Task AssertDisposeDuringArticlePayloadReadAsync(bool useCallback)
         {
@@ -1172,6 +1174,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
                 Assert.False(finished.SessionReusable);
                 Assert.Null(finished.Article);
+                Assert.Equal(nameof(InvalidOperationException), finished.Reason);
                 Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.Equal(0, Volatile.Read(ref consumed));
@@ -1206,7 +1209,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <remarks>
         /// <see cref="ScriptedNntpServer.BlockArticle"/> stays closed until cleanup, so a resumed read cannot observe a response that was written before disposal.
         /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
-        /// The classified reason is the empty status read after flush. A flush that rereads a cleared <c>_stream</c> throws before that read and fails this assertion.
+        /// The classified reason is <see cref="ObjectDisposedException"/> from flushing the stream captured before disposal.
+        /// An empty status, or <see cref="InvalidOperationException"/> from rereading a cleared <c>_stream</c>, fails that assertion.
         /// </remarks>
         private static async Task AssertDisposeBetweenArticleWriteAndFlushAsync(bool useCallback)
         {
@@ -1255,9 +1259,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
                 Assert.False(finished.SessionReusable);
                 Assert.Null(finished.Article);
-                Assert.Equal("NNTP ARTICLE status was empty.", finished.Reason);
-                Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
-                Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                Assert.Equal(nameof(ObjectDisposedException), finished.Reason);
                 Assert.Equal(0, Volatile.Read(ref consumed));
                 Assert.Null(SessionField(session, "_stream"));
                 Assert.Null(SessionField(session, "_reader"));
