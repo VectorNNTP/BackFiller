@@ -347,7 +347,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             if (CompleteWithoutGreeting)
             {
                 await _toClient.Writer.CompleteAsync().ConfigureAwait(false);
-                return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
+                return DecorateClientStream(new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this));
             }
 
             var greeting = Encoding.ASCII.GetBytes(Greeting.EndsWith("\r\n", StringComparison.Ordinal)
@@ -356,8 +356,24 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             _toClient.Writer.Write(greeting);
             await _toClient.Writer.FlushAsync().ConfigureAwait(false);
             _ = RunServerAsync();
-            return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
+            return DecorateClientStream(new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this));
         }
+
+        /// <summary>
+        /// When set, wraps the duplex client stream before <see cref="AcceptClientAsync"/> returns it.
+        /// Null leaves the duplex stream as the session transport.
+        /// </summary>
+        /// <remarks>
+        /// Tests install an <see cref="SslStream"/> here so a held write and a later QUIT hit the same TLS write path.
+        /// The wrapper owns the duplex stream and must dispose it.
+        /// </remarks>
+        internal Func<Stream, Stream>? ClientStreamDecorator { get; set; }
+
+        /// <summary>Applies <see cref="ClientStreamDecorator"/> when a test installed one.</summary>
+        /// <param name="client">Duplex stream just created for the accepted client.</param>
+        /// <returns>The decorator result, or <paramref name="client"/> when no decorator is set.</returns>
+        private Stream DecorateClientStream(Stream client) =>
+            ClientStreamDecorator is { } decorate ? decorate(client) : client;
 
         /// <summary>
         /// Reads CRLF-delimited commands, applies built-in handlers and the configured responder, and completes the outbound pipe on exit.

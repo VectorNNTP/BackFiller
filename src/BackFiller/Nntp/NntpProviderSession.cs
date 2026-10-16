@@ -73,6 +73,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         private Func<Stream, SslStream>? _tlsStreamFactory;
 
+        /// <summary>
+        /// Test gate after the pre-lock ARTICLE readiness check and before <see cref="_busy"/> is acquired.
+        /// Null in production.
+        /// </summary>
+        private Func<Task>? _beforeArticleBusyWait;
+
         /// <summary>Set when a command failure must keep the session out of the idle pool. Sticky for the session lifetime.</summary>
         private bool _unhealthy;
 
@@ -135,6 +141,20 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>Gets the MySQL <c>keepalive</c> interval this session was constructed with.</summary>
         internal byte KeepAliveSeconds => _provider.KeepAliveSeconds;
+
+        /// <summary>
+        /// Pauses ARTICLE after the pre-lock readiness check and before <see cref="DownloadArticleAsync"/> waits for <see cref="_busy"/>.
+        /// Null in production.
+        /// </summary>
+        /// <remarks>
+        /// A test uses this to prove the check ran while DATE still holds <see cref="_busy"/>, then lets DATE fail before ARTICLE waits.
+        /// The gate does not run again after the lock is acquired.
+        /// </remarks>
+        internal Func<Task>? BeforeArticleBusyWait
+        {
+            get => _beforeArticleBusyWait;
+            set => _beforeArticleBusyWait = value;
+        }
 
         /// <summary>
         /// Pauses STARTTLS after the transport is captured and before <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> uses it.
@@ -290,6 +310,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>
         /// A non-ASCII message-id fails before the lock is taken and leaves the session reusable.
         /// A closed or retiring session, or one whose reader or stream is missing, returns a non-reusable provider failure without taking the lock and without setting <see cref="_unhealthy"/>.
+        /// After <see cref="_busy"/> is acquired, <see cref="IsReusable"/> is checked again before <see cref="State"/> becomes <see cref="NntpSessionState.Busy"/> and before ARTICLE is written.
+        /// A DATE failure that marked the session unhealthy while this call waited returns that same non-reusable provider failure and does not write ARTICLE.
         /// A status-line timeout becomes <see cref="TimeoutException"/> inside <see cref="ReadStatusAsync"/> and is then classified as provider failure whose reason is that exception's type name.
         /// A payload timeout is classified as provider failure with the reason <c>ARTICLE timed out.</c>
         /// Disposal during the command clears the session fields and disposes <see cref="_busy"/>. The in-flight call keeps the reader and stream it already captured.
@@ -327,12 +349,26 @@ namespace VectorNNTP.BackFiller.Nntp
                     sessionReusable: true));
             }
 
+            if (_beforeArticleBusyWait is { } beforeBusy)
+            {
+                await beforeBusy().ConfigureAwait(false);
+            }
+
             await _busy.WaitAsync(cancellationToken).ConfigureAwait(false);
             var previous = State;
-            AssignState(NntpSessionState.Busy);
             ExceptionDispatchInfo? consumerError = null;
             try
             {
+                if (!IsReusable)
+                {
+                    return WithCommandTimestamp(ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        "NNTP session is not ready.",
+                        sessionReusable: false));
+                }
+
+                AssignState(NntpSessionState.Busy);
                 var commandLength = NntpProtocolIo.ArticlePrefix.Length + messageIdBytes.Length + NntpProtocolIo.Crlf.Length;
                 var command = ArrayPool<byte>.Shared.Rent(commandLength);
                 try
@@ -647,7 +683,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <remarks>
         /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read.
-        /// Write and flush failures, including <see cref="SocketException"/>, are logged and do not escape.
+        /// Write and flush failures, including <see cref="SocketException"/> and <see cref="NotSupportedException"/> from an overlapping <see cref="SslStream"/> write, are logged and do not escape.
+        /// The transport is still disposed once after that best-effort write.
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
         /// The transport reference is captured under <see cref="_transportGate"/> before any await, and the fields are cleared there.
         /// A STARTTLS upgrade that already owns the plaintext transport disposes the TLS wrapper itself. This method does not dispose that transport again.
@@ -686,7 +723,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
                     await stream.FlushAsync(cts.Token).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException)
+                catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException or NotSupportedException)
                 {
                     NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
                 }

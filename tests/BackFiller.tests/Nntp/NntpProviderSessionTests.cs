@@ -1206,6 +1206,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <remarks>
         /// <see cref="ScriptedNntpServer.BlockArticle"/> stays closed until cleanup, so a resumed read cannot observe a response that was written before disposal.
         /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// The classified reason is the empty status read after flush. A flush that rereads a cleared <c>_stream</c> throws before that read and fails this assertion.
         /// </remarks>
         private static async Task AssertDisposeBetweenArticleWriteAndFlushAsync(bool useCallback)
         {
@@ -1254,6 +1255,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
                 Assert.False(finished.SessionReusable);
                 Assert.Null(finished.Article);
+                Assert.Equal("NNTP ARTICLE status was empty.", finished.Reason);
                 Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
                 Assert.Equal(0, Volatile.Read(ref consumed));

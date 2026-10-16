@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
@@ -1220,6 +1221,104 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// A keepalive that already passed cancellation still sends DATE on the shutdown token after its registration is detached.
+        /// ARTICLE that passed its first check and waited for that DATE must not write after DATE marks the session unhealthy.
+        /// </summary>
+        [Fact]
+        public async Task Article_after_failed_date_does_not_write_on_the_unhealthy_session()
+        {
+            var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var dateFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleAtGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var writeFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = NntpSessionPoolTests.CreateDateAwareServer(dateResponse: "503 keepalive failed\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            var session = warmup.Session;
+            await warmup.DisposeAsync();
+            var firstDelay = await clock.WaitForKeepAliveAsync();
+            pool.BeforeKeepAliveReusabilityCheck = () =>
+            {
+                healthEntered.TrySetResult();
+                return releaseHealth.Task;
+            };
+            pool.BeforeKeepAliveRetirement = _ =>
+            {
+                dateFailed.TrySetResult();
+                return releaseRetirement.Task;
+            };
+            session.BeforeArticleBusyWait = () =>
+            {
+                articleAtGate.TrySetResult();
+                return releaseArticle.Task;
+            };
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            try
+            {
+                firstDelay();
+                await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                Assert.Same(session, lease.Session);
+                server.HoldAfterCommandWrite = releaseWrite;
+                server.CommandWriteFlushed = writeFlushed;
+                releaseHealth.TrySetResult();
+                await writeFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(NntpSessionState.Busy, session.State);
+                download = session.DownloadArticleAsync("<id@example>", CancellationToken.None);
+                await articleAtGate.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseWrite.TrySetResult();
+                await dateFailed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Retiring, session.State);
+                releaseArticle.TrySetResult();
+                using var article = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, article.Kind);
+                Assert.False(article.SessionReusable);
+                Assert.Null(article.Article);
+                Assert.Equal("NNTP session is not ready.", article.Reason);
+                Assert.Equal(0, session.ArticleCommandStartedTimestamp);
+                Assert.Contains(server.Commands, static command => command.Equals("DATE", StringComparison.Ordinal));
+                Assert.DoesNotContain(server.Commands, static command => command.StartsWith("ARTICLE", StringComparison.Ordinal));
+                Assert.Equal(NntpSessionState.Retiring, session.State);
+                Assert.NotNull(SessionField(session, "_stream"));
+            }
+            finally
+            {
+                pool.BeforeKeepAliveReusabilityCheck = null;
+                pool.BeforeKeepAliveRetirement = null;
+                session.BeforeArticleBusyWait = null;
+                releaseHealth.TrySetResult();
+                releaseWrite.TrySetResult();
+                releaseArticle.TrySetResult();
+                releaseRetirement.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
         /// Pool disposal that retires a session after connect and before issuance does not hand that session out.
         /// Lease, created-session, and connection-number accounting stay at zero, and releasing the fill gate does not throw.
         /// </summary>
@@ -1393,6 +1492,82 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 && factory.ConnectAttempts.Count == 2
                 && CreatedSessionCount(pool) == 1
                 && ReservedConnectionCount(pool) == 1);
+        }
+
+        /// <summary>
+        /// Cancelling acquire while a TLS DATE write is still inside <see cref="Stream.WriteAsync"/> disposes that transport once.
+        /// QUIT overlaps the held write. <see cref="SslStream"/> rejects that second write, and the original cancellation is what acquire throws.
+        /// </summary>
+        [Fact]
+        public async Task Cancelled_acquire_during_tls_date_write_disposes_the_transport_once()
+        {
+            var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            NestedWriteTlsStream? tls = null;
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.Equals("DATE", StringComparison.OrdinalIgnoreCase)
+                    ? "111 20260926120000\r\n"
+                    : "430 missing\r\n");
+            server.ClientStreamDecorator = inner =>
+            {
+                tls = new NestedWriteTlsStream(inner, writeEntered, releaseWrite);
+                return tls;
+            };
+            var replacement = ReadyServer();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            factory.Enqueue(replacement);
+            var clock = new KeepAliveDelaySource();
+            var logger = new CollectingLogger<NntpSessionPool>();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock, logger: logger);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            var session = warmup.Session;
+            await warmup.DisposeAsync();
+            var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+            Assert.NotNull(tls);
+            tls.HoldWrites = true;
+            releaseKeepAlive();
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var acquireCancel = new CancellationTokenSource();
+            var acquire = pool.AcquireAsync(acquireCancel.Token);
+            try
+            {
+                await WaitUntilAsync(() =>
+                    pool.IdleSessionCount == 0
+                    && pool.ActiveLeaseCount == 0
+                    && pool.LiveSessionCount == 1);
+                acquireCancel.Cancel();
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(() => acquire).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.IsType<OperationCanceledException>(thrown);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.False(session.IsReusable);
+                Assert.Equal(1, tls.DisposeAsyncCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Contains(
+                    logger.Entries,
+                    static entry => entry.EventId.Id == 5417
+                        && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+                await WaitUntilAsync(() =>
+                    pool.IdleSessionCount == 1
+                    && pool.LiveSessionCount == 1
+                    && pool.ActiveLeaseCount == 0
+                    && factory.ConnectAttempts.Count == 2);
+            }
+            finally
+            {
+                releaseWrite.TrySetResult();
+                try
+                {
+                    _ = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+            }
         }
 
         /// <summary>Scripted peer that accepts connect and answers DATE with a non-success status.</summary>
@@ -1790,6 +1965,125 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Completes immediately; no asynchronous timer teardown.</summary>
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
+        /// <summary>Reads one private instance field from <paramref name="session"/>.</summary>
+        /// <param name="session">Session whose transport fields are asserted after disposal.</param>
+        /// <param name="name">Field name, including the leading underscore.</param>
+        /// <returns>The field value, which is null when disposal has cleared it.</returns>
+        private static object? SessionField(NntpProviderSession session, string name)
+        {
+            var field = typeof(NntpProviderSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return field.GetValue(session);
+        }
+
+        /// <summary>
+        /// <see cref="SslStream"/> that forwards I/O to an inner duplex stream and rejects a second write while the first is held.
+        /// This is the overlapping-write failure <see cref="SslStream"/> raises for a QUIT that starts during DATE.
+        /// </summary>
+        private sealed class NestedWriteTlsStream : SslStream
+        {
+            /// <summary>Plaintext duplex stream. Owned by this wrapper.</summary>
+            private readonly Stream _inner;
+
+            /// <summary>Completes when the held write has entered <see cref="WriteAsync"/>.</summary>
+            private readonly TaskCompletionSource _entered;
+
+            /// <summary>Released by the test to let the held write finish.</summary>
+            private readonly TaskCompletionSource _release;
+
+            /// <summary>One while the held write has not left <see cref="WriteAsync"/>.</summary>
+            private int _writeDepth;
+
+            /// <summary>Zero until <see cref="HoldWrites"/> accepts the next write.</summary>
+            private int _holdArmed;
+
+            /// <summary>Entries to <see cref="DisposeAsync"/>.</summary>
+            private int _disposeAsyncCount;
+
+            /// <summary>Wraps <paramref name="inner"/> and closes it when this wrapper is disposed.</summary>
+            /// <param name="inner">Scripted duplex stream. Ownership transfers to this wrapper.</param>
+            /// <param name="entered">Signaled from inside the held write.</param>
+            /// <param name="release">Awaited by the held write.</param>
+            internal NestedWriteTlsStream(Stream inner, TaskCompletionSource entered, TaskCompletionSource release)
+                : base(inner, leaveInnerStreamOpen: false)
+            {
+                _inner = inner;
+                _entered = entered;
+                _release = release;
+            }
+
+            /// <summary>
+            /// When true, the next <see cref="WriteAsync"/> waits on the release gate.
+            /// A write that arrives while that one is still inside <see cref="WriteAsync"/> throws <see cref="NotSupportedException"/>.
+            /// </summary>
+            internal bool HoldWrites { get; set; }
+
+            /// <summary>Gets how many times <see cref="DisposeAsync"/> has been entered.</summary>
+            internal int DisposeAsyncCount => Volatile.Read(ref _disposeAsyncCount);
+
+            /// <inheritdoc />
+            public override bool CanRead => true;
+
+            /// <inheritdoc />
+            public override bool CanWrite => true;
+
+            /// <summary>Reads from the inner duplex stream. No TLS record layer is used.</summary>
+            /// <param name="buffer">Destination for plaintext bytes.</param>
+            /// <param name="cancellationToken">Cancels the inner read.</param>
+            /// <returns>The inner read count.</returns>
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                _inner.ReadAsync(buffer, cancellationToken);
+
+            /// <summary>Flushes the inner duplex stream.</summary>
+            /// <param name="cancellationToken">Cancels the inner flush.</param>
+            /// <returns>The inner flush task.</returns>
+            public override Task FlushAsync(CancellationToken cancellationToken) =>
+                _inner.FlushAsync(cancellationToken);
+
+            /// <summary>
+            /// Forwards a write, or holds the first write after <see cref="HoldWrites"/> is set.
+            /// A second write while the held one is active throws <see cref="NotSupportedException"/>.
+            /// </summary>
+            /// <param name="buffer">Bytes to write to the inner stream after the hold, when this call is the held write.</param>
+            /// <param name="cancellationToken">Cancels the inner write. The hold itself waits on the test gate.</param>
+            /// <returns>A task that completes when the inner write completes, or a faulted task for the overlapping write.</returns>
+            /// <exception cref="NotSupportedException">Another write is already inside this method.</exception>
+            public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                if (Volatile.Read(ref _writeDepth) > 0)
+                {
+                    throw new NotSupportedException("SslStream does not support simultaneous writes.");
+                }
+
+                var holdThis = HoldWrites && Interlocked.Exchange(ref _holdArmed, 1) == 0;
+                if (!holdThis)
+                {
+                    await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                Interlocked.Increment(ref _writeDepth);
+                try
+                {
+                    _entered.TrySetResult();
+                    await _release.Task.ConfigureAwait(false);
+                    await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _writeDepth);
+                }
+            }
+
+            /// <summary>Counts one dispose, then disposes this wrapper and the inner duplex stream.</summary>
+            /// <returns>The base dispose task.</returns>
+            public override ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref _disposeAsyncCount);
+                return base.DisposeAsync();
+            }
         }
     }
 }
