@@ -22,7 +22,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Send and receive buffer sizes are both set to <see cref="NntpSessionOptions.ReceiveBufferBytes"/>.
         /// The TCP connect uses <see cref="NntpSessionOptions.ConnectTimeout"/> linked with <paramref name="cancellationToken"/>.
         /// Implicit TLS then gets another full <see cref="NntpSessionOptions.ConnectTimeout"/>, linked only with <paramref name="cancellationToken"/>.
-        /// Any failure disposes the client and rethrows. The caller disposes the returned stream.
+        /// Any failure, including <see cref="System.Net.Sockets.SocketException"/>, disposes the client and rethrows.
+        /// This factory does not classify the failure. <see cref="NntpProviderSession.ConnectAsync"/> turns a socket failure into a non-reusable provider-failure result.
+        /// The caller disposes the returned stream.
         /// </remarks>
         public async Task<Stream> ConnectAsync(
             BackFillerProviderDefinition provider,

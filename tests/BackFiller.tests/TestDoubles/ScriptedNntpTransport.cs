@@ -173,6 +173,42 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// </summary>
         public bool FaultClientDateWrite { get; set; }
 
+        /// <summary>
+        /// When set, the client stream throws <see cref="SocketException"/> on a QUIT write.
+        /// Connect and other commands are unaffected.
+        /// </summary>
+        public bool FaultClientQuitWrite { get; set; }
+
+        /// <summary>Pipe-cleanup entries. Incremented only when <see cref="DuplexPipeStream"/> completes the pipes.</summary>
+        private int _clientStreamDisposals;
+
+        /// <summary>Entries to <see cref="DuplexPipeStream.DisposeAsync"/>, including calls that skip pipe cleanup.</summary>
+        private int _clientStreamDisposeAsyncInvocations;
+
+        /// <summary>
+        /// How many times the accepted client stream completed its pipes.
+        /// A repeated <see cref="DuplexPipeStream.DisposeAsync"/> does not increment this.
+        /// </summary>
+        internal int ClientStreamDisposeCount => Volatile.Read(ref _clientStreamDisposals);
+
+        /// <summary>
+        /// How many times <see cref="DuplexPipeStream.DisposeAsync"/> was entered.
+        /// This counts every session disposal call, including ones the stream's own cleanup guard ignores.
+        /// </summary>
+        internal int ClientStreamDisposeAsyncCount => Volatile.Read(ref _clientStreamDisposeAsyncInvocations);
+
+        /// <summary>Records one pipe cleanup of the client stream returned by <see cref="AcceptClientAsync"/>.</summary>
+        internal void RecordClientStreamDisposed()
+        {
+            Interlocked.Increment(ref _clientStreamDisposals);
+        }
+
+        /// <summary>Records one entry to <see cref="DuplexPipeStream.DisposeAsync"/> before once-only pipe cleanup.</summary>
+        internal void RecordClientStreamDisposeAsync()
+        {
+            Interlocked.Increment(ref _clientStreamDisposeAsyncInvocations);
+        }
+
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
         public string StartTlsCapabilityLabel { get; set; } = "STARTTLS";
 
@@ -366,6 +402,8 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
     internal sealed class DuplexPipeStream(PipeReader reader, PipeWriter writer, ScriptedNntpServer? owner = null) : Stream
     {
+        /// <summary>One after the first disposing call. Later calls do not complete the pipes again.</summary>
+        private int _disposed;
         /// <inheritdoc />
         public override bool CanRead => true;
 
@@ -423,9 +461,19 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             throw new NotSupportedException();
 
         /// <inheritdoc />
-        /// <remarks>Honors <see cref="ScriptedNntpServer.FaultClientDateWrite"/> on the optional owner.</remarks>
+        /// <remarks>
+        /// Honors <see cref="ScriptedNntpServer.FaultClientDateWrite"/> and
+        /// <see cref="ScriptedNntpServer.FaultClientQuitWrite"/> on the optional owner.
+        /// A QUIT fault throws <see cref="SocketException"/> before any bytes are written.
+        /// </remarks>
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner?.FaultClientQuitWrite == true
+                && buffer.Span.IndexOf("QUIT"u8) >= 0)
+            {
+                throw new SocketException((int)SocketError.ConnectionReset);
+            }
+
             if (owner?.FaultClientDateWrite == true
                 && buffer.Span.IndexOf("DATE"u8) >= 0)
             {
@@ -442,11 +490,22 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <inheritdoc />
         public override void SetLength(long value) => throw new NotSupportedException();
 
+        /// <summary>
+        /// Counts every disposal entry, then lets <see cref="Dispose(bool)"/> complete the pipes once.
+        /// </summary>
+        /// <returns>The completed disposal task from <see cref="Stream.DisposeAsync"/>.</returns>
+        public override ValueTask DisposeAsync()
+        {
+            owner?.RecordClientStreamDisposeAsync();
+            return base.DisposeAsync();
+        }
+
         /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
             {
+                owner?.RecordClientStreamDisposed();
                 reader.Complete();
                 writer.Complete();
             }

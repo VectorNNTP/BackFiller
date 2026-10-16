@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Runtime.ExceptionServices;
 using VectorNNTP.BackFiller.Articles;
@@ -113,7 +114,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <exception cref="ObjectDisposedException">The session was already disposed.</exception>
         /// <remarks>
         /// A 200 or 201 greeting is required. <c>CAPABILITIES</c> is always sent. <c>STARTTLS</c> is sent only when advertised and <see cref="BackFillerProviderDefinition.UseTls"/> is false.
-        /// Protocol, timeout, and I/O failures return a non-reusable <see cref="ArticleRetrievalResult"/> with <see cref="State"/> <see cref="NntpSessionState.Retiring"/>.
+        /// Protocol, timeout, socket, and I/O failures return a non-reusable <see cref="ArticleRetrievalResult"/> with <see cref="State"/> <see cref="NntpSessionState.Retiring"/>.
+        /// <see cref="SocketException"/> is classified here. The reason stored on that result is the exception type name, not the socket message.
         /// The transport connect budget is <see cref="NntpSessionOptions.ConnectTimeout"/>. The greeting and later status lines use <see cref="NntpSessionOptions.CommandTimeout"/>.
         /// The caller still owns disposal of this session when a failure result is returned.
         /// </remarks>
@@ -178,7 +180,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, null, "NNTP connect timed out.", reusable: false);
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or FormatException or InvalidDataException or TimeoutException)
+            catch (Exception ex) when (ex is SocketException or IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or FormatException or InvalidDataException or TimeoutException)
             {
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, null, ex.GetType().Name, reusable: false);
             }
@@ -559,7 +561,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A second call returns immediately.
         /// </summary>
         /// <remarks>
-        /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read. Write and flush failures are ignored.
+        /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read.
+        /// Write and flush failures, including <see cref="SocketException"/>, are logged and do not escape.
+        /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
         /// <see cref="_busy"/> is disposed. <see cref="State"/> ends as <see cref="NntpSessionState.Closed"/>.
         /// </remarks>
         public async ValueTask DisposeAsync()
@@ -580,15 +584,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     await _stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
                     await _stream.FlushAsync(cts.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException ex)
-                {
-                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
-                }
-                catch (IOException ex)
-                {
-                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
-                }
-                catch (ObjectDisposedException ex)
+                catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException)
                 {
                     NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
                 }
