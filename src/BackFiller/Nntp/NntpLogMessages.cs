@@ -249,5 +249,18 @@ namespace VectorNNTP.BackFiller.Nntp
             Level = LogLevel.Debug,
             Message = "{Session}: QUIT failed during dispose error={ErrorType}")]
         internal static partial void WireQuitFailed(ILogger logger, string Session, string ErrorType);
+
+        /// <summary>
+        /// Written at Debug when closing the plaintext transport fails after a pre-handshake STARTTLS error.
+        /// The initiating handshake error remains the connect failure. This event records only the cleanup failure.
+        /// </summary>
+        /// <param name="logger">Logger that receives the debug event.</param>
+        /// <param name="Session"><see cref="NntpProviderSession.WireLogIdentity"/> for the session.</param>
+        /// <param name="ErrorType">Runtime exception type from the transport dispose.</param>
+        [LoggerMessage(
+            EventId = 5418,
+            Level = LogLevel.Debug,
+            Message = "{Session}: STARTTLS transport cleanup failed error={ErrorType}")]
+        internal static partial void WireTlsCleanupFailed(ILogger logger, string Session, string ErrorType);
     }
 }

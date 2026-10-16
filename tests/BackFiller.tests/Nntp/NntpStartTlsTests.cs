@@ -46,6 +46,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             try
             {
                 await publishEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await server.HandshakeCompleted.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(server.TlsHandshakeCompleted);
                 await session.DisposeAsync();
                 releasePublish.TrySetResult();
                 using var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
@@ -62,7 +64,6 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.NotNull(tls);
                 Assert.Equal(1, tls.DisposeCalls);
                 Assert.Equal(1, transport.DisposeCalls);
-                Assert.True(server.TlsHandshakeCompleted);
             }
             finally
             {
@@ -642,6 +643,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Background accept/handshake loop; awaited during <see cref="DisposeAsync"/> with a short timeout.</summary>
             private readonly Task _accept;
+
+            /// <summary>Completes after <see cref="SslStream.AuthenticateAsServerAsync"/> returns, together with <see cref="TlsHandshakeCompleted"/>.</summary>
+            private readonly TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
             /// <summary>Command lines received after the TCP (or post-STARTTLS) session is established.</summary>
             private readonly List<string> _commands = [];
 
@@ -661,6 +665,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Set after a successful STARTTLS server authentication completes.</summary>
             public bool TlsHandshakeCompleted { get; private set; }
+
+            /// <summary>Completes only after the server handshake await returns. Client publication is not this signal.</summary>
+            public Task HandshakeCompleted => _handshakeCompleted.Task;
 
             /// <summary>Client command lines received after TLS, in order; snapshot is thread-safe via lock on the backing list.</summary>
             /// <value>A copy of accumulated command text without trailing line terminators.</value>
@@ -749,6 +756,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                                 cancellationToken)
                             .ConfigureAwait(false);
                         TlsHandshakeCompleted = true;
+                        _handshakeCompleted.TrySetResult();
                         await ReadCommandsAsync(ssl, allowStartTls: false, cancellationToken).ConfigureAwait(false);
                         return;
                     }

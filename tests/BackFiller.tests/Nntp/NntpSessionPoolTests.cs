@@ -1089,6 +1089,137 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// A DATE loop that decided retirement was needed cannot retire the session after a newer keepalive was published.
+        /// The session stays live, idle, and reusable, and the replacement registration still sends DATE.
+        /// </summary>
+        [Fact]
+        public async Task Superseded_keepalive_cannot_retire_a_session_returned_to_idle()
+        {
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(
+                dateStarted: dateStarted,
+                articleStarted: articleStarted,
+                blockArticle: blockArticle));
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            await warmup.DisposeAsync();
+            var firstDelay = await clock.WaitForKeepAliveAsync();
+
+            var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var retirementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var healthCalls = 0;
+            var retirementCalls = 0;
+            Task? superseded = null;
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            pool.BeforeKeepAliveReusabilityCheck = () =>
+            {
+                if (Interlocked.Increment(ref healthCalls) == 1)
+                {
+                    healthEntered.TrySetResult();
+                    return releaseHealth.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.BeforeKeepAliveRetirement = loop =>
+            {
+                if (Interlocked.Increment(ref retirementCalls) == 1)
+                {
+                    superseded = loop;
+                    retirementEntered.TrySetResult();
+                    return releaseRetirement.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            try
+            {
+                firstDelay();
+                await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                var session = lease.Session;
+                download = session.DownloadArticleAsync("<id@example>", CancellationToken.None);
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseHealth.TrySetResult();
+                await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, retirementCalls);
+                blockArticle.TrySetResult();
+                using (var article = await download.WaitAsync(TimeSpan.FromSeconds(5)))
+                {
+                    Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, article.Kind);
+                    Assert.True(article.SessionReusable);
+                }
+
+                await lease.DisposeAsync();
+                var replacement = await clock.WaitForKeepAliveAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                releaseRetirement.TrySetResult();
+                Assert.NotNull(superseded);
+                await superseded.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.True(session.IsReusable);
+                replacement();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                _ = await clock.WaitForKeepAliveAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.True(session.IsReusable);
+            }
+            finally
+            {
+                pool.BeforeKeepAliveReusabilityCheck = null;
+                pool.BeforeKeepAliveRetirement = null;
+                releaseHealth.TrySetResult();
+                releaseRetirement.TrySetResult();
+                blockArticle.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                if (superseded is not null)
+                {
+                    try
+                    {
+                        await superseded.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Pool disposal that retires a session after connect and before issuance does not hand that session out.
         /// Lease, created-session, and connection-number accounting stay at zero, and releasing the fill gate does not throw.
         /// </summary>

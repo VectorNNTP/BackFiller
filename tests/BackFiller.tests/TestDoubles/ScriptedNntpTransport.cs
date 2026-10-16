@@ -185,8 +185,29 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>Set when a non-QUIT command has been flushed and <see cref="HoldAfterCommandWrite"/> is waiting.</summary>
         public TaskCompletionSource? CommandWriteFlushed { get; set; }
 
+        /// <summary>
+        /// When set, the first client read waits here before touching the pipe.
+        /// Used to dispose the session after transport publication and before the greeting read returns.
+        /// </summary>
+        public TaskCompletionSource? HoldInitialRead { get; set; }
+
+        /// <summary>Set when the first client read has entered and <see cref="HoldInitialRead"/> is waiting.</summary>
+        public TaskCompletionSource? InitialReadEntered { get; set; }
+
+        /// <summary>
+        /// When set, the first <see cref="DuplexPipeStream.DisposeAsync"/> closes the pipes and then throws <see cref="IOException"/>.
+        /// Later dispose calls do not throw.
+        /// </summary>
+        public bool FaultClientDispose { get; set; }
+
         /// <summary>Zero until <see cref="TryBeginStatusLineHold"/> accepts the first completed status line.</summary>
         private int _statusLineHoldStarted;
+
+        /// <summary>Zero until <see cref="TryBeginInitialReadHold"/> accepts the first client read.</summary>
+        private int _initialReadHoldStarted;
+
+        /// <summary>Zero until <see cref="TryConsumeDisposeFault"/> accepts the first throwing dispose.</summary>
+        private int _disposeFaultUsed;
 
         /// <summary>Zero until <see cref="TryBeginCommandWriteHold"/> accepts the first non-QUIT write.</summary>
         private int _commandWriteHoldStarted;
@@ -249,6 +270,25 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         internal bool TryBeginStatusLineHold()
         {
             return HoldStatusLineReturn is not null && Interlocked.Exchange(ref _statusLineHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts the first client read while <see cref="HoldInitialRead"/> is set, before the pipe is read.
+        /// </summary>
+        /// <returns><see langword="true"/> when this read must wait before observing greeting bytes or a closed pipe.</returns>
+        internal bool TryBeginInitialReadHold()
+        {
+            return HoldInitialRead is not null && Interlocked.Exchange(ref _initialReadHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts one throwing dispose while <see cref="FaultClientDispose"/> is set.
+        /// The pipes are already completed by the caller.
+        /// </summary>
+        /// <returns><see langword="true"/> when this dispose must throw <see cref="IOException"/>.</returns>
+        internal bool TryConsumeDisposeFault()
+        {
+            return FaultClientDispose && Interlocked.Exchange(ref _disposeFaultUsed, 1) == 0;
         }
 
         /// <summary>
@@ -498,6 +538,12 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <inheritdoc />
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner is not null && owner.TryBeginInitialReadHold())
+            {
+                owner.InitialReadEntered?.TrySetResult();
+                await owner.HoldInitialRead!.Task.ConfigureAwait(false);
+            }
+
             while (true)
             {
                 var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -576,10 +622,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// Counts every disposal entry, then lets <see cref="Dispose(bool)"/> complete the pipes once.
         /// </summary>
         /// <returns>The completed disposal task from <see cref="Stream.DisposeAsync"/>.</returns>
-        public override ValueTask DisposeAsync()
+        public override async ValueTask DisposeAsync()
         {
             owner?.RecordClientStreamDisposeAsync();
-            return base.DisposeAsync();
+            await base.DisposeAsync().ConfigureAwait(false);
+            if (owner?.TryConsumeDisposeFault() == true)
+            {
+                throw new IOException("plaintext dispose failed");
+            }
         }
 
         /// <inheritdoc />
