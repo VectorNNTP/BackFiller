@@ -1,4 +1,5 @@
 using System.Net.Security;
+using System.Reflection;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,72 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
     {
         /// <summary>Known AUTHINFO password used in scripted servers; must appear redacted in wire logs.</summary>
         private const string Password = "super-secret-nntp-password";
+
+        /// <summary>
+        /// A handshake that finishes while disposal owns the session does not publish the TLS wrapper.
+        /// The wrapper and the plaintext transport are each disposed once, and the session fields stay clear.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_after_successful_starttls_does_not_publish_the_tls_stream()
+        {
+            var publishEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePublish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var certificate = TestListenerCertificates.CreateSelfSigned("nntp-starttls-dispose.test");
+            await using var server = new LoopbackStartTlsNntpServer(certificate);
+            var transport = new DisposeCountingTransport();
+            CountingSslStream? tls = null;
+            var session = CreateSession(host: "127.0.0.1", port: server.Port, acceptAnyCertificate: true);
+            session.TlsStreamFactory = inner =>
+            {
+                tls = new CountingSslStream(inner);
+                return tls;
+            };
+            session.BeforePublishUpgradedTransport = ssl =>
+            {
+                Assert.NotSame(ssl, SessionField(session, "_stream"));
+                publishEntered.TrySetResult();
+                return releasePublish.Task;
+            };
+            var connect = session.ConnectAsync(transport, CancellationToken.None);
+            try
+            {
+                await publishEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await server.HandshakeCompleted.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(server.TlsHandshakeCompleted);
+                await session.DisposeAsync();
+                releasePublish.TrySetResult();
+                using var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal("NNTP session was disposed during STARTTLS.", result.Reason);
+                Assert.DoesNotContain("ArgumentNull", result.Reason, StringComparison.Ordinal);
+                Assert.DoesNotContain("NullReference", result.Reason, StringComparison.Ordinal);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.False(session.IsReusable);
+                Assert.NotNull(tls);
+                Assert.Equal(1, tls.DisposeCalls);
+                Assert.Equal(1, transport.DisposeCalls);
+            }
+            finally
+            {
+                session.BeforePublishUpgradedTransport = null;
+                session.TlsStreamFactory = null;
+                releasePublish.TrySetResult();
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
 
         /// <summary>
         /// Loopback server: CAPABILITIES, STARTTLS 382, TLS handshake, then AUTHINFO with redacted wire logs.
@@ -378,6 +445,188 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 },
                 logger ?? NullLogger.Instance);
 
+        /// <summary>Reads a private instance field from <paramref name="session"/> after the operation under test has quiesced.</summary>
+        /// <param name="session">Session whose field is observed.</param>
+        /// <param name="name">Field name, including its underscore prefix.</param>
+        /// <returns>The field value, or null when the session has released it.</returns>
+        private static object? SessionField(NntpProviderSession session, string name)
+        {
+            var field = typeof(NntpProviderSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return field.GetValue(session);
+        }
+
+        /// <summary>
+        /// TCP transport whose returned stream counts dispose calls. Used to prove the plaintext transport is closed once.
+        /// </summary>
+        private sealed class DisposeCountingTransport : INntpTransportFactory
+        {
+            /// <summary>Dispose entries observed on the stream returned from <see cref="ConnectAsync"/>.</summary>
+            private int _disposeCalls;
+
+            /// <summary>Gets how many times the connected stream's dispose path ran.</summary>
+            public int DisposeCalls => Volatile.Read(ref _disposeCalls);
+
+            /// <summary>Connects to the provider and returns a stream that counts disposal and owns the <see cref="TcpClient"/>.</summary>
+            /// <param name="provider">Endpoint. Implicit TLS is not applied; STARTTLS is the session's job.</param>
+            /// <param name="options">Connect timeout.</param>
+            /// <param name="cancellationToken">Cancels the TCP connect.</param>
+            /// <returns>The counting stream.</returns>
+            public async Task<Stream> ConnectAsync(
+                BackFillerProviderDefinition provider,
+                NntpSessionOptions options,
+                CancellationToken cancellationToken)
+            {
+                var client = new TcpClient();
+                try
+                {
+                    using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    connectCts.CancelAfter(options.ConnectTimeout);
+                    await client.ConnectAsync(provider.Host, provider.Port, connectCts.Token).ConfigureAwait(false);
+                    return new DisposeCountingStream(client, () => Interlocked.Increment(ref _disposeCalls));
+                }
+                catch
+                {
+                    client.Dispose();
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Network stream that records each dispose entry and closes the socket once.
+        /// A second dispose does not close the socket again, but it still increments the counter.
+        /// </summary>
+        /// <param name="client">Connected client disposed with the first disposing call.</param>
+        /// <param name="recordDispose">Increments the factory counter on every dispose entry.</param>
+        private sealed class DisposeCountingStream(TcpClient client, Action recordDispose) : Stream
+        {
+            /// <summary>Inner network stream. Closed on the first disposing call.</summary>
+            private readonly Stream _inner = client.GetStream();
+
+            /// <summary>One after the first disposing call closes <see cref="_inner"/> and <paramref name="client"/>.</summary>
+            private int _closed;
+
+            /// <inheritdoc />
+            public override bool CanRead => _inner.CanRead;
+
+            /// <inheritdoc />
+            public override bool CanSeek => false;
+
+            /// <inheritdoc />
+            public override bool CanWrite => _inner.CanWrite;
+
+            /// <inheritdoc />
+            public override long Length => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            /// <inheritdoc />
+            public override void Flush() => _inner.Flush();
+
+            /// <inheritdoc />
+            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+
+            /// <inheritdoc />
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                _inner.ReadAsync(buffer, cancellationToken);
+
+            /// <inheritdoc />
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+                _inner.WriteAsync(buffer, cancellationToken);
+
+            /// <inheritdoc />
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            /// <summary>Records the call, then closes the socket on the first disposing entry.</summary>
+            /// <param name="disposing"><see langword="true"/> when called from <see cref="IDisposable.Dispose"/>.</param>
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    recordDispose();
+                    if (Interlocked.Exchange(ref _closed, 1) == 0)
+                    {
+                        _inner.Dispose();
+                        client.Dispose();
+                    }
+                }
+
+                base.Dispose(disposing);
+            }
+
+            /// <summary>Records the call, then closes the socket on the first disposing entry.</summary>
+            /// <returns>A completed task. The socket close is synchronous.</returns>
+            public override ValueTask DisposeAsync()
+            {
+                recordDispose();
+                if (Interlocked.Exchange(ref _closed, 1) == 0)
+                {
+                    _inner.Dispose();
+                    client.Dispose();
+                }
+
+                return default;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="SslStream"/> that counts dispose entries. The inner stream stays owned by the wrapper.
+        /// </summary>
+        private sealed class CountingSslStream : SslStream
+        {
+            /// <summary>Dispose entries, including a second call.</summary>
+            private int _disposeCalls;
+
+            /// <summary>Wraps <paramref name="inner"/> and closes it when this wrapper is disposed.</summary>
+            /// <param name="inner">Plaintext transport. Ownership transfers to this wrapper.</param>
+            public CountingSslStream(Stream inner)
+                : base(inner, leaveInnerStreamOpen: false)
+            {
+            }
+
+            /// <summary>Gets how many disposing calls this wrapper has observed.</summary>
+            public int DisposeCalls => Volatile.Read(ref _disposeCalls);
+
+            /// <summary>Counts one asynchronous dispose, then disposes the base wrapper and its inner stream.</summary>
+            /// <returns>The base dispose task.</returns>
+            /// <remarks>
+            /// <see cref="SslStream.DisposeAsync"/> closes the wrapper without calling <see cref="Dispose(bool)"/> with <see langword="true"/>.
+            /// The synchronous override still counts a direct <see cref="IDisposable.Dispose"/>.
+            /// </remarks>
+            public override ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref _disposeCalls);
+                return base.DisposeAsync();
+            }
+
+            /// <summary>Counts a synchronous disposing call, then disposes the base wrapper and its inner stream.</summary>
+            /// <param name="disposing"><see langword="true"/> when called from <see cref="IDisposable.Dispose"/>.</param>
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    Interlocked.Increment(ref _disposeCalls);
+                }
+
+                base.Dispose(disposing);
+            }
+        }
+
         /// <summary>
         /// Loopback TCP NNTP server performing STARTTLS upgrade for integration-style connect tests.
         /// </summary>
@@ -394,6 +643,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Background accept/handshake loop; awaited during <see cref="DisposeAsync"/> with a short timeout.</summary>
             private readonly Task _accept;
+
+            /// <summary>Completes after <see cref="SslStream.AuthenticateAsServerAsync"/> returns, together with <see cref="TlsHandshakeCompleted"/>.</summary>
+            private readonly TaskCompletionSource _handshakeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
             /// <summary>Command lines received after the TCP (or post-STARTTLS) session is established.</summary>
             private readonly List<string> _commands = [];
 
@@ -413,6 +665,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Set after a successful STARTTLS server authentication completes.</summary>
             public bool TlsHandshakeCompleted { get; private set; }
+
+            /// <summary>Completes only after the server handshake await returns. Client publication is not this signal.</summary>
+            public Task HandshakeCompleted => _handshakeCompleted.Task;
 
             /// <summary>Client command lines received after TLS, in order; snapshot is thread-safe via lock on the backing list.</summary>
             /// <value>A copy of accumulated command text without trailing line terminators.</value>
@@ -501,6 +756,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                                 cancellationToken)
                             .ConfigureAwait(false);
                         TlsHandshakeCompleted = true;
+                        _handshakeCompleted.TrySetResult();
                         await ReadCommandsAsync(ssl, allowStartTls: false, cancellationToken).ConfigureAwait(false);
                         return;
                     }

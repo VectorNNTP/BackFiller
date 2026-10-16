@@ -42,6 +42,50 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Zero until <see cref="DisposeAsync"/> runs. A second dispose returns immediately.</summary>
         private int _disposed;
 
+        /// <summary>
+        /// Serializes publication of the connected transport and of a STARTTLS wrapper with <see cref="DisposeAsync"/>'s capture of <see cref="_stream"/>.
+        /// Not held across connect, the handshake, test gates, or any other await.
+        /// </summary>
+        private readonly Lock _transportGate = new();
+
+        /// <summary>
+        /// One while <see cref="UpgradeExistingTransportToTlsAsync"/> owns the plaintext transport.
+        /// <see cref="DisposeAsync"/> then leaves disposal of that transport to the upgrade.
+        /// Guarded by <see cref="_transportGate"/>.
+        /// </summary>
+        private int _upgradeOwnsTransport;
+
+        /// <summary>
+        /// Cancelled by the first <see cref="DisposeAsync"/> so an in-progress STARTTLS handshake ends
+        /// without the caller's token. A callback exception is logged and does not skip the rest of disposal.
+        /// Not disposed here: the handshake may still be linking this source.
+        /// </summary>
+        private readonly CancellationTokenSource _handshakeCancellation = new();
+
+        /// <summary>
+        /// Test gate invoked after STARTTLS has captured its transport and before the handshake reads that transport.
+        /// Null in production. Disposal during the gate must not make the handshake observe a null field.
+        /// </summary>
+        private Func<Task>? _beforeStartTlsHandshake;
+
+        /// <summary>
+        /// Test gate invoked after the TLS wrapper exists and before it is stored in <see cref="_stream"/>.
+        /// Null in production. The argument is that wrapper. The delegate runs outside <see cref="_transportGate"/>.
+        /// </summary>
+        private Func<Stream, Task>? _beforePublishUpgradedTransport;
+
+        /// <summary>
+        /// Test factory for the STARTTLS <see cref="SslStream"/>. Null in production, which uses <see cref="SslStream"/> directly.
+        /// The factory must leave the inner stream owned by the wrapper.
+        /// </summary>
+        private Func<Stream, SslStream>? _tlsStreamFactory;
+
+        /// <summary>
+        /// Test gate after the pre-lock ARTICLE readiness check and before <see cref="_busy"/> is acquired.
+        /// Null in production.
+        /// </summary>
+        private Func<Task>? _beforeArticleBusyWait;
+
         /// <summary>Set when a command failure must keep the session out of the idle pool. Sticky for the session lifetime.</summary>
         private bool _unhealthy;
 
@@ -89,6 +133,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>
         /// Gets the session lifecycle updated by connect, <c>ARTICLE</c>, <c>DATE</c>, and <see cref="DisposeAsync"/>.
         /// </summary>
+        /// <remarks>
+        /// After <see cref="DisposeAsync"/> sets <see cref="_disposed"/>, later command paths do not assign this property.
+        /// <see cref="DisposeAsync"/> is what leaves it <see cref="NntpSessionState.Closed"/>.
+        /// </remarks>
         internal NntpSessionState State { get; private set; }
 
         /// <summary>Gets a value indicating whether the session may return to the idle pool.</summary>
@@ -100,6 +148,50 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>Gets the MySQL <c>keepalive</c> interval this session was constructed with.</summary>
         internal byte KeepAliveSeconds => _provider.KeepAliveSeconds;
+
+        /// <summary>
+        /// Pauses ARTICLE after the pre-lock readiness check and before <see cref="DownloadArticleAsync"/> waits for <see cref="_busy"/>.
+        /// Null in production.
+        /// </summary>
+        /// <remarks>
+        /// A test uses this to prove the check ran while DATE still holds <see cref="_busy"/>, then lets DATE fail before ARTICLE waits.
+        /// The gate does not run again after the lock is acquired.
+        /// </remarks>
+        internal Func<Task>? BeforeArticleBusyWait
+        {
+            get => _beforeArticleBusyWait;
+            set => _beforeArticleBusyWait = value;
+        }
+
+        /// <summary>
+        /// Pauses STARTTLS after the transport is captured and before <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> uses it.
+        /// Null unless a test is holding that window.
+        /// </summary>
+        internal Func<Task>? BeforeStartTlsHandshake
+        {
+            get => _beforeStartTlsHandshake;
+            set => _beforeStartTlsHandshake = value;
+        }
+
+        /// <summary>
+        /// Pauses STARTTLS after the handshake returns a wrapper and before that wrapper is published.
+        /// Null unless a test is holding that window.
+        /// </summary>
+        internal Func<Stream, Task>? BeforePublishUpgradedTransport
+        {
+            get => _beforePublishUpgradedTransport;
+            set => _beforePublishUpgradedTransport = value;
+        }
+
+        /// <summary>
+        /// Replaces <see cref="SslStream"/> construction for STARTTLS. Null in production.
+        /// </summary>
+        /// <remarks>The returned stream must own its inner stream, matching <see cref="NntpTlsClient.AuthenticateAsClientAsync"/>.</remarks>
+        internal Func<Stream, SslStream>? TlsStreamFactory
+        {
+            get => _tlsStreamFactory;
+            set => _tlsStreamFactory = value;
+        }
 
         /// <summary>
         /// Connects, validates the greeting, issues CAPABILITIES, upgrades via STARTTLS
@@ -117,6 +209,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Protocol, timeout, socket, and I/O failures return a non-reusable <see cref="ArticleRetrievalResult"/> with <see cref="State"/> <see cref="NntpSessionState.Retiring"/>.
         /// <see cref="SocketException"/> is classified here. The reason stored on that result is the exception type name, not the socket message.
         /// The transport connect budget is <see cref="NntpSessionOptions.ConnectTimeout"/>. The greeting and later status lines use <see cref="NntpSessionOptions.CommandTimeout"/>.
+        /// The connected stream is published under <see cref="_transportGate"/> after <see cref="INntpTransportFactory.ConnectAsync"/> returns.
+        /// The gate is not held across that connect. Disposal that wins first leaves the fields clear, and this method disposes the unpublished stream once.
         /// The caller still owns disposal of this session when a failure result is returned.
         /// </remarks>
         internal async Task<ArticleRetrievalResult?> ConnectAsync(
@@ -125,7 +219,7 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             ArgumentNullException.ThrowIfNull(transport);
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
-            State = NntpSessionState.Connecting;
+            AssignState(NntpSessionState.Connecting);
             NntpLogMessages.WireConnecting(
                 _logger,
                 _wireIdentity,
@@ -136,9 +230,16 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 connectCts.CancelAfter(_options.ConnectTimeout);
-                _stream = await transport.ConnectAsync(_provider, _options, connectCts.Token).ConfigureAwait(false);
-                _reader = new NntpStreamReader(_stream, _options.ReceiveBufferBytes);
-                State = NntpSessionState.Connected;
+                var connected = await transport.ConnectAsync(_provider, _options, connectCts.Token).ConfigureAwait(false);
+                if (!TryPublishConnectedTransport(connected))
+                {
+                    await connected.DisposeAsync().ConfigureAwait(false);
+                    return ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        "NNTP session was disposed during connect.",
+                        sessionReusable: false);
+                }
 
                 var greeting = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
                 if (greeting is null)
@@ -168,7 +269,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     return auth;
                 }
 
-                State = NntpSessionState.Ready;
+                AssignState(NntpSessionState.Ready);
                 NntpLogMessages.SessionReady(_logger, _provider.Backbone, _provider.Host, _provider.Port, _provider.UseTls);
                 return null;
             }
@@ -216,8 +317,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>
         /// A non-ASCII message-id fails before the lock is taken and leaves the session reusable.
         /// A closed or retiring session, or one whose reader or stream is missing, returns a non-reusable provider failure without taking the lock and without setting <see cref="_unhealthy"/>.
+        /// After <see cref="_busy"/> is acquired, <see cref="IsReusable"/> is checked again before <see cref="State"/> becomes <see cref="NntpSessionState.Busy"/> and before ARTICLE is written.
+        /// A DATE failure that marked the session unhealthy while this call waited returns that same non-reusable provider failure and does not write ARTICLE.
         /// A status-line timeout becomes <see cref="TimeoutException"/> inside <see cref="ReadStatusAsync"/> and is then classified as provider failure whose reason is that exception's type name.
         /// A payload timeout is classified as provider failure with the reason <c>ARTICLE timed out.</c>
+        /// Disposal during the command clears the session fields and disposes <see cref="_busy"/>. The in-flight call keeps the reader and stream it already captured.
+        /// <see cref="ObjectDisposedException"/> from releasing that disposed gate is ignored so the classified result is what the caller observes.
         /// </remarks>
         internal async Task<ArticleRetrievalResult> DownloadArticleAsync(
             string messageId,
@@ -232,7 +337,8 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
-            if (_reader is null || _stream is null || State is NntpSessionState.Closed or NntpSessionState.Retiring)
+            var reader = _reader;
+            if (reader is null || _stream is null || State is NntpSessionState.Closed or NntpSessionState.Retiring)
             {
                 return WithCommandTimestamp(ArticleRetrievalResult.Failed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -250,12 +356,26 @@ namespace VectorNNTP.BackFiller.Nntp
                     sessionReusable: true));
             }
 
+            if (_beforeArticleBusyWait is { } beforeBusy)
+            {
+                await beforeBusy().ConfigureAwait(false);
+            }
+
             await _busy.WaitAsync(cancellationToken).ConfigureAwait(false);
             var previous = State;
-            State = NntpSessionState.Busy;
             ExceptionDispatchInfo? consumerError = null;
             try
             {
+                if (!IsReusable)
+                {
+                    return WithCommandTimestamp(ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        "NNTP session is not ready.",
+                        sessionReusable: false));
+                }
+
+                AssignState(NntpSessionState.Busy);
                 var commandLength = NntpProtocolIo.ArticlePrefix.Length + messageIdBytes.Length + NntpProtocolIo.Crlf.Length;
                 var command = ArrayPool<byte>.Shared.Rent(commandLength);
                 try
@@ -293,7 +413,7 @@ namespace VectorNNTP.BackFiller.Nntp
                         byte[] payload;
                         try
                         {
-                            payload = await _reader
+                            payload = await reader
                                 .ReadArticlePayloadAsync(maxArticleBytes, _options.ReceiveTimeout, cancellationToken)
                                 .ConfigureAwait(false);
                             NntpLogMessages.WireArticlePayloadComplete(_logger, _wireIdentity, payload.Length);
@@ -319,7 +439,7 @@ namespace VectorNNTP.BackFiller.Nntp
 
                         if (payload.Length == 0 || !NntpProtocolIo.HasHeaderBodySeparator(payload))
                         {
-                            State = NntpSessionState.Ready;
+                            AssignState(NntpSessionState.Ready);
                             return WithCommandTimestamp(ArticleRetrievalResult.Failed(
                                 ArticleRetrievalKind.InvalidArticle,
                                 code,
@@ -327,14 +447,14 @@ namespace VectorNNTP.BackFiller.Nntp
                                 sessionReusable: true));
                         }
 
-                        State = NntpSessionState.Ready;
+                        AssignState(NntpSessionState.Ready);
                         return WithCommandTimestamp(ArticleRetrievalResult.Retrieved(code, text, new RetrievedArticle(payload)));
                     }
 
                     var accepted = false;
                     try
                     {
-                        _ = await _reader.ReadArticlePayloadAsync(
+                        _ = await reader.ReadArticlePayloadAsync(
                                 maxArticleBytes,
                                 _options.ReceiveTimeout,
                                 memory =>
@@ -378,7 +498,7 @@ namespace VectorNNTP.BackFiller.Nntp
 
                     if (!accepted)
                     {
-                        State = NntpSessionState.Ready;
+                        AssignState(NntpSessionState.Ready);
                         return WithCommandTimestamp(ArticleRetrievalResult.Failed(
                             ArticleRetrievalKind.InvalidArticle,
                             code,
@@ -386,13 +506,13 @@ namespace VectorNNTP.BackFiller.Nntp
                             sessionReusable: true));
                     }
 
-                    State = NntpSessionState.Ready;
+                    AssignState(NntpSessionState.Ready);
                     return WithCommandTimestamp(ArticleRetrievalResult.Retrieved(code, text));
                 }
 
                 if (code == NntpStatusCode.NoArticleWithMessageId)
                 {
-                    State = NntpSessionState.Ready;
+                    AssignState(NntpSessionState.Ready);
                     return WithCommandTimestamp(ArticleRetrievalResult.Failed(
                         ArticleRetrievalKind.ArticleNotFound,
                         code,
@@ -435,10 +555,18 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 if (State == NntpSessionState.Busy)
                 {
-                    State = previous;
+                    AssignState(previous);
                 }
 
-                _ = _busy.Release();
+                try
+                {
+                    _ = _busy.Release();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // DisposeAsync disposes this gate while ARTICLE is still inside it.
+                    // The try block already classified the failed read or write. Releasing a disposed gate must not replace that result.
+                }
             }
 
             if (consumerError is not null)
@@ -495,7 +623,7 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             var previous = State;
-            State = NntpSessionState.Busy;
+            AssignState(NntpSessionState.Busy);
             var wrote = false;
             try
             {
@@ -521,7 +649,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     return false;
                 }
 
-                State = NntpSessionState.Ready;
+                AssignState(NntpSessionState.Ready);
                 return true;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -532,7 +660,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     return false;
                 }
 
-                State = previous;
+                AssignState(previous);
                 return true;
             }
             catch (OperationCanceledException)
@@ -549,7 +677,7 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 if (State == NntpSessionState.Busy)
                 {
-                    State = previous;
+                    AssignState(previous);
                 }
 
                 _ = _busy.Release();
@@ -562,34 +690,63 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <remarks>
         /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read.
-        /// Write and flush failures, including <see cref="SocketException"/>, are logged and do not escape.
+        /// Write and flush failures, including <see cref="SocketException"/> and <see cref="NotSupportedException"/> from an overlapping <see cref="SslStream"/> write, are logged and do not escape.
+        /// The transport is still disposed once after that best-effort write.
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
+        /// The transport reference is captured under <see cref="_transportGate"/> before any await, and the fields are cleared there.
+        /// A STARTTLS upgrade that already owns the plaintext transport disposes the TLS wrapper itself. This method does not dispose that transport again.
+        /// The first call cancels the session handshake token, so a handshake still inside <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> ends even when the caller's token is not cancelled.
+        /// <see cref="AggregateException"/> or <see cref="ObjectDisposedException"/> from that cancellation is logged and does not skip transport disposal, <see cref="_busy"/> disposal, or the transition to <see cref="NntpSessionState.Closed"/>.
+        /// An upgrade that publishes before this capture is the stream that is closed here, so the wrapper is not left on a closed session.
+        /// After the transport dispose is attempted, <see cref="_stream"/> and <see cref="_reader"/> stay clear.
+        /// That drops the receive buffer and the article scratch buffer owned by the reader.
+        /// Bytes already copied into a <see cref="RetrievedArticle"/> stay with that article.
+        /// An in-flight read holds the reader on its own stack until it returns; clearing the fields does not mutate that reader.
         /// <see cref="_busy"/> is disposed. <see cref="State"/> ends as <see cref="NntpSessionState.Closed"/>.
+        /// Command paths assign <see cref="State"/> through <see cref="AssignState"/>, which returns once <see cref="_disposed"/> is set, so they do not replace that terminal value.
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            Stream? stream;
+            lock (_transportGate)
             {
-                return;
+                if (Interlocked.Exchange(ref _disposed, 1) == 1)
+                {
+                    return;
+                }
+
+                stream = _upgradeOwnsTransport == 1 ? null : _stream;
+
+                _stream = null;
+                _reader = null;
+            }
+
+            try
+            {
+                await _handshakeCancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
+            {
+                NntpLogMessages.WireHandshakeCancellationFailed(_logger, _wireIdentity, ex.GetType().Name);
             }
 
             State = NntpSessionState.Retiring;
             NntpLogMessages.WireRetiring(_logger, _wireIdentity);
-            if (_stream is not null)
+            if (stream is not null)
             {
                 try
                 {
                     NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await _stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
-                    await _stream.FlushAsync(cts.Token).ConfigureAwait(false);
+                    await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
+                    await stream.FlushAsync(cts.Token).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException)
+                catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException or NotSupportedException)
                 {
                     NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
                 }
 
-                await _stream.DisposeAsync().ConfigureAwait(false);
+                await stream.DisposeAsync().ConfigureAwait(false);
             }
 
             _busy.Dispose();
@@ -690,7 +847,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 return FailClosed(ArticleRetrievalKind.ProviderFailure, code, text, reusable: false);
             }
 
-            if (_reader is not null && _reader.BufferedByteCount != 0)
+            if (_reader is { } buffered && buffered.BufferedByteCount != 0)
             {
                 return FailClosed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -702,18 +859,46 @@ namespace VectorNNTP.BackFiller.Nntp
             return await UpgradeExistingTransportToTlsAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        /// <summary>Wraps <see cref="_stream"/> with TLS and installs a new reader over the encrypted stream.</summary>
-        /// <param name="cancellationToken">Cancels the handshake together with <see cref="NntpSessionOptions.ConnectTimeout"/>.</param>
+        /// <summary>Wraps the captured transport with TLS and installs a new reader over the encrypted stream.</summary>
+        /// <param name="cancellationToken">
+        /// Cancels the handshake together with <see cref="NntpSessionOptions.ConnectTimeout"/> and the token cancelled by <see cref="DisposeAsync"/>.
+        /// </param>
         /// <returns><see langword="null"/> when the handshake completed. A handshake exception other than cancellation returns a non-reusable provider failure.</returns>
         /// <remarks>
-        /// There is no post-handshake greeting read. On failure the fields are cleared.
-        /// <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> closes <see cref="_stream"/> when the handshake throws.
+        /// The plaintext transport is captured under <see cref="_transportGate"/> and then owned by this method until publication or failure.
+        /// The handshake uses that local, not a later read of <see cref="_stream"/>. <see cref="_transportGate"/> is not held across the handshake or either test gate.
+        /// <see cref="BeforeStartTlsHandshake"/> runs after that capture. <see cref="BeforePublishUpgradedTransport"/> runs after the wrapper exists and before publication.
+        /// Both gates are null in production.
+        /// Publication stores the wrapper only when <see cref="DisposeAsync"/> has not won. A lost publication disposes the wrapper, which closes the plaintext transport, and does not store it.
+        /// There is no post-handshake greeting read. On handshake failure the fields are cleared unless disposal already cleared them.
+        /// <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> closes the captured transport when the handshake throws.
+        /// An exception from the pre-handshake gate or from <see cref="NntpLogMessages.WireTlsHandshakeStarting"/> clears upgrade ownership and disposes the plaintext transport once, then propagates.
+        /// A transport exception from that dispose is logged and does not replace the initiating exception.
         /// Cancellation is rethrown after the fields are cleared so <see cref="ConnectAsync"/> can classify it.
         /// </remarks>
         private async Task<ArticleRetrievalResult?> UpgradeExistingTransportToTlsAsync(
             CancellationToken cancellationToken)
         {
-            if (_stream is null)
+            Stream? stream = null;
+            lock (_transportGate)
+            {
+                if (Volatile.Read(ref _disposed) == 1)
+                {
+                    return ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        "NNTP stream is not open for STARTTLS.",
+                        sessionReusable: false);
+                }
+
+                if (_stream is not null)
+                {
+                    stream = _stream;
+                    _upgradeOwnsTransport = 1;
+                }
+            }
+
+            if (stream is null)
             {
                 return FailClosed(
                     ArticleRetrievalKind.ProviderFailure,
@@ -722,36 +907,194 @@ namespace VectorNNTP.BackFiller.Nntp
                     reusable: false);
             }
 
-            NntpLogMessages.WireTlsHandshakeStarting(_logger, _wireIdentity);
             try
             {
-                var ssl = await NntpTlsClient.AuthenticateAsClientAsync(
-                        _stream,
+                if (_beforeStartTlsHandshake is { } beforeHandshake)
+                {
+                    await beforeHandshake().ConfigureAwait(false);
+                }
+
+                NntpLogMessages.WireTlsHandshakeStarting(_logger, _wireIdentity);
+            }
+            catch (Exception)
+            {
+                try
+                {
+                    await AbandonUpgradeTransportAsync(stream).ConfigureAwait(false);
+                }
+                catch (Exception cleanup) when (cleanup is IOException or ObjectDisposedException or InvalidOperationException or SocketException)
+                {
+                    NntpLogMessages.WireTlsCleanupFailed(_logger, _wireIdentity, cleanup.GetType().Name);
+                }
+
+                throw;
+            }
+
+            SslStream ssl;
+            try
+            {
+                using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    _handshakeCancellation.Token);
+                ssl = await NntpTlsClient.AuthenticateAsClientAsync(
+                        stream,
                         _provider.Host,
                         _options.ConnectTimeout,
                         _options.ServerCertificateValidationCallback,
-                        cancellationToken)
+                        handshakeCts.Token,
+                        _tlsStreamFactory)
                     .ConfigureAwait(false);
-                _stream = ssl;
-                _reader = new NntpStreamReader(_stream, _options.ReceiveBufferBytes);
-                NntpLogMessages.WireTlsHandshakeCompleted(_logger, _wireIdentity);
-                return null;
+            }
+            catch (OperationCanceledException) when (Volatile.Read(ref _disposed) != 0 && !cancellationToken.IsCancellationRequested)
+            {
+                ReleaseUpgradeOwnership();
+                _unhealthy = true;
+                return ArticleRetrievalResult.Failed(
+                    ArticleRetrievalKind.ProviderFailure,
+                    null,
+                    "NNTP session was disposed during STARTTLS.",
+                    sessionReusable: false);
             }
             catch (OperationCanceledException)
             {
-                _stream = null;
-                _reader = null;
+                ReleaseUpgradeOwnership();
                 throw;
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or AuthenticationException or TimeoutException)
             {
-                _stream = null;
-                _reader = null;
+                ReleaseUpgradeOwnership();
+                if (Volatile.Read(ref _disposed) == 1)
+                {
+                    _unhealthy = true;
+                    return ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        $"TLS handshake failed ({ex.GetType().Name}).",
+                        sessionReusable: false);
+                }
+
                 return FailClosed(
                     ArticleRetrievalKind.ProviderFailure,
                     null,
                     $"TLS handshake failed ({ex.GetType().Name}).",
                     reusable: false);
+            }
+
+            var published = false;
+            try
+            {
+                if (_beforePublishUpgradedTransport is { } beforePublish)
+                {
+                    await beforePublish(ssl).ConfigureAwait(false);
+                }
+
+                published = TryPublishUpgradedTransport(ssl);
+                if (!published)
+                {
+                    _unhealthy = true;
+                    return ArticleRetrievalResult.Failed(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        "NNTP session was disposed during STARTTLS.",
+                        sessionReusable: false);
+                }
+
+                NntpLogMessages.WireTlsHandshakeCompleted(_logger, _wireIdentity);
+                return null;
+            }
+            finally
+            {
+                if (!published)
+                {
+                    ReleaseUpgradeOwnership();
+                    await ssl.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <summary>Stores <paramref name="connected"/> as the session transport when disposal has not won.</summary>
+        /// <param name="connected">Stream returned by the transport factory. The caller disposes it when this returns <see langword="false"/>.</param>
+        /// <returns><see langword="true"/> when <paramref name="connected"/> is now <see cref="_stream"/> and <see cref="State"/> is <see cref="NntpSessionState.Connected"/>.</returns>
+        /// <remarks>
+        /// Does not await. A disposal that already set <see cref="_disposed"/> wins and this method does not publish.
+        /// <see cref="State"/> is set in the same lock so a later dispose cannot observe a published transport whose state was still <see cref="NntpSessionState.Connecting"/>, and this method cannot overwrite <see cref="NntpSessionState.Closed"/>.
+        /// </remarks>
+        private bool TryPublishConnectedTransport(Stream connected)
+        {
+            lock (_transportGate)
+            {
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return false;
+                }
+
+                _stream = connected;
+                _reader = new NntpStreamReader(connected, _options.ReceiveBufferBytes);
+                State = NntpSessionState.Connected;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Clears STARTTLS ownership of <paramref name="stream"/> and closes that plaintext transport once.
+        /// Called only when the handshake has not created a wrapper.
+        /// </summary>
+        /// <param name="stream">Plaintext transport captured before the handshake.</param>
+        /// <remarks>
+        /// <see cref="_upgradeOwnsTransport"/> and the matching session fields are updated under <see cref="_transportGate"/> before the transport is closed.
+        /// <see cref="DisposeAsync"/> skips the transport while the upgrade flag is set, so this method is the one that closes <paramref name="stream"/>.
+        /// The field is cleared in the same lock that clears the flag. A concurrent dispose therefore observes either the flag or a null field and does not close the stream again.
+        /// A disposal exception propagates after those fields are clear. The caller keeps the initiating pre-handshake exception when the disposal failure is a transport exception.
+        /// </remarks>
+        private async ValueTask AbandonUpgradeTransportAsync(Stream stream)
+        {
+            lock (_transportGate)
+            {
+                _upgradeOwnsTransport = 0;
+                if (ReferenceEquals(_stream, stream))
+                {
+                    _stream = null;
+                    _reader = null;
+                }
+            }
+
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>Stores <paramref name="ssl"/> as the session transport when disposal has not won.</summary>
+        /// <param name="ssl">Authenticated wrapper. The caller disposes it when this returns <see langword="false"/>.</param>
+        /// <returns><see langword="true"/> when <paramref name="ssl"/> is now <see cref="_stream"/>.</returns>
+        /// <remarks>Clears <see cref="_upgradeOwnsTransport"/>. Does not await. Does not dispose <paramref name="ssl"/>.</remarks>
+        private bool TryPublishUpgradedTransport(SslStream ssl)
+        {
+            lock (_transportGate)
+            {
+                _upgradeOwnsTransport = 0;
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return false;
+                }
+
+                _stream = ssl;
+                _reader = new NntpStreamReader(ssl, _options.ReceiveBufferBytes);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Drops upgrade ownership. When the session is still live, also drops the plaintext fields the failed handshake already closed.
+        /// </summary>
+        /// <remarks>Does not dispose the transport. The handshake failure path has already closed it, and a lost publication disposes the wrapper separately.</remarks>
+        private void ReleaseUpgradeOwnership()
+        {
+            lock (_transportGate)
+            {
+                _upgradeOwnsTransport = 0;
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    _stream = null;
+                    _reader = null;
+                }
             }
         }
 
@@ -793,7 +1136,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     reusable: false);
             }
 
-            State = NntpSessionState.Authenticating;
+            AssignState(NntpSessionState.Authenticating);
             await WritePrefixedAsync(
                     NntpProtocolIo.AuthInfoUserPrefix,
                     userBytes,
@@ -860,14 +1203,15 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         private async Task<byte[]?> ReadStatusAsync(CancellationToken cancellationToken)
         {
-            if (_reader is null)
+            var reader = _reader;
+            if (reader is null)
             {
                 return null;
             }
 
             try
             {
-                var line = await _reader
+                var line = await reader
                     .ReadLineAsync(_options.MaxStatusLineBytes, _options.CommandTimeout, cancellationToken)
                     .ConfigureAwait(false);
                 if (line is null || !_logger.IsEnabled(LogLevel.Debug))
@@ -933,15 +1277,16 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>Both the timeout and caller cancellation surface as <see cref="OperationCanceledException"/>.</remarks>
         private async Task WriteAsync(ReadOnlyMemory<byte> bytes, TimeSpan timeout, CancellationToken cancellationToken)
         {
-            if (_stream is null)
+            var stream = _stream;
+            if (stream is null)
             {
                 throw new InvalidOperationException("NNTP stream is not open.");
             }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(timeout);
-            await _stream.WriteAsync(bytes, timeoutCts.Token).ConfigureAwait(false);
-            await _stream.FlushAsync(timeoutCts.Token).ConfigureAwait(false);
+            await stream.WriteAsync(bytes, timeoutCts.Token).ConfigureAwait(false);
+            await stream.FlushAsync(timeoutCts.Token).ConfigureAwait(false);
         }
 
         /// <summary>Marks the session unhealthy and retiring, and returns a non-reusable failure.</summary>
@@ -949,10 +1294,13 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="code">Status code when one was parsed; otherwise null.</param>
         /// <param name="reason">Diagnostic text stored on the result.</param>
         /// <returns>A failed result with <see cref="ArticleRetrievalResult.SessionReusable"/> false.</returns>
+        /// <remarks>
+        /// Does not assign <see cref="State"/> after <see cref="DisposeAsync"/> has set <see cref="_disposed"/>.
+        /// </remarks>
         private ArticleRetrievalResult MarkUnhealthy(ArticleRetrievalKind kind, int? code, string reason)
         {
             _unhealthy = true;
-            State = NntpSessionState.Retiring;
+            AssignState(NntpSessionState.Retiring);
             return WithCommandTimestamp(ArticleRetrievalResult.Failed(kind, code, reason, sessionReusable: false));
         }
 
@@ -980,6 +1328,31 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
+        /// <summary>
+        /// Assigns <paramref name="next"/> when <see cref="DisposeAsync"/> has not won.
+        /// </summary>
+        /// <param name="next">Lifecycle state for a session that is still open.</param>
+        /// <remarks>
+        /// Uses <see cref="_transportGate"/>, the same lock that sets <see cref="_disposed"/>.
+        /// A caller that acquires the lock after disposal returns without changing <see cref="State"/>.
+        /// A caller that acquires it first finishes this assignment before <see cref="DisposeAsync"/> reaches <see cref="NntpSessionState.Closed"/>.
+        /// Does not await. <see cref="DisposeAsync"/>'s own retiring and closed assignments do not call this method.
+        /// Callers must not already hold <see cref="_transportGate"/>; <see cref="System.Threading.Lock"/> is not recursive.
+        /// <see cref="FailClosed"/> calls this method, so it also must not run under that lock.
+        /// </remarks>
+        private void AssignState(NntpSessionState next)
+        {
+            lock (_transportGate)
+            {
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return;
+                }
+
+                State = next;
+            }
+        }
+
         /// <summary>Records whether <paramref name="reusable"/> may return to the pool and returns the matching failure.</summary>
         /// <param name="kind">Classification stored on the result.</param>
         /// <param name="code">Status code when one was parsed; otherwise null.</param>
@@ -989,10 +1362,20 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <see langword="true"/> leaves the session <see cref="NntpSessionState.Ready"/>.
         /// </param>
         /// <returns>A failed result whose reusable flag is <paramref name="reusable"/>.</returns>
+        /// <remarks>
+        /// When <see cref="DisposeAsync"/> has already set <see cref="_disposed"/>, this method does not assign <see cref="State"/>.
+        /// The result is still the caller's failure, and the session stays <see cref="NntpSessionState.Closed"/>.
+        /// </remarks>
         private ArticleRetrievalResult FailClosed(ArticleRetrievalKind kind, int? code, string reason, bool reusable)
         {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                _unhealthy = true;
+                return ArticleRetrievalResult.Failed(kind, code, reason, sessionReusable: false);
+            }
+
             _unhealthy = !reusable;
-            State = reusable ? NntpSessionState.Ready : NntpSessionState.Retiring;
+            AssignState(reusable ? NntpSessionState.Ready : NntpSessionState.Retiring);
             return ArticleRetrievalResult.Failed(kind, code, reason, reusable);
         }
 

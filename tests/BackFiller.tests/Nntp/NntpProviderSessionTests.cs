@@ -1,4 +1,6 @@
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
@@ -199,6 +201,459 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.NotEqual(0, result.CommandStartedTimestamp);
             Assert.Equal(result.CommandStartedTimestamp, session.ArticleCommandStartedTimestamp);
             await session.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Disposal drops the session's stream and reader after QUIT, and does not change article bytes already returned.
+        /// A second disposal stays on the idempotent path.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_releases_stream_and_reader_without_invalidating_returned_article_bytes()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            server.RespondBytes(static command =>
+            {
+                if (!command.StartsWith("ARTICLE ", StringComparison.Ordinal))
+                {
+                    return "500 unknown\r\n"u8.ToArray();
+                }
+
+                return "220 0 <a@b> article follows\r\nFrom: a@b\r\n\r\nbody\r\n.\r\n"u8.ToArray();
+            });
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            Assert.NotNull(SessionField(session, "_stream"));
+            Assert.NotNull(SessionField(session, "_reader"));
+
+            using var result = await session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            var payload = result.Article!.Memory.ToArray();
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Null(SessionField(session, "_stream"));
+            Assert.Null(SessionField(session, "_reader"));
+            Assert.Equal(payload, result.Article.Memory.ToArray());
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(payload, result.Article.Memory.ToArray());
+        }
+
+        /// <summary>
+        /// Disposal after the 220 status is copied, and before payload reading, still classifies the owned ARTICLE result.
+        /// The payload call uses the reader captured for the command, so clearing <c>_reader</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_owned_article_payload_read_classifies_provider_failure()
+        {
+            await AssertDisposeDuringArticlePayloadReadAsync(useCallback: false);
+        }
+
+        /// <summary>
+        /// Disposal after the 220 status is copied, and before payload reading, still classifies the callback ARTICLE result.
+        /// The callback is not invoked, and clearing <c>_reader</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_callback_article_payload_read_classifies_provider_failure()
+        {
+            await AssertDisposeDuringArticlePayloadReadAsync(useCallback: true);
+        }
+
+        /// <summary>
+        /// Disposal after ARTICLE bytes are written, and before flush, still classifies the owned ARTICLE result.
+        /// Flush uses the stream captured for the command, so clearing <c>_stream</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_between_owned_article_write_and_flush_classifies_provider_failure()
+        {
+            await AssertDisposeBetweenArticleWriteAndFlushAsync(useCallback: false);
+        }
+
+        /// <summary>
+        /// Disposal after ARTICLE bytes are written, and before flush, still classifies the callback ARTICLE result.
+        /// The callback is not invoked, and clearing <c>_stream</c> does not throw <see cref="NullReferenceException"/>.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_between_callback_article_write_and_flush_classifies_provider_failure()
+        {
+            await AssertDisposeBetweenArticleWriteAndFlushAsync(useCallback: true);
+        }
+
+        /// <summary>
+        /// Disposal after STARTTLS has captured the transport, and before the handshake reads it, is a provider failure.
+        /// The handshake keeps that captured stream, so a cleared <c>_stream</c> is not passed as null.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_starttls_handshake_classifies_provider_failure()
+        {
+            var handshakeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHandshake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            session.BeforeStartTlsHandshake = () =>
+            {
+                handshakeEntered.TrySetResult();
+                return releaseHandshake.Task;
+            };
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await handshakeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseHandshake.TrySetResult();
+                var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.DoesNotContain("ArgumentNull", result.Reason, StringComparison.Ordinal);
+                Assert.DoesNotContain("NullReference", result.Reason, StringComparison.Ordinal);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+            }
+            finally
+            {
+                session.BeforeStartTlsHandshake = null;
+                releaseHandshake.TrySetResult();
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Disposal during a stalled STARTTLS handshake cancels that handshake while the caller token stays uncancelled.
+        /// The upgrade still closes the captured transport once, and the session ends closed.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_stalled_starttls_handshake_cancels_without_caller_cancellation()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handshakeCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            CountingDisposeSslStream? tls = null;
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(connectTimeout: TimeSpan.FromSeconds(30));
+            session.TlsStreamFactory = inner =>
+                tls = new CountingDisposeSslStream(new StalledPlaintextStream(inner, entered, handshakeCancelled));
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(handshakeCancelled.Task.IsCompleted);
+                await session.DisposeAsync();
+                await handshakeCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal("NNTP session was disposed during STARTTLS.", result.Reason);
+                Assert.False(result.SessionReusable);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.False(session.IsReusable);
+                Assert.NotNull(tls);
+                Assert.Equal(1, tls.DisposeAsyncCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+            }
+            finally
+            {
+                session.TlsStreamFactory = null;
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A throwing handshake-cancellation callback does not skip transport disposal or the closed state.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_continues_when_handshake_cancellation_callback_throws()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer("200 ready");
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            var cancellation = Assert.IsType<CancellationTokenSource>(SessionField(session, "_handshakeCancellation"));
+            cancellation.Token.Register(static () => throw new InvalidOperationException("handshake cancel callback failed"));
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Null(SessionField(session, "_stream"));
+            Assert.Null(SessionField(session, "_reader"));
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+        }
+
+        /// <summary>
+        /// Disposal that wins while connect is paused, before the transport is published, stays closed.
+        /// The stream created after that disposal is closed once and is not stored on the session.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_connect_does_not_publish_the_late_transport()
+        {
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var block = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer("200 ready");
+            var factory = new ScriptedNntpTransportFactory
+            {
+                ConnectStarted = started,
+                BlockConnect = block,
+            };
+            factory.Enqueue(server);
+            var session = CreateSession();
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                block.TrySetResult();
+                using var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal("NNTP session was disposed during connect.", result.Reason);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.False(session.IsReusable);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+                await session.DisposeAsync();
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+            }
+            finally
+            {
+                factory.BlockConnect = null;
+                block.TrySetResult();
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A logger that throws from the pre-handshake event does not leave the plaintext transport open.
+        /// No TLS wrapper exists yet, so the session must close that stream once and a later dispose must not close it again.
+        /// </summary>
+        [Fact]
+        public async Task Starttls_log_failure_before_handshake_disposes_the_plaintext_transport_once()
+        {
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: new ThrowingTlsHandshakeLogger());
+            try
+            {
+                using var result = await session.ConnectAsync(factory, CancellationToken.None);
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal("InvalidOperationException", result.Reason);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+                await session.DisposeAsync();
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+            }
+            finally
+            {
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A dispose failure while abandoning the plaintext transport does not replace the pre-handshake exception.
+        /// The session still drops the stream and reader, and a later dispose does not close that transport again.
+        /// </summary>
+        [Fact]
+        public async Task Starttls_cleanup_failure_preserves_the_pre_handshake_exception()
+        {
+            var logger = new RecordingTlsHandshakeLogger();
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+                FaultClientDispose = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            try
+            {
+                using var result = await session.ConnectAsync(factory, CancellationToken.None);
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal("InvalidOperationException", result.Reason);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+                Assert.Contains(logger.Messages, static message => message.Contains("STARTTLS transport cleanup failed", StringComparison.Ordinal) && message.Contains("IOException", StringComparison.Ordinal));
+                await session.DisposeAsync();
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+            }
+            finally
+            {
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A greeting read that fails after disposal has closed the session does not move the session back to retiring.
+        /// The transport captured at publication is closed once.
+        /// </summary>
+        [Fact]
+        public async Task Greeting_failure_after_dispose_leaves_the_session_closed()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                HoldInitialRead = release,
+                InitialReadEntered = entered,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                release.TrySetResult();
+                using var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                await session.DisposeAsync();
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+            }
+            finally
+            {
+                server.HoldInitialRead = null;
+                release.TrySetResult();
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A reusable ARTICLE status that is copied before disposal, and parsed after disposal has closed the session, does not assign <see cref="NntpSessionState.Ready"/>.
+        /// </summary>
+        [Fact]
+        public async Task Article_not_found_after_dispose_does_not_leave_ready()
+        {
+            var statusCopied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStatus = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.StartsWith("ARTICLE ", StringComparison.Ordinal)
+                    ? "430 no such article\r\n"
+                    : "500 unknown\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            server.HoldStatusLineReturn = releaseStatus;
+            server.StatusLineCopied = statusCopied;
+            var download = session.DownloadArticleAsync("<missing@example>", CancellationToken.None);
+            try
+            {
+                await statusCopied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                releaseStatus.TrySetResult();
+                using var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ArticleNotFound, finished.Kind);
+                Assert.True(finished.SessionReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+            }
+            finally
+            {
+                releaseStatus.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
         }
 
         /// <summary>
@@ -749,20 +1204,197 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Pauses after the 220 line is copied and before that read returns, disposes, then lets payload reading observe the closed transport.
+        /// The body stays unwritten until cleanup, so a payload read that rereads a cleared <c>_reader</c> cannot succeed from bytes already buffered.
+        /// </summary>
+        /// <param name="useCallback"><see langword="true"/> exercises the callback payload path. <see langword="false"/> exercises the owned-result path.</param>
+        /// <remarks>
+        /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// The classified reason is <see cref="InvalidOperationException"/> from reading the captured reader after the pipe is completed.
+        /// A payload call that rereads a cleared <c>_reader</c> throws <see cref="NullReferenceException"/>, which this helper does not classify.
+        /// </remarks>
+        private static async Task AssertDisposeDuringArticlePayloadReadAsync(bool useCallback)
+        {
+            var statusCopied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStatus = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseBody = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                HoldArticleBody = releaseBody,
+            };
+            server.Respond(static command =>
+                command.StartsWith("AUTHINFO", StringComparison.OrdinalIgnoreCase)
+                    ? "281 authentication accepted\r\n"
+                    : "500 unknown\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            server.HoldStatusLineReturn = releaseStatus;
+            server.StatusLineCopied = statusCopied;
+            var consumed = 0;
+            var download = useCallback
+                ? session.DownloadArticleAsync(
+                    "<a@b>",
+                    CancellationToken.None,
+                    _ =>
+                    {
+                        Interlocked.Increment(ref consumed);
+                        return default;
+                    })
+                : session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await statusCopied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseStatus.TrySetResult();
+                using var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                Assert.False(finished.SessionReusable);
+                Assert.Null(finished.Article);
+                Assert.Equal(nameof(InvalidOperationException), finished.Reason);
+                Assert.DoesNotContain("NullReference", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain("ArgumentNull", finished.Reason ?? string.Empty, StringComparison.Ordinal);
+                Assert.Equal(0, Volatile.Read(ref consumed));
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+            }
+            finally
+            {
+                releaseStatus.TrySetResult();
+                releaseBody.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Pauses after the ARTICLE command is flushed and before the session flush returns. The peer has the command and has not written a response.
+        /// Disposal runs in that window, then the command resumes on the stream captured before the write.
+        /// </summary>
+        /// <param name="useCallback"><see langword="true"/> starts ARTICLE through the callback overload. <see langword="false"/> uses the owned-result overload.</param>
+        /// <remarks>
+        /// <see cref="ScriptedNntpServer.BlockArticle"/> stays closed until cleanup, so a resumed read cannot observe a response that was written before disposal.
+        /// The download task is joined again in <see langword="finally"/>. <see cref="NullReferenceException"/> and <see cref="ArgumentNullException"/> propagate from that join.
+        /// The classified reason is <see cref="ObjectDisposedException"/> from flushing the stream captured before disposal.
+        /// An empty status, or <see cref="InvalidOperationException"/> from rereading a cleared <c>_stream</c>, fails that assertion.
+        /// </remarks>
+        private static async Task AssertDisposeBetweenArticleWriteAndFlushAsync(bool useCallback)
+        {
+            var writeFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                ArticleStarted = articleStarted,
+                BlockArticle = releaseArticle,
+            };
+            server.RespondBytes(static command =>
+            {
+                if (!command.StartsWith("ARTICLE ", StringComparison.Ordinal))
+                {
+                    return "500 unknown\r\n"u8.ToArray();
+                }
+
+                return "220 0 <a@b> article follows\r\nFrom: a@b\r\n\r\nbody\r\n.\r\n"u8.ToArray();
+            });
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            server.HoldAfterCommandWrite = releaseWrite;
+            server.CommandWriteFlushed = writeFlushed;
+            var consumed = 0;
+            var download = useCallback
+                ? session.DownloadArticleAsync(
+                    "<a@b>",
+                    CancellationToken.None,
+                    _ =>
+                    {
+                        Interlocked.Increment(ref consumed);
+                        return default;
+                    })
+                : session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await writeFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                releaseWrite.TrySetResult();
+                using var finished = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, finished.Kind);
+                Assert.False(finished.SessionReusable);
+                Assert.Null(finished.Article);
+                Assert.Equal(nameof(ObjectDisposedException), finished.Reason);
+                Assert.Equal(0, Volatile.Read(ref consumed));
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+            }
+            finally
+            {
+                releaseWrite.TrySetResult();
+                releaseArticle.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>Reads a private instance field from <paramref name="session"/> after the operation under test has quiesced.</summary>
+        /// <param name="session">Session whose field is observed.</param>
+        /// <param name="name">Field name, including its underscore prefix.</param>
+        /// <returns>The field value, or null when the session has released it.</returns>
+        private static object? SessionField(NntpProviderSession session, string name)
+        {
+            var field = typeof(NntpProviderSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return field.GetValue(session);
+        }
+
+        /// <summary>
         /// Builds a Giganews session against 127.0.0.1:119 with two-second command, receive, and connect timeouts.
         /// </summary>
         /// <param name="useTls">Forwarded to the provider definition and observed on the transport connect attempt.</param>
         /// <param name="user">AUTHINFO user. Null leaves the session anonymous.</param>
         /// <param name="password">AUTHINFO password paired with <paramref name="user"/>.</param>
         /// <param name="logger">Logger for the session. Null uses <see cref="NullLogger"/>.</param>
+        /// <param name="connectTimeout">Connect and STARTTLS budget. Two seconds when null.</param>
         private static NntpProviderSession CreateSession(
             bool useTls = false,
             string? user = null,
             string? password = null,
-            ILogger? logger = null) =>
+            ILogger? logger = null,
+            TimeSpan? connectTimeout = null) =>
             new(
                 new BackFillerProviderDefinition("Giganews", "127.0.0.1", 119, useTls, user, password, 0, 1),
-                NntpSessionOptions.Default with { CommandTimeout = TimeSpan.FromSeconds(2), ReceiveTimeout = TimeSpan.FromSeconds(2), ConnectTimeout = TimeSpan.FromSeconds(2) },
+                NntpSessionOptions.Default with
+                {
+                    CommandTimeout = TimeSpan.FromSeconds(2),
+                    ReceiveTimeout = TimeSpan.FromSeconds(2),
+                    ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(2),
+                },
                 logger ?? NullLogger.Instance);
 
         /// <summary>Locates <paramref name="fileName"/> under <see cref="FindSourceDirectory"/>.</summary>
@@ -787,6 +1419,255 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
 
             throw new DirectoryNotFoundException("Could not locate src/BackFiller/Nntp.");
+        }
+
+        /// <summary>
+        /// Logger that throws <see cref="InvalidOperationException"/> from the STARTTLS handshake-starting event.
+        /// Other events are ignored. The throw happens before a TLS wrapper exists.
+        /// </summary>
+        private sealed class ThrowingTlsHandshakeLogger : ILogger
+        {
+            /// <inheritdoc />
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => NullScope.Instance;
+
+            /// <inheritdoc />
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            /// <inheritdoc />
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (eventId.Id == 5410)
+                {
+                    throw new InvalidOperationException("TLS handshake starting");
+                }
+            }
+
+            /// <summary>No-op scope returned from <see cref="BeginScope{TState}"/>.</summary>
+            private sealed class NullScope : IDisposable
+            {
+                /// <summary>Shared no-op scope instance.</summary>
+                public static NullScope Instance { get; } = new();
+
+                /// <inheritdoc />
+                public void Dispose()
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// Logger that throws <see cref="InvalidOperationException"/> from the STARTTLS handshake-starting event and records every other message.
+        /// The throw happens before a TLS wrapper exists.
+        /// </summary>
+        private sealed class RecordingTlsHandshakeLogger : ILogger
+        {
+            /// <summary>Formatted messages other than the throwing handshake-start event.</summary>
+            private readonly List<string> _messages = [];
+
+            /// <summary>Messages recorded before and after the throwing handshake-start event.</summary>
+            internal IReadOnlyList<string> Messages
+            {
+                get
+                {
+                    lock (_messages)
+                    {
+                        return [.. _messages];
+                    }
+                }
+            }
+
+            /// <inheritdoc />
+            public IDisposable BeginScope<TState>(TState state)
+                where TState : notnull => NullScope.Instance;
+
+            /// <inheritdoc />
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            /// <inheritdoc />
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (eventId.Id == 5410)
+                {
+                    throw new InvalidOperationException("TLS handshake starting");
+                }
+
+                ArgumentNullException.ThrowIfNull(formatter);
+                var message = formatter(state, exception);
+                lock (_messages)
+                {
+                    _messages.Add(message);
+                }
+            }
+
+            /// <summary>No-op scope returned from <see cref="BeginScope{TState}"/>.</summary>
+            private sealed class NullScope : IDisposable
+            {
+                /// <summary>Shared no-op scope instance.</summary>
+                public static NullScope Instance { get; } = new();
+
+                /// <inheritdoc />
+                public void Dispose()
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// Counts asynchronous disposal of the TLS wrapper. The handshake itself is the base implementation.
+        /// </summary>
+        private sealed class CountingDisposeSslStream : SslStream
+        {
+            /// <summary>Entries to <see cref="DisposeAsync"/>.</summary>
+            private int _disposeAsyncCount;
+
+            /// <summary>Wraps <paramref name="inner"/> and closes it on disposal.</summary>
+            /// <param name="inner">Plaintext transport owned by this wrapper.</param>
+            public CountingDisposeSslStream(Stream inner)
+                : base(inner, leaveInnerStreamOpen: false)
+            {
+            }
+
+            /// <summary>Gets how many times <see cref="DisposeAsync"/> was entered.</summary>
+            public int DisposeAsyncCount => Volatile.Read(ref _disposeAsyncCount);
+
+            /// <inheritdoc />
+            public override ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref _disposeAsyncCount);
+                return base.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Plaintext transport whose first handshake read waits until that read is cancelled.
+        /// Later writes pass through so the client hello can leave the socket.
+        /// </summary>
+        private sealed class StalledPlaintextStream : Stream
+        {
+            /// <summary>Transport wrapped for the scripted server.</summary>
+            private readonly Stream _inner;
+
+            /// <summary>Completed when the handshake attempts its first read.</summary>
+            private readonly TaskCompletionSource _entered;
+
+            /// <summary>Completed when that read observes a cancelled token.</summary>
+            private readonly TaskCompletionSource _cancelled;
+
+            /// <summary>One after this wrapper has closed <see cref="_inner"/>.</summary>
+            private int _innerDisposed;
+
+            /// <summary>Wraps <paramref name="inner"/> and signals the handshake read gates.</summary>
+            /// <param name="inner">Plaintext transport closed exactly once by this wrapper.</param>
+            /// <param name="entered">Completed when the first handshake read starts.</param>
+            /// <param name="cancelled">Completed when that read's token is cancelled.</param>
+            public StalledPlaintextStream(Stream inner, TaskCompletionSource entered, TaskCompletionSource cancelled)
+            {
+                _inner = inner;
+                _entered = entered;
+                _cancelled = cancelled;
+            }
+
+            /// <inheritdoc />
+            public override bool CanRead => true;
+
+            /// <inheritdoc />
+            public override bool CanSeek => false;
+
+            /// <inheritdoc />
+            public override bool CanWrite => true;
+
+            /// <inheritdoc />
+            public override long Length => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            /// <inheritdoc />
+            public override void Flush() => _inner.Flush();
+
+            /// <inheritdoc />
+            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+
+            /// <inheritdoc />
+            public override int Read(byte[] buffer, int offset, int count) =>
+                throw new InvalidOperationException("The STARTTLS handshake used a synchronous read.");
+
+            /// <inheritdoc />
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+
+            /// <inheritdoc />
+            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                _inner.WriteAsync(buffer, offset, count, cancellationToken);
+
+            /// <inheritdoc />
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken) =>
+                _inner.WriteAsync(buffer, cancellationToken);
+
+            /// <summary>Signals entry, then waits until <paramref name="cancellationToken"/> is cancelled.</summary>
+            /// <param name="buffer">Ignored. The handshake does not receive peer bytes.</param>
+            /// <param name="cancellationToken">Token the TLS handshake passed for this read.</param>
+            /// <returns>A task that completes only by cancellation.</returns>
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+            {
+                _ = buffer;
+                _entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    _cancelled.TrySetResult();
+                    throw;
+                }
+
+                return 0;
+            }
+
+            /// <inheritdoc />
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+            /// <inheritdoc />
+            public override async ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _innerDisposed, 1) == 0)
+                {
+                    await _inner.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+
+            /// <inheritdoc />
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing && Interlocked.Exchange(ref _innerDisposed, 1) == 0)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
         }
     }
 }

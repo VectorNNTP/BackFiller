@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
@@ -208,6 +209,70 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await dispose;
 
             await Assert.ThrowsAnyAsync<Exception>(() => pool.AcquireAsync(CancellationToken.None));
+        }
+
+        /// <summary>
+        /// An acquire that has already passed the initial disposed check cannot take a lease after drain was observed.
+        /// The created session is retired once, and the drain does not return while a new lease is outstanding.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_rejects_issuance_after_drain_was_observed()
+        {
+            var readyToIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drainObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.StartsWith("AUTHINFO", StringComparison.OrdinalIgnoreCase)
+                    ? "281 authentication accepted\r\n"
+                    : "430 missing\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var pool = CreatePool(factory, max: 1);
+            pool.BeforeCreatedSessionIssue = () =>
+            {
+                readyToIssue.TrySetResult();
+                return releaseIssue.Task;
+            };
+            pool.AfterDrainObserved = () =>
+            {
+                drainObserved.TrySetResult();
+                return releaseDrain.Task;
+            };
+            var acquire = pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await readyToIssue.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var dispose = pool.DrainAndDisposeAsync(CancellationToken.None);
+                await drainObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseIssue.TrySetResult();
+                await Assert.ThrowsAsync<ObjectDisposedException>(async () => await acquire);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                releaseDrain.TrySetResult();
+                await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+            }
+            finally
+            {
+                pool.BeforeCreatedSessionIssue = null;
+                pool.AfterDrainObserved = null;
+                releaseIssue.TrySetResult();
+                releaseDrain.TrySetResult();
+                try
+                {
+                    var leaked = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                    await leaked.DisposeAsync();
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await pool.DisposeAsync();
+            }
         }
 
         /// <summary>
@@ -917,6 +982,671 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Repeated DATE failures replace the idle session without an acquire.
+        /// Each replacement is held in its DATE delay before the counts are read, so retirement cannot run between the two observations.
+        /// </summary>
+        [Fact]
+        public async Task Keepalive_retirement_without_acquire_does_not_accumulate_idle_sessions()
+        {
+            const int replacements = 8;
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var clock = new KeepAliveDelaySource();
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: replacements + 1);
+            await using var pool = CreatePool(
+                factory,
+                max: 1,
+                keepAliveSeconds: 30,
+                time: clock,
+                logger: logger);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+            Assert.Equal(1, pool.IdleSessionCount);
+            Assert.Equal(0, pool.ActiveLeaseCount);
+
+            var release = await clock.WaitForKeepAliveAsync();
+            for (var attempt = 0; attempt < replacements; attempt++)
+            {
+                release();
+                var next = await clock.WaitForKeepAliveAsync();
+                var expectedConnects = attempt + 2;
+                Assert.True(pool.IdleSessionCount <= pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.ActiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(expectedConnects, factory.ConnectAttempts.Count);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.Equal(1, ReservedConnectionCount(pool));
+                release = next;
+            }
+
+            Assert.Equal(replacements, logger.Messages.Count(static message =>
+                message.Contains("reason=DATE keepalive failed", StringComparison.Ordinal)));
+            Assert.Equal(1, pool.IdleSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.True(pool.IdleSessionCount <= pool.LiveSessionCount);
+        }
+
+        /// <summary>
+        /// A DATE helper that already observed a taken session, and the loop it superseded, cannot cancel or remove the keepalive installed when that session is idle again.
+        /// The replacement count is read only after the superseded loop task has finished its own registration removal.
+        /// </summary>
+        [Fact]
+        public async Task Superseded_keepalive_cannot_cancel_the_later_idle_registration()
+        {
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(dateStarted: dateStarted));
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 2, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            await warmup.DisposeAsync();
+            _ = await clock.WaitForKeepAliveAsync();
+
+            var firstLoopExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var supersededLoopExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSupersededLoop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var published = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var loopExits = 0;
+            var publishCalls = 0;
+            var stopCalls = 0;
+            Task? supersededLoop = null;
+            pool.KeepAliveLoopExitGate = loopTask =>
+            {
+                var call = Interlocked.Increment(ref loopExits);
+                if (call == 1)
+                {
+                    firstLoopExited.TrySetResult();
+                    return Task.CompletedTask;
+                }
+
+                if (call == 2)
+                {
+                    supersededLoop = loopTask;
+                    supersededLoopExited.TrySetResult();
+                    return releaseSupersededLoop.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.AfterKeepAlivePublished = () =>
+            {
+                if (Interlocked.Increment(ref publishCalls) == 1)
+                {
+                    published.TrySetResult();
+                    return releasePublished.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.KeepAliveStopGate = () =>
+            {
+                if (Interlocked.Increment(ref stopCalls) == 1)
+                {
+                    stopEntered.TrySetResult();
+                    return releaseStop.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+
+            Task? returning = null;
+            NntpSessionLease? second = null;
+            var first = await pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await firstLoopExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                returning = first.DisposeAsync().AsTask();
+                await published.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                second = await pool.AcquireAsync(CancellationToken.None);
+                await supersededLoopExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releasePublished.TrySetResult();
+                await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                await second.DisposeAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.NotNull(supersededLoop);
+                releaseSupersededLoop.TrySetResult();
+                await supersededLoop.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                releaseStop.TrySetResult();
+                await returning.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+
+                _ = await clock.WaitForKeepAliveAsync();
+                var currentTimer = await clock.WaitForKeepAliveAsync();
+                currentTimer();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+            }
+            finally
+            {
+                releasePublished.TrySetResult();
+                releaseSupersededLoop.TrySetResult();
+                releaseStop.TrySetResult();
+                if (supersededLoop is not null)
+                {
+                    await supersededLoop.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                pool.AfterKeepAlivePublished = null;
+                pool.KeepAliveStopGate = null;
+                pool.KeepAliveLoopExitGate = null;
+                if (returning is not null)
+                {
+                    await returning.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                if (second is not null)
+                {
+                    await second.DisposeAsync();
+                }
+
+                await first.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A DATE loop that decided retirement was needed cannot retire the session after a newer keepalive was published.
+        /// The session stays live, idle, and reusable, and the replacement registration still sends DATE.
+        /// </summary>
+        [Fact]
+        public async Task Superseded_keepalive_cannot_retire_a_session_returned_to_idle()
+        {
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(
+                dateStarted: dateStarted,
+                articleStarted: articleStarted,
+                blockArticle: blockArticle));
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            await warmup.DisposeAsync();
+            var firstDelay = await clock.WaitForKeepAliveAsync();
+
+            var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var retirementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var healthCalls = 0;
+            var retirementCalls = 0;
+            Task? superseded = null;
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            pool.BeforeKeepAliveReusabilityCheck = () =>
+            {
+                if (Interlocked.Increment(ref healthCalls) == 1)
+                {
+                    healthEntered.TrySetResult();
+                    return releaseHealth.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.BeforeKeepAliveRetirement = loop =>
+            {
+                if (Interlocked.Increment(ref retirementCalls) == 1)
+                {
+                    superseded = loop;
+                    retirementEntered.TrySetResult();
+                    return releaseRetirement.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            try
+            {
+                firstDelay();
+                await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                var session = lease.Session;
+                download = session.DownloadArticleAsync("<id@example>", CancellationToken.None);
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseHealth.TrySetResult();
+                await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, retirementCalls);
+                blockArticle.TrySetResult();
+                using (var article = await download.WaitAsync(TimeSpan.FromSeconds(5)))
+                {
+                    Assert.Equal(ArticleRetrievalKind.ArticleRetrieved, article.Kind);
+                    Assert.True(article.SessionReusable);
+                }
+
+                await lease.DisposeAsync();
+                var replacement = await clock.WaitForKeepAliveAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                releaseRetirement.TrySetResult();
+                Assert.NotNull(superseded);
+                await superseded.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.True(session.IsReusable);
+                replacement();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                _ = await clock.WaitForKeepAliveAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.True(session.IsReusable);
+            }
+            finally
+            {
+                pool.BeforeKeepAliveReusabilityCheck = null;
+                pool.BeforeKeepAliveRetirement = null;
+                releaseHealth.TrySetResult();
+                releaseRetirement.TrySetResult();
+                blockArticle.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                if (superseded is not null)
+                {
+                    try
+                    {
+                        await superseded.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// A keepalive that already passed cancellation still sends DATE on the shutdown token after its registration is detached.
+        /// ARTICLE that passed its first check and waited for that DATE must not write after DATE marks the session unhealthy.
+        /// </summary>
+        [Fact]
+        public async Task Article_after_failed_date_does_not_write_on_the_unhealthy_session()
+        {
+            var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var dateFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleAtGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var writeFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = NntpSessionPoolTests.CreateDateAwareServer(dateResponse: "503 keepalive failed\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            var session = warmup.Session;
+            await warmup.DisposeAsync();
+            var firstDelay = await clock.WaitForKeepAliveAsync();
+            pool.BeforeKeepAliveReusabilityCheck = () =>
+            {
+                healthEntered.TrySetResult();
+                return releaseHealth.Task;
+            };
+            pool.BeforeKeepAliveRetirement = _ =>
+            {
+                dateFailed.TrySetResult();
+                return releaseRetirement.Task;
+            };
+            session.BeforeArticleBusyWait = () =>
+            {
+                articleAtGate.TrySetResult();
+                return releaseArticle.Task;
+            };
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            try
+            {
+                firstDelay();
+                await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                Assert.Same(session, lease.Session);
+                server.HoldAfterCommandWrite = releaseWrite;
+                server.CommandWriteFlushed = writeFlushed;
+                releaseHealth.TrySetResult();
+                await writeFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(NntpSessionState.Busy, session.State);
+                download = session.DownloadArticleAsync("<id@example>", CancellationToken.None);
+                await articleAtGate.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseWrite.TrySetResult();
+                await dateFailed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(session.IsReusable);
+                Assert.Equal(NntpSessionState.Retiring, session.State);
+                releaseArticle.TrySetResult();
+                using var article = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, article.Kind);
+                Assert.False(article.SessionReusable);
+                Assert.Null(article.Article);
+                Assert.Equal("NNTP session is not ready.", article.Reason);
+                Assert.Equal(0, session.ArticleCommandStartedTimestamp);
+                Assert.Contains(server.Commands, static command => command.Equals("DATE", StringComparison.Ordinal));
+                Assert.DoesNotContain(server.Commands, static command => command.StartsWith("ARTICLE", StringComparison.Ordinal));
+                Assert.Equal(NntpSessionState.Retiring, session.State);
+                Assert.NotNull(SessionField(session, "_stream"));
+            }
+            finally
+            {
+                pool.BeforeKeepAliveReusabilityCheck = null;
+                pool.BeforeKeepAliveRetirement = null;
+                session.BeforeArticleBusyWait = null;
+                releaseHealth.TrySetResult();
+                releaseWrite.TrySetResult();
+                releaseArticle.TrySetResult();
+                releaseRetirement.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex.GetType();
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pool disposal that retires a session after connect and before issuance does not hand that session out.
+        /// Lease, created-session, and connection-number accounting stay at zero, and releasing the fill gate does not throw.
+        /// </summary>
+        [Fact]
+        public async Task Disposal_before_issue_does_not_lease_the_retired_created_session()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(factory, max: 1);
+            var created = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pool.BeforeCreatedSessionIssue = () =>
+            {
+                created.TrySetResult();
+                return releaseIssue.Task;
+            };
+            var acquire = pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await created.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await pool.DisposeAsync();
+                releaseIssue.TrySetResult();
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(() => acquire);
+                Assert.IsNotType<NullReferenceException>(thrown);
+                Assert.IsType<ObjectDisposedException>(thrown);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, CreatedSessionCount(pool));
+                Assert.Equal(0, ReservedConnectionCount(pool));
+            }
+            finally
+            {
+                pool.BeforeCreatedSessionIssue = null;
+                releaseIssue.TrySetResult();
+                try
+                {
+                    await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+                {
+                    _ = ex.GetType();
+                }
+            }
+        }
+
+        /// <summary>
+        /// A keepalive retirement that has left the idle list, but not yet finished dispose, cannot be leased or returned to the queue.
+        /// The replacement lease stays usable after the retired session is disposed, and its return does not requeue the retired one.
+        /// </summary>
+        [Fact]
+        public async Task Retirement_overlapping_acquire_does_not_lease_or_requeue_the_retired_session()
+        {
+            var clock = new KeepAliveDelaySource();
+            var factory = new ScriptedNntpTransportFactory();
+            var retiredServer = ReadyServer();
+            var survivorServer = ReadyServer();
+            factory.Enqueue(retiredServer);
+            factory.Enqueue(survivorServer);
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var retirementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pool.ActiveSessionCountChanged += () =>
+            {
+                if (pool.ActiveSessionCount != 0 || pool.LiveSessionCount != 0)
+                {
+                    return;
+                }
+
+                if (!retirementEntered.TrySetResult())
+                {
+                    return;
+                }
+
+                if (!releaseRetirement.Task.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("Retirement callback was not released.");
+                }
+            };
+
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+            Assert.Equal(1, pool.IdleSessionCount);
+
+            var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+            releaseKeepAlive();
+            await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, pool.IdleSessionCount);
+            Assert.Equal(0, pool.LiveSessionCount);
+            Assert.Equal(0, pool.ActiveLeaseCount);
+            Assert.Equal(0, CreatedSessionCount(pool));
+            Assert.Equal(0, ReservedConnectionCount(pool));
+            Assert.Equal(0, retiredServer.ClientStreamDisposeCount);
+
+            var lease = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            var survivor = lease.Session;
+            Assert.Equal(NntpSessionState.Ready, survivor.State);
+            Assert.Equal(0, pool.IdleSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(1, pool.ActiveLeaseCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+            Assert.Equal(2, factory.ConnectAttempts.Count);
+
+            await lease.DisposeAsync();
+            Assert.Equal(1, pool.IdleSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(0, pool.ActiveLeaseCount);
+            Assert.Equal(NntpSessionState.Ready, survivor.State);
+            Assert.Equal(2, factory.ConnectAttempts.Count);
+
+            releaseRetirement.TrySetResult();
+            await WaitUntilAsync(() => retiredServer.ClientStreamDisposeCount == 1);
+            Assert.Equal(NntpSessionState.Ready, survivor.State);
+            Assert.Equal(0, survivorServer.ClientStreamDisposeCount);
+            Assert.Equal(1, pool.IdleSessionCount);
+            Assert.Equal(1, pool.LiveSessionCount);
+            Assert.Equal(1, CreatedSessionCount(pool));
+            Assert.Equal(1, ReservedConnectionCount(pool));
+
+            var reused = await pool.AcquireAsync(CancellationToken.None);
+            Assert.Same(survivor, reused.Session);
+            Assert.Equal(NntpSessionState.Ready, reused.Session.State);
+            Assert.Equal(2, factory.ConnectAttempts.Count);
+            await reused.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Cancelling an acquire while the taken session is inside DATE retires that session.
+        /// The DATE loop will not retire it, because it has already left the idle list.
+        /// </summary>
+        [Fact]
+        public async Task Cancelled_acquire_during_date_retires_the_taken_session()
+        {
+            var clock = new KeepAliveDelaySource();
+            var factory = new ScriptedNntpTransportFactory();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = CreateDateAwareServer(dateStarted: dateStarted, blockDate: blockDate);
+            factory.Enqueue(server);
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+            var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+            releaseKeepAlive();
+            await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            using var acquireCancel = new CancellationTokenSource();
+            var acquire = pool.AcquireAsync(acquireCancel.Token);
+            await WaitUntilAsync(() =>
+                pool.IdleSessionCount == 0
+                && pool.ActiveLeaseCount == 0
+                && pool.LiveSessionCount == 1);
+
+            acquireCancel.Cancel();
+            try
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await acquire)
+                    .WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+            }
+
+            await WaitUntilAsync(() => server.ClientStreamDisposeCount == 1);
+            await WaitUntilAsync(() =>
+                pool.IdleSessionCount == 1
+                && pool.LiveSessionCount == 1
+                && pool.ActiveLeaseCount == 0
+                && factory.ConnectAttempts.Count == 2
+                && CreatedSessionCount(pool) == 1
+                && ReservedConnectionCount(pool) == 1);
+        }
+
+        /// <summary>
+        /// Cancelling acquire while a TLS DATE write is still inside <see cref="Stream.WriteAsync"/> disposes that transport once.
+        /// QUIT overlaps the held write. <see cref="SslStream"/> rejects that second write, and the original cancellation is what acquire throws.
+        /// </summary>
+        [Fact]
+        public async Task Cancelled_acquire_during_tls_date_write_disposes_the_transport_once()
+        {
+            var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            NestedWriteTlsStream? tls = null;
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.Equals("DATE", StringComparison.OrdinalIgnoreCase)
+                    ? "111 20260926120000\r\n"
+                    : "430 missing\r\n");
+            server.ClientStreamDecorator = inner =>
+            {
+                tls = new NestedWriteTlsStream(inner, writeEntered, releaseWrite);
+                return tls;
+            };
+            var replacement = ReadyServer();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            factory.Enqueue(replacement);
+            var clock = new KeepAliveDelaySource();
+            var logger = new CollectingLogger<NntpSessionPool>();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock, logger: logger);
+            var warmup = await pool.AcquireAsync(CancellationToken.None);
+            var session = warmup.Session;
+            await warmup.DisposeAsync();
+            var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+            Assert.NotNull(tls);
+            tls.HoldWrites = true;
+            releaseKeepAlive();
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var acquireCancel = new CancellationTokenSource();
+            var acquire = pool.AcquireAsync(acquireCancel.Token);
+            try
+            {
+                await WaitUntilAsync(() =>
+                    pool.IdleSessionCount == 0
+                    && pool.ActiveLeaseCount == 0
+                    && pool.LiveSessionCount == 1);
+                acquireCancel.Cancel();
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(() => acquire).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.IsType<OperationCanceledException>(thrown);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.False(session.IsReusable);
+                Assert.Equal(1, tls.DisposeAsyncCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Contains(
+                    logger.Entries,
+                    static entry => entry.EventId.Id == 5417
+                        && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+                await WaitUntilAsync(() =>
+                    pool.IdleSessionCount == 1
+                    && pool.LiveSessionCount == 1
+                    && pool.ActiveLeaseCount == 0
+                    && factory.ConnectAttempts.Count == 2);
+            }
+            finally
+            {
+                releaseWrite.TrySetResult();
+                try
+                {
+                    _ = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+            }
+        }
+
+        /// <summary>Scripted peer that accepts connect and answers DATE with a non-success status.</summary>
+        /// <returns>A server whose DATE response retires a keepalive session.</returns>
+        private static ScriptedNntpServer ReadyServer()
+        {
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.StartsWith("AUTHINFO", StringComparison.OrdinalIgnoreCase)
+                    ? "281 authentication accepted\r\n"
+                    : "430 missing\r\n");
+            return server;
+        }
+
+        /// <summary>
         /// Asserts a finished failed create left no live session, lease, created-count reservation, or connection number.
         /// </summary>
         /// <param name="pool">Pool observed after the failed attempt has returned.</param>
@@ -1165,6 +1895,88 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Holds DATE keepalive delays until the test releases them.
+        /// Replenish delays on the same clock never fire, so replacement comes only from retirement's immediate fill.
+        /// </summary>
+        private sealed class KeepAliveDelaySource : TimeProvider
+        {
+            /// <summary>Keepalive delays entered and not yet observed, in entry order.</summary>
+            private readonly ConcurrentQueue<HeldTimer> _pending = new();
+
+            /// <summary>Waits until the next 30-second DATE delay is entered.</summary>
+            /// <returns>A callback that completes that delay.</returns>
+            /// <exception cref="TimeoutException">No keepalive delay is entered within five seconds.</exception>
+            internal async Task<Action> WaitForKeepAliveAsync()
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                while (!timeout.IsCancellationRequested)
+                {
+                    if (_pending.TryDequeue(out var next))
+                    {
+                        return next.Release;
+                    }
+
+                    await Task.Yield();
+                }
+
+                throw new TimeoutException("DATE keepalive did not enter its delay.");
+            }
+
+            /// <summary>Holds a 30-second keepalive delay and returns an inert timer for every other delay.</summary>
+            /// <inheritdoc />
+            public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            {
+                if (dueTime == TimeSpan.FromSeconds(30))
+                {
+                    var timer = new HeldTimer(callback, state);
+                    _pending.Enqueue(timer);
+                    return timer;
+                }
+
+                _ = period;
+                return new IdleTimer();
+            }
+
+            /// <summary>One keepalive delay whose callback the test invokes.</summary>
+            /// <param name="callback">Timer callback supplied by the delay.</param>
+            /// <param name="state">State object supplied with <paramref name="callback"/>.</param>
+            private sealed class HeldTimer(TimerCallback callback, object? state) : ITimer
+            {
+                /// <summary>Zero until <see cref="Release"/> has invoked the callback.</summary>
+                private int _fired;
+
+                /// <summary>Invokes the delay callback once.</summary>
+                internal void Release()
+                {
+                    if (Interlocked.Exchange(ref _fired, 1) == 0)
+                    {
+                        callback(state);
+                    }
+                }
+
+                /// <summary>Accepts reschedule requests. The test fires the callback.</summary>
+                /// <param name="dueTime">Ignored.</param>
+                /// <param name="period">Ignored.</param>
+                /// <returns><see langword="true"/>.</returns>
+                public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+                /// <summary>Stops a later <see cref="Release"/> from invoking the callback.</summary>
+                public void Dispose()
+                {
+                    Interlocked.Exchange(ref _fired, 1);
+                }
+
+                /// <summary>Stops a later <see cref="Release"/> from invoking the callback.</summary>
+                /// <returns>A completed task.</returns>
+                public ValueTask DisposeAsync()
+                {
+                    Dispose();
+                    return ValueTask.CompletedTask;
+                }
+            }
+        }
+
+        /// <summary>
         /// TimeProvider returning inert timers for keep-alive tests.
         /// </summary>
 
@@ -1217,6 +2029,125 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Completes immediately; no asynchronous timer teardown.</summary>
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
+        /// <summary>Reads one private instance field from <paramref name="session"/>.</summary>
+        /// <param name="session">Session whose transport fields are asserted after disposal.</param>
+        /// <param name="name">Field name, including the leading underscore.</param>
+        /// <returns>The field value, which is null when disposal has cleared it.</returns>
+        private static object? SessionField(NntpProviderSession session, string name)
+        {
+            var field = typeof(NntpProviderSession).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return field.GetValue(session);
+        }
+
+        /// <summary>
+        /// <see cref="SslStream"/> that forwards I/O to an inner duplex stream and rejects a second write while the first is held.
+        /// This is the overlapping-write failure <see cref="SslStream"/> raises for a QUIT that starts during DATE.
+        /// </summary>
+        private sealed class NestedWriteTlsStream : SslStream
+        {
+            /// <summary>Plaintext duplex stream. Owned by this wrapper.</summary>
+            private readonly Stream _inner;
+
+            /// <summary>Completes when the held write has entered <see cref="WriteAsync"/>.</summary>
+            private readonly TaskCompletionSource _entered;
+
+            /// <summary>Released by the test to let the held write finish.</summary>
+            private readonly TaskCompletionSource _release;
+
+            /// <summary>One while the held write has not left <see cref="WriteAsync"/>.</summary>
+            private int _writeDepth;
+
+            /// <summary>Zero until <see cref="HoldWrites"/> accepts the next write.</summary>
+            private int _holdArmed;
+
+            /// <summary>Entries to <see cref="DisposeAsync"/>.</summary>
+            private int _disposeAsyncCount;
+
+            /// <summary>Wraps <paramref name="inner"/> and closes it when this wrapper is disposed.</summary>
+            /// <param name="inner">Scripted duplex stream. Ownership transfers to this wrapper.</param>
+            /// <param name="entered">Signaled from inside the held write.</param>
+            /// <param name="release">Awaited by the held write.</param>
+            internal NestedWriteTlsStream(Stream inner, TaskCompletionSource entered, TaskCompletionSource release)
+                : base(inner, leaveInnerStreamOpen: false)
+            {
+                _inner = inner;
+                _entered = entered;
+                _release = release;
+            }
+
+            /// <summary>
+            /// When true, the next <see cref="WriteAsync"/> waits on the release gate.
+            /// A write that arrives while that one is still inside <see cref="WriteAsync"/> throws <see cref="NotSupportedException"/>.
+            /// </summary>
+            internal bool HoldWrites { get; set; }
+
+            /// <summary>Gets how many times <see cref="DisposeAsync"/> has been entered.</summary>
+            internal int DisposeAsyncCount => Volatile.Read(ref _disposeAsyncCount);
+
+            /// <inheritdoc />
+            public override bool CanRead => true;
+
+            /// <inheritdoc />
+            public override bool CanWrite => true;
+
+            /// <summary>Reads from the inner duplex stream. No TLS record layer is used.</summary>
+            /// <param name="buffer">Destination for plaintext bytes.</param>
+            /// <param name="cancellationToken">Cancels the inner read.</param>
+            /// <returns>The inner read count.</returns>
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                _inner.ReadAsync(buffer, cancellationToken);
+
+            /// <summary>Flushes the inner duplex stream.</summary>
+            /// <param name="cancellationToken">Cancels the inner flush.</param>
+            /// <returns>The inner flush task.</returns>
+            public override Task FlushAsync(CancellationToken cancellationToken) =>
+                _inner.FlushAsync(cancellationToken);
+
+            /// <summary>
+            /// Forwards a write, or holds the first write after <see cref="HoldWrites"/> is set.
+            /// A second write while the held one is active throws <see cref="NotSupportedException"/>.
+            /// </summary>
+            /// <param name="buffer">Bytes to write to the inner stream after the hold, when this call is the held write.</param>
+            /// <param name="cancellationToken">Cancels the inner write. The hold itself waits on the test gate.</param>
+            /// <returns>A task that completes when the inner write completes, or a faulted task for the overlapping write.</returns>
+            /// <exception cref="NotSupportedException">Another write is already inside this method.</exception>
+            public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                if (Volatile.Read(ref _writeDepth) > 0)
+                {
+                    throw new NotSupportedException("SslStream does not support simultaneous writes.");
+                }
+
+                var holdThis = HoldWrites && Interlocked.Exchange(ref _holdArmed, 1) == 0;
+                if (!holdThis)
+                {
+                    await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                Interlocked.Increment(ref _writeDepth);
+                try
+                {
+                    _entered.TrySetResult();
+                    await _release.Task.ConfigureAwait(false);
+                    await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _writeDepth);
+                }
+            }
+
+            /// <summary>Counts one dispose, then disposes this wrapper and the inner duplex stream.</summary>
+            /// <returns>The base dispose task.</returns>
+            public override ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref _disposeAsyncCount);
+                return base.DisposeAsync();
+            }
         }
     }
 }

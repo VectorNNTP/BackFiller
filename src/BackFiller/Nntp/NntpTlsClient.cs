@@ -53,6 +53,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Optional certificate callback. Null uses platform validation.
         /// </param>
         /// <param name="cancellationToken">Cancels the handshake. Combined with <paramref name="timeout"/>.</param>
+        /// <param name="streamFactory">
+        /// When non-null, builds the wrapper around <paramref name="inner"/>. The wrapper must own <paramref name="inner"/>.
+        /// Null uses <see cref="SslStream"/> with the inner stream closed on dispose. Production callers pass null.
+        /// </param>
         /// <returns>The authenticated stream. It owns <paramref name="inner"/>.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="inner"/> is null.</exception>
         /// <exception cref="ArgumentNullException"><paramref name="host"/> is null.</exception>
@@ -66,10 +70,11 @@ namespace VectorNNTP.BackFiller.Nntp
             string host,
             TimeSpan timeout,
             RemoteCertificateValidationCallback? serverCertificateValidationCallback,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Func<Stream, SslStream>? streamFactory = null)
         {
             ArgumentNullException.ThrowIfNull(inner);
-            var ssl = new SslStream(inner, leaveInnerStreamOpen: false);
+            var ssl = streamFactory?.Invoke(inner) ?? new SslStream(inner, leaveInnerStreamOpen: false);
             try
             {
                 using var tlsCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

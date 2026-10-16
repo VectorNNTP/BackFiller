@@ -158,6 +158,60 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>When set, ARTICLE waits here before the scripted response is written.</summary>
         public TaskCompletionSource? BlockArticle { get; set; }
 
+        /// <summary>
+        /// When set, ARTICLE writes only the 220 status line, signals <see cref="ArticleStatusWritten"/>, then waits here before the body.
+        /// AUTHINFO and other commands still use the installed responder.
+        /// </summary>
+        public TaskCompletionSource? HoldArticleBody { get; set; }
+
+        /// <summary>Set after the 220 status line for a held ARTICLE body has been flushed to the client.</summary>
+        public TaskCompletionSource? ArticleStatusWritten { get; set; }
+
+        /// <summary>
+        /// When set, the next client read that copies a newline waits before <see cref="DuplexPipeStream.ReadAsync"/> returns those bytes.
+        /// Connect reads must finish before this is armed, or the greeting is held too.
+        /// </summary>
+        public TaskCompletionSource? HoldStatusLineReturn { get; set; }
+
+        /// <summary>Set when a status line has been copied into the client buffer and <see cref="HoldStatusLineReturn"/> is waiting.</summary>
+        public TaskCompletionSource? StatusLineCopied { get; set; }
+
+        /// <summary>
+        /// When set, the next non-QUIT client write waits after the pipe flush and before <see cref="DuplexPipeStream.WriteAsync"/> returns.
+        /// QUIT is not held, so session disposal can finish while a command write is paused.
+        /// </summary>
+        public TaskCompletionSource? HoldAfterCommandWrite { get; set; }
+
+        /// <summary>Set when a non-QUIT command has been flushed and <see cref="HoldAfterCommandWrite"/> is waiting.</summary>
+        public TaskCompletionSource? CommandWriteFlushed { get; set; }
+
+        /// <summary>
+        /// When set, the first client read waits here before touching the pipe.
+        /// Used to dispose the session after transport publication and before the greeting read returns.
+        /// </summary>
+        public TaskCompletionSource? HoldInitialRead { get; set; }
+
+        /// <summary>Set when the first client read has entered and <see cref="HoldInitialRead"/> is waiting.</summary>
+        public TaskCompletionSource? InitialReadEntered { get; set; }
+
+        /// <summary>
+        /// When set, the first <see cref="DuplexPipeStream.DisposeAsync"/> closes the pipes and then throws <see cref="IOException"/>.
+        /// Later dispose calls do not throw.
+        /// </summary>
+        public bool FaultClientDispose { get; set; }
+
+        /// <summary>Zero until <see cref="TryBeginStatusLineHold"/> accepts the first completed status line.</summary>
+        private int _statusLineHoldStarted;
+
+        /// <summary>Zero until <see cref="TryBeginInitialReadHold"/> accepts the first client read.</summary>
+        private int _initialReadHoldStarted;
+
+        /// <summary>Zero until <see cref="TryConsumeDisposeFault"/> accepts the first throwing dispose.</summary>
+        private int _disposeFaultUsed;
+
+        /// <summary>Zero until <see cref="TryBeginCommandWriteHold"/> accepts the first non-QUIT write.</summary>
+        private int _commandWriteHoldStarted;
+
         /// <summary>Set when a DATE command is read, before any optional block.</summary>
         public TaskCompletionSource? DateStarted { get; set; }
 
@@ -209,6 +263,43 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             Interlocked.Increment(ref _clientStreamDisposeAsyncInvocations);
         }
 
+        /// <summary>
+        /// Accepts the first client read that already copied a newline while <see cref="HoldStatusLineReturn"/> is set.
+        /// </summary>
+        /// <returns><see langword="true"/> when this read must wait before returning the copied bytes.</returns>
+        internal bool TryBeginStatusLineHold()
+        {
+            return HoldStatusLineReturn is not null && Interlocked.Exchange(ref _statusLineHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts the first client read while <see cref="HoldInitialRead"/> is set, before the pipe is read.
+        /// </summary>
+        /// <returns><see langword="true"/> when this read must wait before observing greeting bytes or a closed pipe.</returns>
+        internal bool TryBeginInitialReadHold()
+        {
+            return HoldInitialRead is not null && Interlocked.Exchange(ref _initialReadHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts one throwing dispose while <see cref="FaultClientDispose"/> is set.
+        /// The pipes are already completed by the caller.
+        /// </summary>
+        /// <returns><see langword="true"/> when this dispose must throw <see cref="IOException"/>.</returns>
+        internal bool TryConsumeDisposeFault()
+        {
+            return FaultClientDispose && Interlocked.Exchange(ref _disposeFaultUsed, 1) == 0;
+        }
+
+        /// <summary>
+        /// Accepts the first non-QUIT client write while <see cref="HoldAfterCommandWrite"/> is set.
+        /// </summary>
+        /// <returns><see langword="true"/> when this write must wait after the pipe flush and before <see cref="DuplexPipeStream.WriteAsync"/> returns.</returns>
+        internal bool TryBeginCommandWriteHold()
+        {
+            return HoldAfterCommandWrite is not null && Interlocked.Exchange(ref _commandWriteHoldStarted, 1) == 0;
+        }
+
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
         public string StartTlsCapabilityLabel { get; set; } = "STARTTLS";
 
@@ -256,7 +347,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             if (CompleteWithoutGreeting)
             {
                 await _toClient.Writer.CompleteAsync().ConfigureAwait(false);
-                return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
+                return DecorateClientStream(new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this));
             }
 
             var greeting = Encoding.ASCII.GetBytes(Greeting.EndsWith("\r\n", StringComparison.Ordinal)
@@ -265,8 +356,24 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             _toClient.Writer.Write(greeting);
             await _toClient.Writer.FlushAsync().ConfigureAwait(false);
             _ = RunServerAsync();
-            return new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this);
+            return DecorateClientStream(new DuplexPipeStream(_toClient.Reader, _toServer.Writer, this));
         }
+
+        /// <summary>
+        /// When set, wraps the duplex client stream before <see cref="AcceptClientAsync"/> returns it.
+        /// Null leaves the duplex stream as the session transport.
+        /// </summary>
+        /// <remarks>
+        /// Tests install an <see cref="SslStream"/> here so a held write and a later QUIT hit the same TLS write path.
+        /// The wrapper owns the duplex stream and must dispose it.
+        /// </remarks>
+        internal Func<Stream, Stream>? ClientStreamDecorator { get; set; }
+
+        /// <summary>Applies <see cref="ClientStreamDecorator"/> when a test installed one.</summary>
+        /// <param name="client">Duplex stream just created for the accepted client.</param>
+        /// <returns>The decorator result, or <paramref name="client"/> when no decorator is set.</returns>
+        private Stream DecorateClientStream(Stream client) =>
+            ClientStreamDecorator is { } decorate ? decorate(client) : client;
 
         /// <summary>
         /// Reads CRLF-delimited commands, applies built-in handlers and the configured responder, and completes the outbound pipe on exit.
@@ -328,6 +435,22 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                         if (BlockArticle is not null)
                         {
                             await BlockArticle.Task.ConfigureAwait(false);
+                        }
+
+                        if (HoldArticleBody is not null)
+                        {
+                            _toClient.Writer.Write("220 0 <a@b> article follows\r\n"u8);
+                            var statusFlush = await _toClient.Writer.FlushAsync().ConfigureAwait(false);
+                            ArticleStatusWritten?.TrySetResult();
+                            await HoldArticleBody.Task.ConfigureAwait(false);
+                            _toClient.Writer.Write("From: a@b\r\n\r\nbody\r\n.\r\n"u8);
+                            var bodyFlush = await _toClient.Writer.FlushAsync().ConfigureAwait(false);
+                            if (CompleteAfterResponse || statusFlush.IsCompleted || bodyFlush.IsCompleted)
+                            {
+                                break;
+                            }
+
+                            continue;
                         }
                     }
                     else if (text.Equals("DATE", StringComparison.OrdinalIgnoreCase))
@@ -428,9 +551,35 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         {
         }
 
+        /// <summary>
+        /// Completes when this stream is still open. Flushing after disposal throws <see cref="ObjectDisposedException"/>.
+        /// </summary>
+        /// <param name="cancellationToken">Ignored. This flush does not write to the pipes.</param>
+        /// <returns>A completed task when the stream has not been disposed.</returns>
+        /// <exception cref="ObjectDisposedException">The stream was already disposed.</exception>
+        /// <remarks>
+        /// Command bytes are pushed in <see cref="WriteAsync"/>. The session calls this method afterward.
+        /// A disposed flush fails the caller with <see cref="ObjectDisposedException"/>, which is distinct from an empty status read.
+        /// </remarks>
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                throw new ObjectDisposedException(nameof(DuplexPipeStream));
+            }
+
+            return Task.CompletedTask;
+        }
+
         /// <inheritdoc />
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner is not null && owner.TryBeginInitialReadHold())
+            {
+                owner.InitialReadEntered?.TrySetResult();
+                await owner.HoldInitialRead!.Task.ConfigureAwait(false);
+            }
+
             while (true)
             {
                 var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -448,6 +597,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
                 result.Buffer.Slice(0, taken).CopyTo(buffer.Span);
                 reader.AdvanceTo(result.Buffer.GetPosition(taken));
+                if (owner is not null
+                    && buffer.Span[..taken].IndexOf((byte)'\n') >= 0
+                    && owner.TryBeginStatusLineHold())
+                {
+                    owner.StatusLineCopied?.TrySetResult();
+                    await owner.HoldStatusLineReturn!.Task.ConfigureAwait(false);
+                }
+
                 return taken;
             }
         }
@@ -482,6 +639,13 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
             writer.Write(buffer.Span);
             await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            if (owner is not null
+                && buffer.Span.IndexOf("QUIT"u8) < 0
+                && owner.TryBeginCommandWriteHold())
+            {
+                owner.CommandWriteFlushed?.TrySetResult();
+                await owner.HoldAfterCommandWrite!.Task.ConfigureAwait(false);
+            }
         }
 
         /// <inheritdoc />
@@ -494,10 +658,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// Counts every disposal entry, then lets <see cref="Dispose(bool)"/> complete the pipes once.
         /// </summary>
         /// <returns>The completed disposal task from <see cref="Stream.DisposeAsync"/>.</returns>
-        public override ValueTask DisposeAsync()
+        public override async ValueTask DisposeAsync()
         {
             owner?.RecordClientStreamDisposeAsync();
-            return base.DisposeAsync();
+            await base.DisposeAsync().ConfigureAwait(false);
+            if (owner?.TryConsumeDisposeFault() == true)
+            {
+                throw new IOException("plaintext dispose failed");
+            }
         }
 
         /// <inheritdoc />
