@@ -7,7 +7,10 @@ using VectorNNTP.BackFiller.Cloudflare;
 using VectorNNTP.BackFiller.Configuration;
 using VectorNNTP.BackFiller.Core;
 using VectorNNTP.BackFiller.Hosting;
+using VectorNNTP.BackFiller.Hosting.Systemd;
+using VectorNNTP.BackFiller.Networking.Certificates;
 using VectorNNTP.BackFiller.Tests.Fixtures;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 namespace VectorNNTP.BackFiller.Tests.Acme
 {
@@ -120,6 +123,187 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             manager.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => manager.EvaluateExisting());
+        }
+
+        /// <summary>
+        /// A usable certificate outside the renewal window stays healthy after one injected renewal fault.
+        /// </summary>
+        [Fact]
+        public async Task Transient_renewal_fault_outside_the_window_stays_healthy()
+        {
+            var started = DateTimeOffset.UtcNow;
+            await using var observed = CreateObservedRenewal(started, new ThrowingIssuer(), notAfter: started.AddDays(90), seedDisk: true);
+            observed.Health.MarkStarted();
+            await observed.Service.StartAsync(CancellationToken.None);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+
+            observed.Service.RenewalFaultsToInject = 1;
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            observed.Time.Advance(TimeSpan.FromHours(6));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalChecksCompleted == 1, TimeSpan.FromSeconds(2));
+
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+            Assert.Equal(0, observed.Service.RenewalFaultsToInject);
+            await observed.Service.StopAsync(CancellationToken.None);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+        }
+
+        /// <summary>
+        /// Repeated renewal failure inside the safety window blocks watchdog keep-alives. A later replacement clears the block.
+        /// </summary>
+        [Fact]
+        public async Task Renewal_failure_inside_the_window_blocks_health_until_a_replacement_is_published()
+        {
+            var started = DateTimeOffset.UtcNow;
+            var reading = 0;
+            var issuer = new ScriptedIssuer((call, domains, password) => call switch
+            {
+                1 => CreateMaterial(domains, password, started.AddDays(20)),
+                2 => throw new InvalidOperationException("renewal failed"),
+                _ => CreateMaterial(domains, password, started.AddDays(90)),
+            });
+            await using var observed = CreateObservedRenewal(started, issuer, notAfter: null, seedDisk: false);
+            observed.Health.MarkStarted();
+            await observed.Service.StartAsync(CancellationToken.None);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+            var lease = observed.Publisher.Acquire();
+            var reader = Task.Run(() =>
+            {
+                while (Volatile.Read(ref reading) == 0)
+                {
+                    _ = observed.Health.IsHealthyForWatchdog;
+                    if (observed.Publisher.IsAvailable)
+                    {
+                        using var current = observed.Publisher.Acquire();
+                    }
+                }
+            });
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            observed.Time.Advance(TimeSpan.FromHours(6));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalChecksCompleted == 1, TimeSpan.FromSeconds(2));
+            Assert.False(observed.Health.IsHealthyForWatchdog);
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalWaitsStarted == 2, TimeSpan.FromSeconds(2));
+            observed.Time.Advance(TimeSpan.FromHours(6));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalChecksCompleted == 2, TimeSpan.FromSeconds(2));
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+            Assert.True(observed.Publisher.IsAvailable);
+
+            Volatile.Write(ref reading, 1);
+            await reader.WaitAsync(TimeSpan.FromSeconds(2));
+            lease.Dispose();
+            using (observed.Publisher.Acquire())
+            {
+            }
+
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+        }
+
+        /// <summary>
+        /// An expired published certificate is not healthy, including when renewal cannot replace it.
+        /// </summary>
+        [Fact]
+        public async Task Expired_certificate_is_not_healthy()
+        {
+            var started = DateTimeOffset.UtcNow;
+            var expires = started.AddHours(5);
+            var issuer = new ScriptedIssuer((call, domains, password) => call == 1
+                ? CreateMaterial(domains, password, expires)
+                : throw new InvalidOperationException("renewal failed"));
+            await using var observed = CreateObservedRenewal(started, issuer, notAfter: null, seedDisk: false);
+            observed.Health.MarkStarted();
+            await observed.Service.StartAsync(CancellationToken.None);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            observed.Time.Advance(TimeSpan.FromHours(6));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalChecksCompleted == 1, TimeSpan.FromSeconds(2));
+
+            Assert.False(observed.Health.IsHealthyForWatchdog);
+            Assert.True(AcmeCertificateService.CertificateRequiresWatchdogBlock(
+                new CertificateStatus(Usable: false, DueForRenewal: true, Material: null, Reason: "expired"),
+                renewalReplacedCertificate: false));
+            Assert.True(AcmeCertificateService.CertificateRequiresWatchdogBlock(
+                new CertificateStatus(Usable: false, DueForRenewal: true, Material: null, Reason: "absent"),
+                renewalReplacedCertificate: true));
+        }
+
+        /// <summary>
+        /// Stopping the renewal loop while it is waiting is not recorded as a renewal failure.
+        /// </summary>
+        [Fact]
+        public async Task Renewal_shutdown_cancellation_is_not_a_failure()
+        {
+            var started = DateTimeOffset.UtcNow;
+            await using var observed = CreateObservedRenewal(
+                started,
+                new ThrowingIssuer(),
+                notAfter: started.AddDays(90),
+                seedDisk: true);
+            observed.Health.MarkStarted();
+            await observed.Service.StartAsync(CancellationToken.None);
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => observed.Service.RenewalWaitsStarted == 1, TimeSpan.FromSeconds(2));
+
+            await observed.Service.StopAsync(CancellationToken.None);
+
+            Assert.Equal(0, observed.Service.RenewalChecksCompleted);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+            Assert.True(observed.Service.Execution!.IsCompleted);
+            observed.Time.Advance(TimeSpan.FromHours(6));
+            Assert.Equal(0, observed.Service.RenewalChecksCompleted);
+            Assert.True(observed.Health.IsHealthyForWatchdog);
+        }
+
+        /// <summary>
+        /// Builds a TLS-enabled certificate service on a manual clock with watchdog health and an in-memory publisher.
+        /// </summary>
+        private static ObservedRenewal CreateObservedRenewal(
+            DateTimeOffset clock,
+            ICertificateIssuer issuer,
+            DateTimeOffset? notAfter,
+            bool seedDisk)
+        {
+            var time = new ManualTimeProvider(clock);
+            var dir = new TempAcmeDir();
+            var options = BackFillerTestOptions.CreateValidAcme();
+            options.AcmeStateDir = dir.Path;
+            options.Fqdn = "backfiller01.usenet.ninja";
+            options.IncludeNewsHostnameInCertificate = false;
+            var domains = CertificateIdentities.ForFqdn(options.Fqdn, includeNewsHostname: false);
+            var store = new CertificateStore(
+                dir.Path,
+                options.Fqdn,
+                options.AcmeCertificatePassword,
+                domains,
+                TimeSpan.FromDays(options.AcmeRenewalThresholdDays));
+            if (seedDisk)
+            {
+                store.Save(CreateMaterial(domains, options.AcmeCertificatePassword, notAfter ?? clock.AddDays(90)));
+            }
+
+            var manager = new CertificateManager(
+                options.Fqdn,
+                dir.Path,
+                options.AcmeDirectoryUrl,
+                store,
+                issuer,
+                options.AcmeCertificatePassword,
+                TimeSpan.FromDays(options.AcmeRenewalThresholdDays),
+                NullLogger<CertificateManager>.Instance,
+                includeNewsHostname: false);
+            var readiness = new AcmeCertificateReadiness();
+            var publisher = new TlsCertificateContextProvider(NullLogger<TlsCertificateContextProvider>.Instance);
+            var health = new BackFillerApplicationHealth();
+            var service = new AcmeCertificateService(
+                Options.Create<AcmeCloudflareOptions>(options),
+                new InjectedManagerFactory(manager, Options.Create<AcmeCloudflareOptions>(options)),
+                publisher,
+                readiness,
+                NullLogger<AcmeCertificateService>.Instance,
+                time,
+                health);
+            return new ObservedRenewal(service, health, time, publisher, dir);
         }
 
         /// <summary>
@@ -424,6 +608,70 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             /// </summary>
             /// <param name="name">Named client key (ignored).</param>
             public HttpClient CreateClient(string name) => new();
+        }
+
+        /// <summary>Manual-clock renewal service, watchdog health, and the publisher used to swap certificate leases.</summary>
+        private sealed class ObservedRenewal : IAsyncDisposable
+        {
+            private readonly TempAcmeDir _directory;
+
+            /// <summary>Stores the started collaborators. The caller starts the service.</summary>
+            internal ObservedRenewal(
+                AcmeCertificateService service,
+                BackFillerApplicationHealth health,
+                ManualTimeProvider time,
+                TlsCertificateContextProvider publisher,
+                TempAcmeDir directory)
+            {
+                Service = service;
+                Health = health;
+                Time = time;
+                Publisher = publisher;
+                _directory = directory;
+            }
+
+            /// <summary>Certificate service under test.</summary>
+            internal AcmeCertificateService Service { get; }
+
+            /// <summary>Watchdog health updated by the service.</summary>
+            internal BackFillerApplicationHealth Health { get; }
+
+            /// <summary>Clock advanced by the test.</summary>
+            internal ManualTimeProvider Time { get; }
+
+            /// <summary>Publisher that swaps the listener certificate context.</summary>
+            internal TlsCertificateContextProvider Publisher { get; }
+
+            /// <summary>Stops the renewal loop, then releases the publisher and temp directory.</summary>
+            public async ValueTask DisposeAsync()
+            {
+                await Service.StopAsync(CancellationToken.None).ConfigureAwait(false);
+                await Service.DisposeAsync().ConfigureAwait(false);
+                await Publisher.DisposeAsync().ConfigureAwait(false);
+                _directory.Dispose();
+            }
+        }
+
+        /// <summary>Issuer whose result depends on the 1-based call count.</summary>
+        private sealed class ScriptedIssuer : ICertificateIssuer
+        {
+            private readonly Func<int, IReadOnlyList<string>, string, CertificateMaterial> _next;
+            private int _calls;
+
+            /// <summary>Stores the script. Call 1 is the first <see cref="IssueAsync"/>.</summary>
+            internal ScriptedIssuer(Func<int, IReadOnlyList<string>, string, CertificateMaterial> next)
+            {
+                _next = next;
+            }
+
+            /// <inheritdoc />
+            public Task<CertificateMaterial> IssueAsync(IReadOnlyList<string> domains, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var call = Interlocked.Increment(ref _calls);
+                var password = BackFillerTestOptions.CreateValidAcme().AcmeCertificatePassword;
+                return Task.FromResult(_next(call, domains, password));
+            }
         }
 
         /// <summary>ICertificateIssuer that always throws to simulate issuance failure.</summary>

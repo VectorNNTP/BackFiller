@@ -185,8 +185,9 @@ namespace VectorNNTP.BackFiller.Acme
         /// When a previously usable certificate exists and issuance fails, that material is kept and the result is <see langword="false"/>.
         /// </summary>
         /// <param name="cancellationToken">Cancels the gate wait, the issuance lock wait, and issuance. Cancellation is not swallowed.</param>
+        /// <param name="now">UTC time for the due check. <see langword="null"/> uses <see cref="DateTimeOffset.UtcNow"/>.</param>
         /// <returns><see langword="true"/> when a new certificate was persisted.</returns>
-        internal async Task<bool> RenewIfDueAsync(CancellationToken cancellationToken)
+        internal async Task<bool> RenewIfDueAsync(CancellationToken cancellationToken, DateTimeOffset? now = null)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -195,7 +196,7 @@ namespace VectorNNTP.BackFiller.Acme
                 await using var issuanceLock = await AcmeIssuanceLock
                     .AcquireAsync(_stateDir, _fqdn, cancellationToken)
                     .ConfigureAwait(false);
-                var status = EvaluateExisting();
+                var status = EvaluateExisting(now);
                 if (status is { Usable: true, Material: not null, DueForRenewal: false })
                 {
                     _current = status.Material;

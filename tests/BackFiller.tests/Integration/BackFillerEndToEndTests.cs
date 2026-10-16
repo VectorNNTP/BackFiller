@@ -60,26 +60,29 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(retained.Length, harness.Retention.RetainedPayloadBytes);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
-        /// <summary>ThrowOnPublish and publish nack still ack inbound work after successful retention and handler success.</summary>
+        /// <summary>ThrowOnPublish and publish nack NACK-requeue inbound work after successful retention. They do not ACK.</summary>
 
         [Fact]
-        public async Task Publish_failure_and_confirm_failure_ack_successful_work()
+        public async Task Publish_failure_and_confirm_failure_requeue_successful_work()
         {
             await using var publishFail = await BackFillerPipelineHarness.StartAsync(FakePublishConfirmBehavior.ThrowOnPublish);
             publishFail.EnqueueArticle(CanonicalPayload);
             var publishChannel = new FakeBackFillerRabbitMqChannel(1);
             var publishOutcome = await publishFail.ProcessCanonicalAsync(publishChannel);
-            Assert.Equal(ArticleWorkOutcome.Success, publishOutcome);
-            Assert.True(Assert.Single(publishChannel.Settlements).Acknowledge);
-            Assert.False(Assert.Single(publishChannel.Settlements).Requeue);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, publishOutcome);
+            Assert.False(Assert.Single(publishChannel.Settlements).Acknowledge);
+            Assert.True(Assert.Single(publishChannel.Settlements).Requeue);
 
             await using var confirmFail = await BackFillerPipelineHarness.StartAsync(FakePublishConfirmBehavior.Nack);
             confirmFail.EnqueueArticle(CanonicalPayload);
             var confirmChannel = new FakeBackFillerRabbitMqChannel(1);
             var confirmOutcome = await confirmFail.ProcessCanonicalAsync(confirmChannel);
-            Assert.Equal(ArticleWorkOutcome.Success, confirmOutcome);
-            Assert.True(Assert.Single(confirmChannel.Settlements).Acknowledge);
-            Assert.False(Assert.Single(confirmChannel.Settlements).Requeue);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, confirmOutcome);
+            Assert.False(Assert.Single(confirmChannel.Settlements).Acknowledge);
+            Assert.True(Assert.Single(confirmChannel.Settlements).Requeue);
+            Assert.Equal(
+                ArticleWorkTestDeliveries.CanonicalCorrelationId,
+                Assert.Single(confirmFail.PublishChannel.Publications).CorrelationId);
         }
         /// <summary>Success processing with stale channel or closed channel leaves settlements empty after confirm.</summary>
 

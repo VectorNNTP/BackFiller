@@ -76,10 +76,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// Publish/confirm failure modes for success still terminal-ack without requeue (no local retry loop).
+        /// Publish/confirm failure modes for success NACK-requeue once and do not ACK (no local retry loop).
         /// </summary>
         [Fact]
-        public async Task Success_publication_failures_ack_and_do_not_requeue()
+        public async Task Success_publication_failures_nack_requeue_and_do_not_ack()
         {
             FakePublishConfirmBehavior[] behaviors =
             [
@@ -103,11 +103,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                     static () => true,
                     CancellationToken.None);
 
-                Assert.Equal(ArticleWorkOutcome.Success, outcome);
+                Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
                 Assert.Equal(1, handler.HandleCount);
                 var settlement = Assert.Single(channel.Settlements);
-                Assert.True(settlement.Acknowledge);
-                Assert.False(settlement.Requeue);
+                Assert.False(settlement.Acknowledge);
+                Assert.True(settlement.Requeue);
             }
         }
 
@@ -135,7 +135,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// Connection loss during publish suppresses settlement even when handler reports success.
+        /// Connection loss during publish fails the reply and suppresses settlement. The delivery is not ACKed.
         /// </summary>
         [Fact]
         public async Task Generation_disappears_during_publication_does_not_ack()
@@ -152,7 +152,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 () => context.Connections.TryGetCurrent(out var handle) && handle.Generation == 1,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.Success, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
             Assert.Empty(channel.Settlements);
         }
 
@@ -201,6 +201,60 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(ArticleWorkOutcome.Success, outcome);
             Assert.Empty(original.Settlements);
             Assert.Empty(replacement.Settlements);
+        }
+
+        /// <summary>
+        /// A failed publish on a closed consume channel does not NACK that tag, and it does not settle a replacement channel.
+        /// </summary>
+        [Fact]
+        public async Task Closed_channel_publish_failure_does_not_settle_a_replacement()
+        {
+            await using var context = await PublicationContext.StartAsync(FakePublishConfirmBehavior.ThrowOnPublish);
+            var original = new FakeBackFillerRabbitMqChannel(1);
+            var replacement = new FakeBackFillerRabbitMqChannel(2);
+            original.IsOpen = false;
+            var pipeline = new ArticleWorkDeliveryPipeline(SuccessHandler(), context.Publisher, 1024);
+
+            var outcome = await pipeline.ProcessAsync(
+                ArticleWorkTestDeliveries.Canonical(),
+                "Giganews",
+                original,
+                static () => true,
+                CancellationToken.None);
+
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
+            Assert.Empty(original.Settlements);
+            Assert.Empty(replacement.Settlements);
+        }
+
+        /// <summary>
+        /// Cancelling while the publisher is waiting for a confirm NACK-requeues and does not ACK.
+        /// </summary>
+        [Fact]
+        public async Task Cancellation_during_publication_nacks_with_requeue()
+        {
+            await using var context = await PublicationContext.StartAsync(FakePublishConfirmBehavior.Wait);
+            var enqueued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            context.PublishChannel.Enqueued = enqueued;
+            context.PublishChannel.ConfirmGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var channel = new FakeBackFillerRabbitMqChannel(1);
+            var pipeline = new ArticleWorkDeliveryPipeline(SuccessHandler(), context.Publisher, 1024);
+            using var cts = new CancellationTokenSource();
+
+            var processing = pipeline.ProcessAsync(
+                ArticleWorkTestDeliveries.Canonical(),
+                "Giganews",
+                channel,
+                static () => true,
+                cts.Token);
+            await enqueued.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await cts.CancelAsync();
+
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, await processing.WaitAsync(TimeSpan.FromSeconds(2)));
+            var settlement = Assert.Single(channel.Settlements);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
+            Assert.Equal(ArticleWorkTestDeliveries.CanonicalCorrelationId, Assert.Single(context.PublishChannel.Publications).CorrelationId);
         }
 
         /// <summary>
@@ -262,10 +316,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// Terminal response publish nack still acks the inbound delivery without requeue.
+        /// A publisher nack after the reply is recorded is an ambiguous confirm. The delivery NACK-requeues and is not ACKed.
         /// </summary>
         [Fact]
-        public async Task Terminal_response_confirm_failure_acks_without_requeue()
+        public async Task Terminal_response_confirm_failure_nacks_with_requeue()
         {
             await using var context = await PublicationContext.StartAsync(FakePublishConfirmBehavior.Nack);
             var channel = new FakeBackFillerRabbitMqChannel(1);
@@ -281,17 +335,19 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static () => true,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.ArticleNotFound, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
+            var publication = Assert.Single(context.PublishChannel.Publications);
+            Assert.Equal(ArticleWorkTestDeliveries.CanonicalCorrelationId, publication.CorrelationId);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
         }
 
         /// <summary>
-        /// InvalidRequest path acks without requeue when publish throws before confirm.
+        /// InvalidRequest path NACK-requeues when publish throws before the reply is recorded.
         /// </summary>
         [Fact]
-        public async Task InvalidRequest_publish_failure_acks_without_requeue()
+        public async Task InvalidRequest_publish_failure_nacks_with_requeue()
         {
             await using var context = await PublicationContext.StartAsync(FakePublishConfirmBehavior.ThrowOnPublish);
             var channel = new FakeBackFillerRabbitMqChannel(1);
@@ -304,10 +360,11 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static () => true,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.InvalidRequest, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
+            Assert.Empty(context.PublishChannel.Publications);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
         }
 
         /// <summary>
@@ -504,7 +561,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// Single pipeline pass after publish nack: one handler invocation, one publication attempt, terminal ack.
+        /// Single pipeline pass after publish nack: one handler invocation, one publication attempt, one NACK.
         /// </summary>
         [Fact]
         public async Task One_delivery_is_not_retried_locally_after_publish_failure()
@@ -524,45 +581,37 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             Assert.Equal(1, handler.HandleCount);
             Assert.Single(context.PublishChannel.Publications);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
         }
 
         /// <summary>
-        /// Unroutable success confirm still ends in a single terminal ack without requeue-driven handler replays.
+        /// An unroutable confirm NACK-requeues once. The pipeline does not replay the handler on that same call.
         /// </summary>
         [Fact]
-        public async Task Unroutable_success_response_cannot_requeue_into_an_execution_loop()
+        public async Task Unroutable_success_response_nacks_once_without_a_local_execution_loop()
         {
             await using var context = await PublicationContext.StartAsync(FakePublishConfirmBehavior.Unroutable);
             var handler = SuccessHandler();
             var channel = new FakeBackFillerRabbitMqChannel(1);
             var pipeline = new ArticleWorkDeliveryPipeline(handler, context.Publisher, 1024);
-            var delivery = ArticleWorkTestDeliveries.Canonical();
 
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                if (attempt > 0 && channel.Settlements.Count > 0 && !channel.Settlements[^1].Requeue)
-                {
-                    break;
-                }
+            var outcome = await pipeline.ProcessAsync(
+                ArticleWorkTestDeliveries.Canonical(),
+                "Giganews",
+                channel,
+                static () => true,
+                CancellationToken.None);
 
-                await pipeline.ProcessAsync(
-                    delivery,
-                    "Giganews",
-                    channel,
-                    static () => true,
-                    CancellationToken.None);
-            }
-
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
             Assert.Equal(1, handler.HandleCount);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
         }
 
         /// <summary>
-        /// Unroutable success publication logs request id, outcome, and unroutable hint while still acking.
+        /// Unroutable success publication logs request id, outcome, and unroutable hint, then NACK-requeues.
         /// </summary>
         [Fact]
         public async Task Unroutable_success_publication_is_logged_with_request_id_and_outcome()
@@ -581,8 +630,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static () => true,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.Success, outcome);
-            Assert.True(Assert.Single(channel.Settlements).Acknowledge);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
+            Assert.False(Assert.Single(channel.Settlements).Acknowledge);
+            Assert.True(Assert.Single(channel.Settlements).Requeue);
             Assert.Contains(
                 logger.Messages,
                 static message =>

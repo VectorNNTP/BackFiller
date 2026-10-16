@@ -12,13 +12,17 @@ The worker consumes RabbitMQ Article Work, retrieves articles from upstream NNTP
 
 After start, non-null `IApplicationService.Execution` tasks are watched. A fault, a successful completion, or cancellation of that execution raises `UnexpectedServiceTermination`. `BackFillerApplicationHostedService` marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`.
 
-`SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. Readiness is not inferred from DI registration order.
+`SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. That flag is also false while the published TLS certificate is missing, unreadable, expired, or still inside the renewal window after a renewal attempt that did not replace it. A later successful publication of a usable certificate clears that condition. Unexpected supervised-service termination stays sticky. Readiness is not inferred from DI registration order.
 
 Article Work shutdown uses `BackFillerShutdownOptions`:
 
 - `DrainQueuedWork` defaults to true. When false, admitted work that has not entered processing is cancelled and NACK-requeued. Broker-prefetched deliveries that were never admitted are not drained by this flag.
 - `FinishActiveArticles` defaults to true. When false, active work is cooperatively cancelled. Cancellation does not ACK the delivery.
 - `ArticleWorkConsumerSession.RetireAsync()` without a token waits for admitted work and does not arm the grace timer. The host shutdown path passes a grace token from `GracePeriodSeconds`.
+
+## Article Work reconcile
+
+The consumer membership loop waits 15 seconds after a pass that started every desired consumer, including a pass with nothing to start. A pass that cannot declare topology because RabbitMQ is not ready, or because channel creation or declaration failed for a desired backbone, does not reset that delay. The next wait doubles, up to 2 minutes. An unexpected exception uses the same delay and does not end the loop. Shutdown cancellation ends the loop and is not a failure. The host stays healthy while RabbitMQ is temporarily unavailable. Capacity snapshots and connection replacement reconcile once on the shared gate and do not change the delay. If replacement cannot restore a session, the same periodic loop retries it. A later successful pass resets the delay to 15 seconds.
 
 ## Article Work settlement
 
@@ -39,7 +43,7 @@ If cancellation is already requested, the planner returns NACK requeue and does 
 
 `ArticleWorkSettlementLease` is one settlement attempt for one delivery tag on the original consumer channel and connection generation. It sets the settled flag before the broker RPC. If that RPC throws, the flag stays set and the lease does not retry. If the channel is stale, closed, or not the original channel, `TrySettleAsync` returns false without ACK or NACK, and the broker may redeliver. Pipeline settlement calls use `CancellationToken.None`.
 
-When the success publisher reports that it does not complete success publication, the pipeline NACK-requeues and still returns `ArticleWorkOutcome.Success`. A non-cancellation publication failure of a non-requeue disposition still settles that disposition, including ACK. Cancellation of the publication attempt NACK-requeues.
+When the success publisher reports that it does not complete success publication, the pipeline NACK-requeues and still returns `ArticleWorkOutcome.Success`. A required terminal response that is cancelled or that fails NACK-requeues and returns `ArticleWorkOutcome.UnexpectedFailure`, including when the planned disposition was ACK. The lease still settles at most once. A failed NACK is not retried on that lease, and a stale or replacement channel is not settled. A confirm lost after the broker has accepted the publish is indistinguishable from a failed publish, so the requeue can publish a second reply with the same correlation id. That is at-least-once for the reply when the confirm is ambiguous, not exactly-once.
 
 Publisher confirms (`BasicAcksAsync` / `BasicNacksAsync` on an async-confirm publish channel) are the broker's response to an outbound publish. They are not the consumer ACK of the inbound delivery.
 

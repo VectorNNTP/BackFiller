@@ -4,6 +4,7 @@ using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.RabbitMq;
 using VectorNNTP.BackFiller.Tests.Fixtures;
 using VectorNNTP.BackFiller.Tests.RabbitMq;
+using VectorNNTP.BackFiller.Tests.TestDoubles;
 
 using VectorNNTP.BackFiller.Messaging.RabbitMq;
 
@@ -341,6 +342,611 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
+        /// An unexpected reconcile fault stays on the same loop, backs off, and does not open another consumer.
+        /// </summary>
+        [Fact]
+        public async Task Reconcile_loop_fault_backs_off_without_a_second_loop_or_consumer()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time,
+                reconcileLoopBody: static _ => Task.FromException(new InvalidOperationException("reconcile fault")));
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+            var sessions = consumer.Sessions.Count;
+            var consumeCount = factory.LastConnection!.Channels.Sum(static channel => channel.ConsumeCount);
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.UnexpectedReconcileFaults == 1, TimeSpan.FromSeconds(2));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 2, TimeSpan.FromSeconds(2));
+
+            Assert.Equal(TimeSpan.FromSeconds(30), consumer.CurrentReconcileDelay);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            time.Advance(TimeSpan.FromSeconds(15));
+            Assert.Equal(1, consumer.UnexpectedReconcileFaults);
+            Assert.Equal(2, consumer.ReconcileWaitsStarted);
+            Assert.Equal(sessions, consumer.Sessions.Count);
+            Assert.Equal(consumeCount, factory.LastConnection.Channels.Sum(static channel => channel.ConsumeCount));
+
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.UnexpectedReconcileFaults == 2, TimeSpan.FromSeconds(2));
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop.IsCompleted);
+            Assert.Equal(sessions, consumer.Sessions.Count);
+            Assert.Equal(consumeCount, factory.LastConnection.Channels.Sum(static channel => channel.ConsumeCount));
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// After a fault, the next successful pass resets the delay. Shutdown cancellation does not count as a fault or start another loop.
+        /// </summary>
+        [Fact]
+        public async Task Reconcile_loop_resets_after_recovery_and_shutdown_does_not_restart_it()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var fail = true;
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                time: time,
+                reconcileLoopBody: _ => fail
+                    ? Task.FromException(new InvalidOperationException("reconcile fault"))
+                    : Task.CompletedTask);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.UnexpectedReconcileFaults == 1 && consumer.ReconcileWaitsStarted == 2,
+                TimeSpan.FromSeconds(2));
+            fail = false;
+            time.Advance(TimeSpan.FromSeconds(30));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 3 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(1, consumer.UnexpectedReconcileFaults);
+            Assert.Same(loop, consumer.ReconcileLoop);
+
+            await consumer.StopAsync(CancellationToken.None);
+            Assert.True(loop!.IsCompleted);
+            Assert.Equal(1, consumer.UnexpectedReconcileFaults);
+            time.Advance(TimeSpan.FromMinutes(5));
+            Assert.Equal(1, consumer.UnexpectedReconcileFaults);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(consumer.IsRunning);
+
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// A faulting periodic body does not stop capacity or connection-replacement reconciliation, and it does not duplicate sessions.
+        /// </summary>
+        [Fact]
+        public async Task Reconcile_loop_fault_still_allows_capacity_and_connection_replacement()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            var capacity = CreateCapacity("Giganews", active: 0);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: capacity,
+                time: time,
+                reconcileLoopBody: static _ => Task.FromException(new InvalidOperationException("reconcile fault")));
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.UnexpectedReconcileFaults == 1, TimeSpan.FromSeconds(2));
+
+            capacity.PublishSnapshot(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Giganews"] = 1 });
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.Sessions.Count == 1, TimeSpan.FromSeconds(2));
+            var session = Assert.Single(consumer.Sessions);
+            var channel = Assert.IsType<FakeBackFillerRabbitMqChannel>(session.Channel);
+            Assert.Equal(1, channel.ConsumeCount);
+            Assert.Equal(1, session.Generation);
+
+            var secondConnected = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            factory.Connected = secondConnected;
+            factory.LastConnection!.SimulateLost();
+            await secondConnected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 1 && consumer.Sessions[0].Generation == 2,
+                TimeSpan.FromSeconds(2));
+
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(consumer.Sessions[0].Channel).ConsumeCount);
+            Assert.Equal(1, channel.DisposeCount);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// A broker that is not ready is not a successful reconcile, so the next wait doubles instead of staying at 15 seconds.
+        /// </summary>
+        [Fact]
+        public async Task Broker_not_ready_reconcile_does_not_reset_backoff()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            Assert.Equal(TimeSpan.FromSeconds(15), consumer.CurrentReconcileDelay);
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            Assert.Empty(consumer.Sessions);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            time.Advance(TimeSpan.FromSeconds(15));
+            Assert.Equal(2, consumer.ReconcileWaitsStarted);
+            Assert.Equal(TimeSpan.FromSeconds(30), consumer.CurrentReconcileDelay);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Repeated declaration failures wait 15, 30, 60, then 120 seconds, and further failures stay at the cap.
+        /// </summary>
+        [Fact]
+        public async Task Repeated_topology_failures_back_off_to_the_two_minute_cap()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            factory.LastConnection!.OnManualAckChannelCreated = static channel =>
+                channel.ExchangeDeclareException = new InvalidOperationException("declare failed");
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+            var waited = new List<TimeSpan>();
+            for (var pass = 0; pass < 5; pass++)
+            {
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => consumer.ReconcileWaitsStarted == pass + 1,
+                    TimeSpan.FromSeconds(2));
+                waited.Add(consumer.CurrentReconcileDelay);
+                time.Advance(consumer.CurrentReconcileDelay);
+            }
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 6,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(
+            [
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(60),
+                TimeSpan.FromMinutes(2),
+                TimeSpan.FromMinutes(2),
+            ],
+            waited);
+            Assert.Equal(TimeSpan.FromMinutes(2), consumer.CurrentReconcileDelay);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            Assert.Empty(consumer.Sessions);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// A pass that starts the desired consumer resets backoff to 15 seconds.
+        /// </summary>
+        [Fact]
+        public async Task Successful_reconcile_resets_backoff_to_fifteen_seconds()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            factory.LastConnection!.CreateChannelException = new InvalidOperationException("channel");
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+            factory.LastConnection.CreateChannelException = null;
+            time.Advance(TimeSpan.FromSeconds(30));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 1 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            Assert.Equal(1, factory.LastConnection.Channels.Sum(static channel => channel.ConsumeCount));
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// No usable capacity is a completed pass, including while RabbitMQ is down, so the interval stays 15 seconds.
+        /// </summary>
+        [Fact]
+        public async Task Empty_topology_reconcile_keeps_the_fifteen_second_interval()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 0),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            Assert.Equal(TimeSpan.FromSeconds(15), consumer.CurrentReconcileDelay);
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(TimeSpan.FromSeconds(15), consumer.CurrentReconcileDelay);
+            Assert.Empty(consumer.Sessions);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 3 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(2));
+            Assert.Empty(consumer.Sessions);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Once RabbitMQ connects, the same loop starts one consumer and a later pass does not start a second one.
+        /// </summary>
+        [Fact]
+        public async Task Broker_recovery_uses_the_same_reconcile_loop_without_a_duplicate_consumer()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+            await connections.StartAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromSeconds(30));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 1
+                      && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15)
+                      && consumer.ReconcileWaitsStarted == 3,
+                TimeSpan.FromSeconds(2));
+
+            var session = Assert.Single(consumer.Sessions);
+            Assert.Equal(1, session.Generation);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(session.Channel).ConsumeCount);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 4,
+                TimeSpan.FromSeconds(2));
+            Assert.Same(loop, consumer.ReconcileLoop);
+            session = Assert.Single(consumer.Sessions);
+            Assert.Equal(1, session.Generation);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(session.Channel).ConsumeCount);
+            Assert.Equal(TimeSpan.FromSeconds(15), consumer.CurrentReconcileDelay);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Shutdown while the loop is waiting cancels that wait, counts no fault, and arms no later pass.
+        /// </summary>
+        [Fact]
+        public async Task Shutdown_during_reconcile_backoff_does_not_schedule_another_pass()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+            await consumer.StopAsync(CancellationToken.None);
+
+            Assert.True(loop!.IsCompleted);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            Assert.False(consumer.IsRunning);
+            Assert.Empty(consumer.Sessions);
+            time.Advance(TimeSpan.FromMinutes(5));
+            Assert.Equal(2, consumer.ReconcileWaitsStarted);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// After a failed periodic pass, a capacity snapshot and a connection replacement still maintain one consumer on the same loop.
+        /// </summary>
+        [Fact]
+        public async Task Failed_periodic_reconcile_still_accepts_capacity_and_connection_replacement()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            factory.LastConnection!.CreateChannelException = new InvalidOperationException("channel");
+            var capacity = CreateCapacity("Giganews", active: 1);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: capacity,
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+            Assert.Empty(consumer.Sessions);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            factory.LastConnection.CreateChannelException = null;
+            capacity.PublishSnapshot(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Giganews"] = 1 });
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.Sessions.Count == 1, TimeSpan.FromSeconds(2));
+            var session = Assert.Single(consumer.Sessions);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(session.Channel).ConsumeCount);
+            Assert.Equal(TimeSpan.FromSeconds(30), consumer.CurrentReconcileDelay);
+            Assert.Same(loop, consumer.ReconcileLoop);
+
+            var secondConnected = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            factory.Connected = secondConnected;
+            factory.LastConnection.SimulateLost();
+            await secondConnected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 1 && consumer.Sessions[0].Generation == 2,
+                TimeSpan.FromSeconds(2));
+
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(consumer.Sessions[0].Channel).ConsumeCount);
+            Assert.Equal(TimeSpan.FromSeconds(30), consumer.CurrentReconcileDelay);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// A connection replacement that cannot declare topology leaves backoff to the same periodic loop, which then starts one consumer.
+        /// </summary>
+        [Fact]
+        public async Task Connection_replacement_failure_is_retried_by_the_same_reconcile_loop()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory
+            {
+                CreateChannelException = new InvalidOperationException("channel"),
+            };
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: CreateCatalog("Giganews", maxSessions: 1),
+                capacity: CreateCapacity("Giganews", active: 1),
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+            var first = factory.LastConnection;
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(() => consumer.ReconcileWaitsStarted == 1, TimeSpan.FromSeconds(2));
+            time.Advance(TimeSpan.FromSeconds(15));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 2 && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(2));
+
+            var reconnected = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            factory.Connected = reconnected;
+            first!.SimulateLost();
+            await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => factory.LastConnection is { } current
+                      && !ReferenceEquals(current, first)
+                      && current.ManualAckChannelCreateAttempts >= 1
+                      && consumer.Sessions.Count == 0,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(TimeSpan.FromSeconds(30), consumer.CurrentReconcileDelay);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            factory.CreateChannelException = null;
+            factory.LastConnection!.CreateChannelException = null;
+            time.Advance(TimeSpan.FromSeconds(30));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 1
+                      && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15)
+                      && consumer.ReconcileWaitsStarted == 3,
+                TimeSpan.FromSeconds(2));
+
+            var session = Assert.Single(consumer.Sessions);
+            Assert.Equal(2, session.Generation);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(session.Channel).ConsumeCount);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop.IsCompleted);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
+        /// One of two desired backbones failing declaration starts only the healthy consumer, backs off to the cap,
+        /// and the same loop adds the recovered backbone without replacing the healthy session.
+        /// </summary>
+        [Fact]
+        public async Task Partial_topology_failure_backs_off_and_keeps_the_healthy_consumer()
+        {
+            var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+            var factory = new FakeBackFillerRabbitMqConnectionFactory();
+            var connections = RabbitMqServiceTests.CreateService(factory);
+            await connections.StartAsync(CancellationToken.None);
+            var failEweka = true;
+            factory.LastConnection!.OnManualAckChannelCreated = channel =>
+            {
+                channel.ExchangeDeclareFailure = exchange =>
+                    failEweka && string.Equals(exchange, "backfiller.eweka", StringComparison.Ordinal)
+                        ? new InvalidOperationException("declare failed")
+                        : null;
+            };
+            var capacity = new BackboneUsableCapacityState();
+            capacity.PublishSnapshot(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Eweka"] = 1,
+                ["Giganews"] = 1,
+            });
+            var consumer = CreateConsumerService(
+                connections,
+                new DeferredArticleWorkHandler(),
+                catalog: new StaticBackFillerProviderCatalog(
+                [
+                    Provider("Eweka"),
+                    Provider("Giganews"),
+                ]),
+                capacity: capacity,
+                time: time);
+            await consumer.StartAsync(CancellationToken.None);
+            var loop = consumer.ReconcileLoop;
+
+            var healthy = Assert.Single(consumer.Sessions);
+            Assert.Equal("Giganews", healthy.Backbone);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(healthy.Channel).ConsumeCount);
+            Assert.Equal(TimeSpan.FromSeconds(15), consumer.CurrentReconcileDelay);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            var waited = new List<TimeSpan>();
+            for (var pass = 0; pass < 5; pass++)
+            {
+                await ArticleWorkTestDeliveries.WaitUntilAsync(
+                    () => consumer.ReconcileWaitsStarted == pass + 1,
+                    TimeSpan.FromSeconds(2));
+                waited.Add(consumer.CurrentReconcileDelay);
+                time.Advance(consumer.CurrentReconcileDelay);
+            }
+
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.ReconcileWaitsStarted == 6,
+                TimeSpan.FromSeconds(2));
+            Assert.Equal(
+            [
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(60),
+                TimeSpan.FromMinutes(2),
+                TimeSpan.FromMinutes(2),
+            ],
+            waited);
+            Assert.Equal(TimeSpan.FromMinutes(2), consumer.CurrentReconcileDelay);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop!.IsCompleted);
+            var stillHealthy = Assert.Single(consumer.Sessions);
+            Assert.Same(healthy, stillHealthy);
+            Assert.Equal("Giganews", stillHealthy.Backbone);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(stillHealthy.Channel).ConsumeCount);
+
+            failEweka = false;
+            time.Advance(TimeSpan.FromMinutes(2));
+            await ArticleWorkTestDeliveries.WaitUntilAsync(
+                () => consumer.Sessions.Count == 2
+                      && consumer.CurrentReconcileDelay == TimeSpan.FromSeconds(15)
+                      && consumer.ReconcileWaitsStarted == 7,
+                TimeSpan.FromSeconds(2));
+
+            var giganews = Assert.Single(consumer.Sessions, static session => session.Backbone == "Giganews");
+            var eweka = Assert.Single(consumer.Sessions, static session => session.Backbone == "Eweka");
+            Assert.Same(healthy, giganews);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(giganews.Channel).ConsumeCount);
+            Assert.Equal(1, Assert.IsType<FakeBackFillerRabbitMqChannel>(eweka.Channel).ConsumeCount);
+            Assert.Same(loop, consumer.ReconcileLoop);
+            Assert.False(loop.IsCompleted);
+            Assert.Equal(0, consumer.UnexpectedReconcileFaults);
+
+            await consumer.DisposeAsync();
+            await connections.DisposeAsync();
+        }
+
+        /// <summary>
         /// Static guard: production ArticleWork sources must not use blocking wait/sleep patterns on async paths.
         /// </summary>
         [Fact]
@@ -389,7 +995,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             IRabbitMqService connections,
             IArticleWorkHandler handler,
             IBackFillerProviderCatalog? catalog = null,
-            IBackboneUsableCapacityProvider? capacity = null)
+            IBackboneUsableCapacityProvider? capacity = null,
+            TimeProvider? time = null,
+            Func<CancellationToken, Task>? reconcileLoopBody = null)
         {
             return new ArticleWorkConsumerService(
                 connections,
@@ -398,7 +1006,9 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 new RecordingArticleWorkResponsePublisher(),
                 NullLogger<ArticleWorkConsumerService>.Instance,
                 catalog,
-                capacity);
+                capacity,
+                time,
+                reconcileLoopBody);
         }
 
         /// <summary>
@@ -408,18 +1018,22 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         /// <param name="maxSessions">Configured NNTP slot ceiling for that backbone.</param>
         /// <returns>A static catalog with one definition.</returns>
         private static StaticBackFillerProviderCatalog CreateCatalog(string backbone, int maxSessions) =>
+            new([Provider(backbone, maxSessions)]);
+
+        /// <summary>One provider definition with a single eager session unless <paramref name="maxSessions"/> says otherwise.</summary>
+        /// <param name="backbone">Provider backbone label.</param>
+        /// <param name="maxSessions">Configured NNTP slot ceiling.</param>
+        /// <returns>A catalog entry that does not open a live NNTP connection.</returns>
+        private static BackFiller.Nntp.BackFillerProviderDefinition Provider(string backbone, int maxSessions = 1) =>
             new(
-            [
-                new BackFiller.Nntp.BackFillerProviderDefinition(
-                    backbone,
-                    "127.0.0.1",
-                    119,
-                    false,
-                    "nntp-user",
-                    "p",
-                    0,
-                    maxSessions),
-            ]);
+                backbone,
+                "127.0.0.1",
+                119,
+                false,
+                "nntp-user",
+                "p",
+                0,
+                maxSessions);
 
         /// <summary>
         /// Publishes an initial usable-capacity snapshot for one backbone (omit publish when <paramref name="active"/> is zero).

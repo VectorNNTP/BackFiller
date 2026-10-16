@@ -339,5 +339,16 @@ namespace VectorNNTP.BackFiller.ArticleWork
             string outcome,
             string reason,
             string elapsed);
+
+        /// <summary>
+        /// Writes an Error event when the periodic reconcile loop will retry after backoff.
+        /// </summary>
+        /// <param name="logger">Logger that receives the event.</param>
+        /// <param name="Reason">Exception message, or a stable reason when topology for a desired consumer is not ready. The loop stays on the same task.</param>
+        [LoggerMessage(
+            EventId = 5322,
+            Level = LogLevel.Error,
+            Message = "Article Work reconcile loop failed and will retry: {Reason}")]
+        internal static partial void ConsumerReconcileFailed(ILogger logger, string Reason);
     }
 }

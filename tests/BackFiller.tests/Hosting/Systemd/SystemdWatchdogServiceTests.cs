@@ -171,6 +171,40 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
                 await watchdog.StopAsync(CancellationToken.None);
             }
         }
+        /// <summary>An unavailable certificate suppresses WATCHDOG until a replacement clears the condition.</summary>
+        [Fact]
+        public async Task Watchdog_SkipsKeepAliveWhileCertificateIsUnavailable()
+        {
+            var health = new BackFillerApplicationHealth();
+            health.MarkStarted();
+            health.MarkCertificateUnavailable();
+            Assert.False(health.IsHealthyForWatchdog);
+
+            var notify = new FakeSystemdNotifyBridge();
+            var skipped = new WatchdogEventLogger("Skipping systemd watchdog keep-alive");
+            using var service = CreateWatchdog(
+                notify,
+                runtime: RecordingSystemdRuntimeFactory.LinuxUnderSystemd(TimeSpan.FromMilliseconds(80)),
+                health: health,
+                configure: o => o.Systemd.WatchdogIntervalFraction = 0.5,
+                logger: skipped);
+            try
+            {
+                await service.StartAsync(CancellationToken.None);
+                await skipped.Seen.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(0, notify.WatchdogCount);
+
+                health.MarkCertificateAvailable();
+                await notify.WatchdogSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(notify.WatchdogCount >= 1);
+                Assert.True(health.IsHealthyForWatchdog);
+            }
+            finally
+            {
+                await service.StopAsync(CancellationToken.None);
+            }
+        }
+
         /// <summary>ApplicationStopping stops additional heartbeats after the in-flight tick completes.</summary>
 
         [Fact]

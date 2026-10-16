@@ -50,10 +50,10 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             Assert.Equal(7UL, channel.Settlements[0].DeliveryTag);
             Assert.Equal(1, harness.Retention.RetainedCount);
         }
-        /// <summary>Oversized retention requeues; publish confirm failure after successful ingest still acks the message.</summary>
+        /// <summary>Oversized retention requeues; a publish confirm failure after ingest NACK-requeues and does not ACK.</summary>
 
         [Fact]
-        public async Task Retention_rejection_requeues_and_publish_failure_after_success_acks()
+        public async Task Retention_rejection_requeues_and_publish_failure_after_success_nacks()
         {
             await using var tiny = await BackFillerPipelineHarness.StartAsync();
             var oversized = ArticleWorkTestArticles.OversizedForOneMegabyteRetention();
@@ -68,10 +68,10 @@ namespace VectorNNTP.BackFiller.Tests.Integration
             await using var publishFail = await BackFillerPipelineHarness.StartAsync(FakePublishConfirmBehavior.Nack);
             publishFail.EnqueueArticle(Payload);
             var failChannel = new FakeBackFillerRabbitMqChannel(1);
-            Assert.Equal(ArticleWorkOutcome.Success, await publishFail.ProcessCanonicalAsync(failChannel));
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, await publishFail.ProcessCanonicalAsync(failChannel));
             var failedPublication = Assert.Single(failChannel.Settlements);
-            Assert.True(failedPublication.Acknowledge);
-            Assert.False(failedPublication.Requeue);
+            Assert.False(failedPublication.Acknowledge);
+            Assert.True(failedPublication.Requeue);
 
             await using var recovered = await BackFillerPipelineHarness.StartAsync();
             recovered.EnqueueArticle(Payload);

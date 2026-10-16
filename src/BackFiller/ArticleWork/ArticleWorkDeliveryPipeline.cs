@@ -59,9 +59,9 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <returns>
         /// The <see cref="ArticleWorkOutcome"/> classification for the delivery. Diagnostic parse failures are returned
         /// through the optional <c>preParsed</c> value and are not reparsed by diagnostic code. Returns
-        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/> when publication is cancelled, or when publication fails for a
-        /// disposition that requeues; those paths NACK requeue. A handler result of <see cref="ArticleWorkOutcome.InvalidRequest"/> is
-        /// treated as <see cref="ArticleWorkOutcome.UnexpectedFailure"/>. When <see cref="IArticleWorkResponsePublisher.CompletesSuccessPublication"/>
+        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/> when a required publication is cancelled or fails; those paths
+        /// NACK requeue and do not ACK. A handler result of <see cref="ArticleWorkOutcome.InvalidRequest"/> is treated as
+        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/>. When <see cref="IArticleWorkResponsePublisher.CompletesSuccessPublication"/>
         /// is <see langword="false"/>, Success is NACK-requeued without publication, and this method still returns
         /// <see cref="ArticleWorkOutcome.Success"/>.
         /// </returns>
@@ -72,11 +72,11 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <remarks>
         /// Settlement calls use <see cref="CancellationToken.None"/>. A stale <paramref name="channelStillCurrent"/> result, or a lease
         /// that is not the original channel, returns without ACK or NACK. After the handler returns, a cancelled token forces
-        /// <see cref="ArticleWorkOutcome.Cancelled"/> settlement even when the handler outcome was terminal. A non-cancellation publication
-        /// failure still settles a disposition that does not requeue, including ACK. Cancellation of the publication attempt always
-        /// NACK-requeues and returns <see cref="ArticleWorkOutcome.UnexpectedFailure"/>. Any <see cref="ArticleWorkHandlerResult.Article"/>
-        /// is disposed before settlement. Other handler exceptions become <see cref="ArticleWorkOutcome.UnexpectedFailure"/> and the error
-        /// text is the exception type name.
+        /// <see cref="ArticleWorkOutcome.Cancelled"/> settlement even when the handler outcome was terminal. A required publication that
+        /// is cancelled or fails NACK-requeues and returns <see cref="ArticleWorkOutcome.UnexpectedFailure"/>, including when the planned
+        /// disposition was ACK. The lease still attempts settlement once; a failed NACK is not retried on that lease. Any
+        /// <see cref="ArticleWorkHandlerResult.Article"/> is disposed before settlement. Other handler exceptions become
+        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/> and the error text is the exception type name.
         /// SECURITY: The diagnostic reason is captured from the parse failure and returned directly. This ensures the configured payload
         /// limit is never bypassed by diagnostic code that might reparse the body with an unbounded limit.
         /// </remarks>
@@ -249,20 +249,21 @@ namespace VectorNNTP.BackFiller.ArticleWork
         }
 
         /// <summary>
-        /// Settles after a publication attempt. A non-cancellation failure keeps a non-requeue disposition; cancellation always NACK-requeues.
+        /// Settles after a publication attempt. A required publication that is cancelled or fails NACK-requeues.
         /// </summary>
         /// <param name="published">Result of the publication attempt. <see cref="ArticleWorkPublishAttempt.Confirmed"/> includes attempts that were not required.</param>
-        /// <param name="disposition">Plan produced before publication.</param>
+        /// <param name="disposition">Plan produced before publication. Submitted only when <paramref name="published"/> is confirmed.</param>
         /// <param name="outcome">Outcome that <paramref name="disposition"/> was planned from.</param>
-        /// <param name="lease">Settlement lease for this delivery.</param>
+        /// <param name="lease">Settlement lease for this delivery. One attempt; a failed NACK does not settle again.</param>
         /// <param name="channel">Channel originally bound to <paramref name="lease"/>.</param>
-        /// <param name="channelStillCurrent">Rechecked immediately before settlement.</param>
+        /// <param name="channelStillCurrent">Rechecked immediately before settlement. A stale or replacement channel is not settled.</param>
         /// <returns>
         /// <paramref name="outcome"/> when the original disposition is submitted.
-        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/> when publication was cancelled, or failed and <paramref name="disposition"/> requeues.
+        /// <see cref="ArticleWorkOutcome.UnexpectedFailure"/> when publication was cancelled or failed.
         /// </returns>
         /// <remarks>
-        /// Broker RPCs use <see cref="CancellationToken.None"/>. A failed publication of an ACK disposition still ACKs.
+        /// Broker RPCs use <see cref="CancellationToken.None"/>. A lost publisher confirm is reported as failure, so the
+        /// requeue can publish another reply with the same correlation id. That is not exactly-once delivery.
         /// </remarks>
         private static async Task<ArticleWorkOutcome> CompleteAfterPublishAttemptAsync(
             ArticleWorkPublishAttempt published,
@@ -272,8 +273,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
             IRabbitMqManualAckChannel channel,
             Func<bool> channelStillCurrent)
         {
-            if (published == ArticleWorkPublishAttempt.Cancelled
-                || (published == ArticleWorkPublishAttempt.Failed && disposition.Requeue))
+            if (published != ArticleWorkPublishAttempt.Confirmed)
             {
                 await SettleRetryableAsync(lease, channel, channelStillCurrent).ConfigureAwait(false);
                 return ArticleWorkOutcome.UnexpectedFailure;

@@ -218,10 +218,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// InvalidRequest still terminal-acks when recording publisher throws (no requeue).
+        /// InvalidRequest NACK-requeues when the recording publisher throws before a reply is recorded.
         /// </summary>
         [Fact]
-        public async Task InvalidRequest_publish_failure_acks_without_requeue()
+        public async Task InvalidRequest_publish_failure_nacks_with_requeue()
         {
             var channel = new FakeBackFillerRabbitMqChannel(1);
             var publisher = new RecordingArticleWorkResponsePublisher
@@ -240,18 +240,18 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static () => true,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.InvalidRequest, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
             Assert.Empty(publisher.Published);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
         }
 
         /// <summary>
-        /// Success handler with failed confirm/publication still acks without requeue (article may be retained upstream).
+        /// Success handler with a publisher exception before a recorded reply NACK-requeues once and does not ACK.
         /// </summary>
         [Fact]
-        public async Task Success_publish_failure_acks_and_does_not_requeue()
+        public async Task Success_publish_failure_nacks_with_requeue_and_does_not_ack()
         {
             var channel = new FakeBackFillerRabbitMqChannel(1);
             var publisher = new RecordingArticleWorkResponsePublisher
@@ -269,11 +269,51 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
                 static () => true,
                 CancellationToken.None);
 
-            Assert.Equal(ArticleWorkOutcome.Success, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
             Assert.Empty(publisher.Published);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
+            Assert.True(handler.LastItem!.Settlement.IsSettled);
+            Assert.False(await handler.LastItem.Settlement.TrySettleAsync(
+                new ArticleWorkDisposition(Acknowledge: true, Requeue: false, PublishResponse: false),
+                channelStillCurrent: true,
+                CancellationToken.None));
+        }
+
+        /// <summary>
+        /// A NACK that throws after a failed publish claims the lease once and does not try a second settlement.
+        /// </summary>
+        [Fact]
+        public async Task Publish_failure_with_nack_exception_does_not_settle_twice()
+        {
+            var channel = new FakeBackFillerRabbitMqChannel(1)
+            {
+                NackException = new InvalidOperationException("nack failed"),
+            };
+            var publisher = new RecordingArticleWorkResponsePublisher
+            {
+                CompletesSuccessPublication = true,
+                PublishException = new InvalidOperationException("confirm failed"),
+            };
+            var handler = new ControllableArticleWorkHandler { Outcome = ArticleWorkOutcome.Success };
+            var pipeline = new ArticleWorkDeliveryPipeline(handler, publisher, 1024);
+
+            var outcome = await pipeline.ProcessAsync(
+                ArticleWorkTestDeliveries.Canonical(),
+                "Giganews",
+                channel,
+                static () => true,
+                CancellationToken.None);
+
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
+            Assert.Empty(channel.Settlements);
+            Assert.True(handler.LastItem!.Settlement.IsSettled);
+            Assert.False(await handler.LastItem.Settlement.TrySettleAsync(
+                new ArticleWorkDisposition(Acknowledge: false, Requeue: true, PublishResponse: false),
+                channelStillCurrent: true,
+                CancellationToken.None));
+            Assert.Empty(channel.Settlements);
         }
 
         /// <summary>

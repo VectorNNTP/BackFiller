@@ -52,6 +52,12 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public TaskCompletionSource? CreatePublishChannelStarted { get; set; }
 
         /// <summary>
+        /// Copied onto each new connection as <see cref="FakeBackFillerRabbitMqConnection.CreateChannelException"/>.
+        /// A replacement connection keeps failing channel creation until this is cleared before that connect.
+        /// </summary>
+        public Exception? CreateChannelException { get; set; }
+
+        /// <summary>
         /// Simulates broker connect: honors failure count, exceptions, and gates, then builds an in-memory connection from options.
         /// Does not open AMQP/TCP.
         /// </summary>
@@ -98,6 +104,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 DefaultPublishConfirmBehavior = DefaultPublishConfirmBehavior,
                 BlockCreatePublishChannel = BlockCreatePublishChannel,
                 CreatePublishChannelStarted = CreatePublishChannelStarted,
+                CreateChannelException = CreateChannelException,
             };
 
             LastConnection = connection;
@@ -162,6 +169,15 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>When set, thrown from manual-ack channel creation instead of adding to <see cref="Channels"/>.</summary>
         public Exception? CreateChannelException { get; set; }
 
+        /// <summary>Manual-ack channel create attempts, including those that throw <see cref="CreateChannelException"/>.</summary>
+        public int ManualAckChannelCreateAttempts { get; private set; }
+
+        /// <summary>
+        /// Invoked with each new manual-ack channel before it is returned.
+        /// Tests use it to arm a declaration failure on every channel.
+        /// </summary>
+        public Action<FakeBackFillerRabbitMqChannel>? OnManualAckChannelCreated { get; set; }
+
         /// <summary>When set, thrown from publish-channel creation after optional start/block gates.</summary>
         public Exception? CreatePublishChannelException { get; set; }
 
@@ -213,6 +229,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public Task<IRabbitMqManualAckChannel> CreateManualAckChannelAsync(long generation, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ManualAckChannelCreateAttempts++;
             if (CreateChannelException is not null)
             {
                 throw CreateChannelException;
@@ -230,6 +247,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 NextChannelQueueDeclareException = null;
             }
 
+            OnManualAckChannelCreated?.Invoke(channel);
             Channels.Add(channel);
             return Task.FromResult<IRabbitMqManualAckChannel>(channel);
         }
@@ -362,6 +380,12 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>When set, thrown from exchange declare instead of recording the declaration.</summary>
         public Exception? ExchangeDeclareException { get; set; }
 
+        /// <summary>
+        /// When it returns an exception, that exchange name fails and other exchanges on this channel are still declared.
+        /// Checked before <see cref="ExchangeDeclareException"/>.
+        /// </summary>
+        public Func<string, Exception?>? ExchangeDeclareFailure { get; set; }
+
         /// <summary>When set, thrown from queue declare instead of recording the declaration.</summary>
         public Exception? QueueDeclareException { get; set; }
 
@@ -416,6 +440,11 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             ArgumentException.ThrowIfNullOrWhiteSpace(exchange);
             ArgumentException.ThrowIfNullOrWhiteSpace(type);
             cancellationToken.ThrowIfCancellationRequested();
+            if (ExchangeDeclareFailure?.Invoke(exchange) is { } selectiveFailure)
+            {
+                throw selectiveFailure;
+            }
+
             if (ExchangeDeclareException is not null)
             {
                 throw ExchangeDeclareException;

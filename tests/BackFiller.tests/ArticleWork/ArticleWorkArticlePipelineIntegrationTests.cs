@@ -230,10 +230,10 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
         }
 
         /// <summary>
-        /// Success path still acks without requeue when response publish/confirm fails (requester gone); article remains retained.
+        /// A retained article is not ACKed when the terminal reply throws before publication. The delivery NACK-requeues.
         /// </summary>
         [Fact]
-        public async Task Successful_article_acks_when_requester_has_disappeared()
+        public async Task Successful_article_requeues_when_terminal_reply_fails_before_publish()
         {
             await using var harness = await BackFillerPipelineHarness.StartAsync(FakePublishConfirmBehavior.ThrowOnPublish);
             harness.EnqueueArticle(ArticleWorkTestArticles.Valid());
@@ -241,11 +241,36 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
 
             var outcome = await harness.ProcessCanonicalAsync(channel);
 
-            Assert.Equal(ArticleWorkOutcome.Success, outcome);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, outcome);
             Assert.Equal(ArticleRetentionKind.Retained, harness.Handler.LastRetentionKind);
             var settlement = Assert.Single(channel.Settlements);
-            Assert.True(settlement.Acknowledge);
-            Assert.False(settlement.Requeue);
+            Assert.False(settlement.Acknowledge);
+            Assert.True(settlement.Requeue);
+        }
+
+        /// <summary>
+        /// Redelivery after a failed terminal reply publishes once the confirm succeeds and does not retain a second copy.
+        /// </summary>
+        [Fact]
+        public async Task Redelivery_after_failed_terminal_publish_keeps_one_retained_article()
+        {
+            await using var harness = await BackFillerPipelineHarness.StartAsync(FakePublishConfirmBehavior.ThrowOnPublish);
+            harness.EnqueueArticle(ArticleWorkTestArticles.Valid());
+            var first = new FakeBackFillerRabbitMqChannel(1);
+            Assert.Equal(ArticleWorkOutcome.UnexpectedFailure, await harness.ProcessCanonicalAsync(first));
+            Assert.Equal(1, harness.Retention.RetainedCount);
+            Assert.Empty(harness.PublishChannel.Publications);
+
+            harness.EnqueueArticle(ArticleWorkTestArticles.Valid());
+            harness.PublishChannel.ConfirmBehavior = FakePublishConfirmBehavior.Confirm;
+            var second = new FakeBackFillerRabbitMqChannel(1);
+            Assert.Equal(ArticleWorkOutcome.Success, await harness.ProcessCanonicalAsync(second, deliveryTag: 8));
+            Assert.True(Assert.Single(second.Settlements).Acknowledge);
+            Assert.False(Assert.Single(first.Settlements).Acknowledge);
+            Assert.Equal(1, harness.Retention.RetainedCount);
+            Assert.Equal(
+                ArticleWorkTestDeliveries.CanonicalCorrelationId,
+                Assert.Single(harness.PublishChannel.Publications).CorrelationId);
         }
 
         /// <summary>
