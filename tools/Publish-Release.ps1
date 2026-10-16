@@ -8,7 +8,8 @@
     working directory. Publishes src/BackFiller/BackFiller.csproj for win-x64,
     linux-x64, or both. Output is a flat directory: .artifacts/release/win-64 or
     .artifacts/release/linux-64. The linux-64 directory also contains
-    deploy/systemd/vectornntp-backfiller.service and README.md.
+    deploy/systemd/vectornntp-backfiller.service, deploy/systemd/backfiller.env.example,
+    and README.md.
     A failed publish leaves that platform directory unchanged and exits 1.
 
 .PARAMETER Platform
@@ -33,6 +34,8 @@ $RequiredPublishFiles = @(
 )
 $SystemdServiceFileName = 'vectornntp-backfiller.service'
 $SystemdServiceSource = Join-Path (Join-Path (Join-Path $RepoRoot 'deploy') 'systemd') $SystemdServiceFileName
+$EnvironmentExampleFileName = 'backfiller.env.example'
+$EnvironmentExampleSource = Join-Path (Join-Path (Join-Path $RepoRoot 'deploy') 'systemd') $EnvironmentExampleFileName
 $LinuxDocumentationFileName = 'README.md'
 $LinuxDocumentationSource = Join-Path $RepoRoot $LinuxDocumentationFileName
 
@@ -197,9 +200,21 @@ function Test-PublishedRelease {
         if (-not (Test-Path -LiteralPath $documentationPath)) {
             Fail "Missing documentation in the linux-x64 release: $documentationPath"
         }
+
+        $environmentExamplePath = Join-Path $ReleaseDir $EnvironmentExampleFileName
+        if (-not (Test-Path -LiteralPath $environmentExamplePath)) {
+            Fail "Missing environment-file example in the linux-x64 release: $environmentExamplePath"
+        }
     }
-    elseif (Test-Path -LiteralPath $servicePath) {
-        Fail "systemd unit must not be packaged for ${Rid}: $servicePath"
+    else {
+        if (Test-Path -LiteralPath $servicePath) {
+            Fail "systemd unit must not be packaged for ${Rid}: $servicePath"
+        }
+
+        $environmentExamplePath = Join-Path $ReleaseDir $EnvironmentExampleFileName
+        if (Test-Path -LiteralPath $environmentExamplePath) {
+            Fail "Environment-file example must not be packaged for ${Rid}: $environmentExamplePath"
+        }
     }
 
     Test-NativeAotBinary -Path $exePath -Rid $Rid
@@ -238,8 +253,13 @@ function Publish-Platform {
                 Fail "Linux documentation was not found: $LinuxDocumentationSource"
             }
 
+            if (-not (Test-Path -LiteralPath $EnvironmentExampleSource)) {
+                Fail "Environment-file example was not found: $EnvironmentExampleSource"
+            }
+
             Copy-Item -LiteralPath $SystemdServiceSource -Destination (Join-Path $stage $SystemdServiceFileName)
             Copy-Item -LiteralPath $LinuxDocumentationSource -Destination (Join-Path $stage $LinuxDocumentationFileName)
+            Copy-Item -LiteralPath $EnvironmentExampleSource -Destination (Join-Path $stage $EnvironmentExampleFileName)
         }
 
         Test-PublishedRelease -ReleaseDir $stage -Rid $Rid -ExeSuffix $ExeSuffix

@@ -2,9 +2,10 @@
 Description=VectorNNTP BackFiller
 # Install the flat linux-x64 release directory at this path. It contains
 # VectorNNTP.BackFiller, VectorNNTP.BackFiller.json, VectorNNTP.RabbitMQ.json,
-# README.md, and vectornntp-backfiller.service. Copy the unit to
-# /etc/systemd/system/. Create user and group vectornntp, and create
-# logs/ and certs/ owned by that account, before enable.
+# README.md, vectornntp-backfiller.service, and backfiller.env.example.
+# Copy the unit to /etc/systemd/system/. Create user and group vectornntp,
+# create logs/ and certs/ owned by that account, and install
+# /etc/vectornntp/backfiller.env before enable.
 Documentation=file:///opt/vectornntp/backfiller/README.md
 After=network-online.target
 Wants=network-online.target
@@ -34,11 +35,16 @@ TimeoutStopSec=60
 Restart=on-failure
 RestartSec=5
 
-# DOTNET_ENVIRONMENT selects the optional VectorNNTP.BackFiller.Production.json overlay.
-# Configuration overlays use VECTOR__ (for example VECTOR__RABBITMQ__USERNAME).
-# The NntpDB connection string is ConnectionStrings__NntpDB, without a VECTOR__ prefix.
+# systemd reads this file as root before exec. The leading '-' suppresses errors
+# reading the file and still starts the process. Current systemd ignores a missing,
+# unreadable, or invalid file. That does not insert ConnectionStrings__NntpDB.
+# Startup validation still fails when the variable is absent. The file is KEY=VALUE,
+# not a shell script. An unquoted backslash is an escape. The connection string has
+# no VECTOR__ prefix. RabbitMQ, ACME, and Cloudflare secrets come from
+# nntpsharedconfig; this unit does not set them.
 # backfiller__ and nntpd__ are not registered.
-# EnvironmentFile=-/etc/vectornntp/backfiller.env
+EnvironmentFile=-/etc/vectornntp/backfiller.env
+# DOTNET_ENVIRONMENT selects the optional VectorNNTP.BackFiller.Production.json overlay.
 Environment=DOTNET_ENVIRONMENT=Production
 
 # Watchdog heartbeats run only when EnableWatchdog is true (the shipped default)

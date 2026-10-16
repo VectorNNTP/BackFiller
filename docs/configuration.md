@@ -59,7 +59,7 @@ VECTOR__RABBITMQ__USERNAME
 VECTOR__RABBITMQ__PASSWORD
 ```
 
-Never commit or log those values. Other connectivity settings, including `Hosts`, bind from the `RabbitMQ` section. See `RabbitMqOptions` for the current defaults (`WorkRequestMaxPayloadBytes` 1024, `RpcTimeoutSeconds` 30, `ConnectionBlockedTimeoutSeconds` 30, `ChannelLeaseTimeoutSeconds` 60).
+Never commit or log those values. BackFiller discards values bound from those variables before validation. They are not required in the Linux environment file. Other connectivity settings, including `Hosts`, bind from the `RabbitMQ` section. See `RabbitMqOptions` for the current defaults (`WorkRequestMaxPayloadBytes` 1024, `RpcTimeoutSeconds` 30, `ConnectionBlockedTimeoutSeconds` 30, `ChannelLeaseTimeoutSeconds` 60).
 
 ## Shared ACME and Cloudflare secrets
 
@@ -72,7 +72,7 @@ VECTOR__ACMEACCOUNT
 VECTOR__ACMECERTIFICATEPASSWORD
 ```
 
-`CloudFlareApiKey` is a secret. Ordinary options validation must not call Cloudflare or mutate DNS. Tests inject NIC data through `ILocalIpAddressAssignee` instead of reading the live host.
+`CloudFlareApiKey` is a secret. BackFiller clears the API key, ACME account, and certificate password bound at startup, and it does not copy the root `VECTOR__CLOUDFLAREZONEID` value onto BackFiller options. Those names are not required in the Linux environment file. Ordinary options validation must not call Cloudflare or mutate DNS. Tests inject NIC data through `ILocalIpAddressAssignee` instead of reading the live host.
 
 `BackFiller:CloudFlareZoneId` is the application key. `VECTOR__CLOUDFLAREZONEID` is the shared environment variable documented on `AcmeCloudflareOptions`. Do not invent an `nntpd__` name for either.
 
@@ -85,6 +85,37 @@ ConnectionStrings__NntpDB
 ```
 
 That name has no `VECTOR__` prefix. Do not log the connection string. The same key is what NNTPD uses. That is shared-domain configuration, not an instruction to build the NNTPD solution.
+
+For the shipped TLS configuration, this is the only environment setting startup validation requires. `TlsOnlyAcmeCloudflareOptionsValidator` requires `BindPortTls` in the range 1–65535, and the shipped JSON already sets that port. ACME and Cloudflare credential validation is not enabled at startup (`validateSharedCredentials: false`).
+
+## Linux environment file
+
+`deploy/systemd/vectornntp-backfiller.service` contains:
+
+```text
+EnvironmentFile=-/etc/vectornntp/backfiller.env
+```
+
+systemd reads that file as root before it executes the service. The leading `-` suppresses errors reading the environment file. Current systemd ignores a missing, unreadable, or invalid file. Older systemd ignored only a missing file. Suppressing that error does not insert a connection string. If `ConnectionStrings__NntpDB` is absent, `NntpDbOptionsValidator` fails with `ConnectionStrings:NntpDB must be configured.` and the process exits 1. When that message appears, check that the file exists, is owned by `root:root`, is mode `0600`, and that its syntax is valid. Do not print the file.
+
+The file is systemd `KEY=VALUE` syntax. A line whose first non-space character is `#` is a comment. systemd parses the file itself. It does not expand variables, command substitutions, or backticks, and `source` does not reproduce that parse. In an unquoted value, a backslash escapes the next character, so `\\` is one backslash, and a backslash at the end of a line joins the next line. Interior spaces remain. Leading and trailing spaces are removed. On systemd 259, single quotes around the whole value keep the enclosed characters verbatim and do not treat a backslash as an escape; a single quote cannot appear inside that pair. Double quotes use a different escape set. Those quote rules are not the same on every systemd version. After editing a value that contains a backslash, a quote, or leading or trailing whitespace, confirm the loaded value on that host without writing it to a log.
+
+Install it as owner `root:root` and mode `0600`. The service account does not need to read the file. Do not commit the installed file, do not pass the connection string on a command line, and do not make the file world-readable. `deploy/systemd/backfiller.env.example` is the placeholder template. Replace `REPLACE_WITH_MYSQL_HOST`, `REPLACE_WITH_MYSQL_USER`, `REPLACE_WITH_MYSQL_PASSWORD`, and `REPLACE_WITH_DATABASE_NAME` with a root editor before the first start.
+
+These names are not required in `/etc/vectornntp/backfiller.env`:
+
+```text
+VECTOR__RABBITMQ__USERNAME
+VECTOR__RABBITMQ__PASSWORD
+VECTOR__CLOUDFLAREAPIKEY
+VECTOR__CLOUDFLAREZONEID
+VECTOR__ACMEACCOUNT
+VECTOR__ACMECERTIFICATEPASSWORD
+```
+
+After the connection string works, `ProviderAccountConfigurationService` copies the ACME account, ACME certificate password, Cloudflare API key, Cloudflare zone id, DNS suffix, and RabbitMQ username and password from `nntpsharedconfig`. Assigning the names above in the environment file does not override that row.
+
+`Environment=DOTNET_ENVIRONMENT=Production` in the unit selects the optional `VectorNNTP.BackFiller.Production.json` overlay. A missing overlay does not fail startup. `daemon-reload` is required after a unit-file change. An edit to the environment file is read on the next service start; `daemon-reload` does not reload the environment of a running process. `WatchdogSec` stays commented out.
 
 ## Validation behavior that is easy to misread
 
