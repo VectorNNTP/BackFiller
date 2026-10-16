@@ -1,3 +1,4 @@
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
@@ -338,6 +339,83 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
                 await session.DisposeAsync();
             }
+        }
+
+        /// <summary>
+        /// Disposal during a stalled STARTTLS handshake cancels that handshake while the caller token stays uncancelled.
+        /// The upgrade still closes the captured transport once, and the session ends closed.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_stalled_starttls_handshake_cancels_without_caller_cancellation()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handshakeCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            CountingDisposeSslStream? tls = null;
+            var server = new ScriptedNntpServer
+            {
+                AdvertiseStartTls = true,
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(connectTimeout: TimeSpan.FromSeconds(30));
+            session.TlsStreamFactory = inner =>
+                tls = new CountingDisposeSslStream(new StalledPlaintextStream(inner, entered, handshakeCancelled));
+            var connect = session.ConnectAsync(factory, CancellationToken.None);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(handshakeCancelled.Task.IsCompleted);
+                await session.DisposeAsync();
+                await handshakeCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal("NNTP session was disposed during STARTTLS.", result.Reason);
+                Assert.False(result.SessionReusable);
+                Assert.Null(SessionField(session, "_stream"));
+                Assert.Null(SessionField(session, "_reader"));
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.False(session.IsReusable);
+                Assert.NotNull(tls);
+                Assert.Equal(1, tls.DisposeAsyncCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+            }
+            finally
+            {
+                session.TlsStreamFactory = null;
+                try
+                {
+                    using var leftover = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await session.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A throwing handshake-cancellation callback does not skip transport disposal or the closed state.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_continues_when_handshake_cancellation_callback_throws()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer("200 ready");
+            factory.Enqueue(server);
+            var session = CreateSession();
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            var cancellation = Assert.IsType<CancellationTokenSource>(SessionField(session, "_handshakeCancellation"));
+            cancellation.Token.Register(static () => throw new InvalidOperationException("handshake cancel callback failed"));
+
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Null(SessionField(session, "_stream"));
+            Assert.Null(SessionField(session, "_reader"));
+            Assert.Equal(1, server.ClientStreamDisposeCount);
         }
 
         /// <summary>
@@ -1302,14 +1380,21 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <param name="user">AUTHINFO user. Null leaves the session anonymous.</param>
         /// <param name="password">AUTHINFO password paired with <paramref name="user"/>.</param>
         /// <param name="logger">Logger for the session. Null uses <see cref="NullLogger"/>.</param>
+        /// <param name="connectTimeout">Connect and STARTTLS budget. Two seconds when null.</param>
         private static NntpProviderSession CreateSession(
             bool useTls = false,
             string? user = null,
             string? password = null,
-            ILogger? logger = null) =>
+            ILogger? logger = null,
+            TimeSpan? connectTimeout = null) =>
             new(
                 new BackFillerProviderDefinition("Giganews", "127.0.0.1", 119, useTls, user, password, 0, 1),
-                NntpSessionOptions.Default with { CommandTimeout = TimeSpan.FromSeconds(2), ReceiveTimeout = TimeSpan.FromSeconds(2), ConnectTimeout = TimeSpan.FromSeconds(2) },
+                NntpSessionOptions.Default with
+                {
+                    CommandTimeout = TimeSpan.FromSeconds(2),
+                    ReceiveTimeout = TimeSpan.FromSeconds(2),
+                    ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(2),
+                },
                 logger ?? NullLogger.Instance);
 
         /// <summary>Locates <paramref name="fileName"/> under <see cref="FindSourceDirectory"/>.</summary>
@@ -1435,6 +1520,153 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 public void Dispose()
                 {
                 }
+            }
+        }
+
+        /// <summary>
+        /// Counts asynchronous disposal of the TLS wrapper. The handshake itself is the base implementation.
+        /// </summary>
+        private sealed class CountingDisposeSslStream : SslStream
+        {
+            /// <summary>Entries to <see cref="DisposeAsync"/>.</summary>
+            private int _disposeAsyncCount;
+
+            /// <summary>Wraps <paramref name="inner"/> and closes it on disposal.</summary>
+            /// <param name="inner">Plaintext transport owned by this wrapper.</param>
+            public CountingDisposeSslStream(Stream inner)
+                : base(inner, leaveInnerStreamOpen: false)
+            {
+            }
+
+            /// <summary>Gets how many times <see cref="DisposeAsync"/> was entered.</summary>
+            public int DisposeAsyncCount => Volatile.Read(ref _disposeAsyncCount);
+
+            /// <inheritdoc />
+            public override ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref _disposeAsyncCount);
+                return base.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Plaintext transport whose first handshake read waits until that read is cancelled.
+        /// Later writes pass through so the client hello can leave the socket.
+        /// </summary>
+        private sealed class StalledPlaintextStream : Stream
+        {
+            /// <summary>Transport wrapped for the scripted server.</summary>
+            private readonly Stream _inner;
+
+            /// <summary>Completed when the handshake attempts its first read.</summary>
+            private readonly TaskCompletionSource _entered;
+
+            /// <summary>Completed when that read observes a cancelled token.</summary>
+            private readonly TaskCompletionSource _cancelled;
+
+            /// <summary>One after this wrapper has closed <see cref="_inner"/>.</summary>
+            private int _innerDisposed;
+
+            /// <summary>Wraps <paramref name="inner"/> and signals the handshake read gates.</summary>
+            /// <param name="inner">Plaintext transport closed exactly once by this wrapper.</param>
+            /// <param name="entered">Completed when the first handshake read starts.</param>
+            /// <param name="cancelled">Completed when that read's token is cancelled.</param>
+            public StalledPlaintextStream(Stream inner, TaskCompletionSource entered, TaskCompletionSource cancelled)
+            {
+                _inner = inner;
+                _entered = entered;
+                _cancelled = cancelled;
+            }
+
+            /// <inheritdoc />
+            public override bool CanRead => true;
+
+            /// <inheritdoc />
+            public override bool CanSeek => false;
+
+            /// <inheritdoc />
+            public override bool CanWrite => true;
+
+            /// <inheritdoc />
+            public override long Length => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            /// <inheritdoc />
+            public override void Flush() => _inner.Flush();
+
+            /// <inheritdoc />
+            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+
+            /// <inheritdoc />
+            public override int Read(byte[] buffer, int offset, int count) =>
+                throw new InvalidOperationException("The STARTTLS handshake used a synchronous read.");
+
+            /// <inheritdoc />
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            /// <inheritdoc />
+            public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+
+            /// <inheritdoc />
+            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                _inner.WriteAsync(buffer, offset, count, cancellationToken);
+
+            /// <inheritdoc />
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken) =>
+                _inner.WriteAsync(buffer, cancellationToken);
+
+            /// <summary>Signals entry, then waits until <paramref name="cancellationToken"/> is cancelled.</summary>
+            /// <param name="buffer">Ignored. The handshake does not receive peer bytes.</param>
+            /// <param name="cancellationToken">Token the TLS handshake passed for this read.</param>
+            /// <returns>A task that completes only by cancellation.</returns>
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+            {
+                _ = buffer;
+                _entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    _cancelled.TrySetResult();
+                    throw;
+                }
+
+                return 0;
+            }
+
+            /// <inheritdoc />
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+            /// <inheritdoc />
+            public override async ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _innerDisposed, 1) == 0)
+                {
+                    await _inner.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+
+            /// <inheritdoc />
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing && Interlocked.Exchange(ref _innerDisposed, 1) == 0)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
             }
         }
     }

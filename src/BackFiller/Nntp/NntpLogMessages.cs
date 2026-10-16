@@ -262,5 +262,18 @@ namespace VectorNNTP.BackFiller.Nntp
             Level = LogLevel.Debug,
             Message = "{Session}: STARTTLS transport cleanup failed error={ErrorType}")]
         internal static partial void WireTlsCleanupFailed(ILogger logger, string Session, string ErrorType);
+
+        /// <summary>
+        /// Written at Debug when cancelling the session handshake token throws from a registered callback.
+        /// Disposal still closes the captured transport and ends <see cref="NntpSessionState.Closed"/>.
+        /// </summary>
+        /// <param name="logger">Logger that receives the debug event.</param>
+        /// <param name="Session"><see cref="NntpProviderSession.WireLogIdentity"/> for the session.</param>
+        /// <param name="ErrorType">Runtime exception type from <see cref="CancellationTokenSource.CancelAsync"/>.</param>
+        [LoggerMessage(
+            EventId = 5419,
+            Level = LogLevel.Debug,
+            Message = "{Session}: handshake cancellation callback failed error={ErrorType}")]
+        internal static partial void WireHandshakeCancellationFailed(ILogger logger, string Session, string ErrorType);
     }
 }

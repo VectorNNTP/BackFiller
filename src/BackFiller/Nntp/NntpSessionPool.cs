@@ -96,6 +96,12 @@ namespace VectorNNTP.BackFiller.Nntp
         private Func<Task, Task>? _beforeKeepAliveRetirement;
 
         /// <summary>
+        /// Test gate invoked after the lease drain wait returns and before remaining sessions are retired.
+        /// Null in production. The delegate runs outside <see cref="_idleGate"/>.
+        /// </summary>
+        private Func<Task>? _afterDrainObserved;
+
+        /// <summary>
         /// FIFO of sessions waiting for <see cref="AcquireAsync"/>.
         /// Guarded by <see cref="_idleGate"/> with <see cref="_idleNodes"/> and <see cref="_issued"/>.
         /// Count is the number of live idle sessions, not a history of retired ones.
@@ -148,7 +154,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Leases issued by <see cref="Issue"/> and not yet finished by <see cref="ReturnAsync"/>.</summary>
         private int _activeLeases;
 
-        /// <summary>Zero until dispose begins. The first dispose wins.</summary>
+        /// <summary>
+        /// Zero until dispose begins. The first dispose sets this under <see cref="_idleGate"/> before it observes <see cref="_drained"/>.
+        /// </summary>
         private int _disposed;
 
         /// <summary>Zero until <see cref="StartPeriodicReplenish"/> publishes <see cref="_replenishTask"/>.</summary>
@@ -350,6 +358,16 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             get => _beforeKeepAliveRetirement;
             set => _beforeKeepAliveRetirement = value;
+        }
+
+        /// <summary>
+        /// Pauses dispose after the outstanding-lease wait has returned and before remaining sessions are retired.
+        /// Null unless a test is holding that window. Issuance after this point must already have been rejected.
+        /// </summary>
+        internal Func<Task>? AfterDrainObserved
+        {
+            get => _afterDrainObserved;
+            set => _afterDrainObserved = value;
         }
 
         /// <summary>Raised after the active session count may have changed.</summary>
@@ -672,6 +690,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </param>
         /// <param name="cancellationToken">Drain budget when <paramref name="forceAfterGrace"/> is false. Ignored for the lease wait when it is true.</param>
         /// <remarks>
+        /// The disposed flag is published under <see cref="_idleGate"/> before <see cref="_drained"/> is observed,
+        /// so <see cref="TryIssueReusable"/> cannot open a lease after that wait has been decided.
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
         /// <see cref="SuperviseReplenishAsync"/> logs an unexpected fill failure and keeps the replenish task alive until shutdown.
         /// A failure of that supervisor task itself is logged here and does not skip retirement.
@@ -679,9 +699,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         private async Task DisposeCoreAsync(bool forceAfterGrace, CancellationToken cancellationToken)
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            lock (_idleGate)
             {
-                return;
+                if (Interlocked.Exchange(ref _disposed, 1) == 1)
+                {
+                    return;
+                }
             }
 
             await _shutdown.CancelAsync().ConfigureAwait(false);
@@ -722,6 +745,11 @@ namespace VectorNNTP.BackFiller.Nntp
             catch (OperationCanceledException)
             {
                 ShutdownObservations.Canceled(_logger, "pool dispose grace");
+            }
+
+            if (_afterDrainObserved is { } afterDrain)
+            {
+                await afterDrain().ConfigureAwait(false);
             }
 
             while (TryTakeIdleSession(out var keepalive) is { } idle)
@@ -1016,8 +1044,8 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
-        /// Issues <paramref name="session"/> when it is still live and reusable.
-        /// The check and <see cref="_issued"/> insert share <see cref="_idleGate"/> with retirement.
+        /// Issues <paramref name="session"/> when shutdown has not started and the session is still live and reusable.
+        /// The shutdown check, the live check, and the <see cref="_issued"/> insert share <see cref="_idleGate"/>.
         /// </summary>
         /// <param name="session">Live session removed from <see cref="_idle"/>, or a session just returned by <see cref="CreateReadySessionAsync"/>.</param>
         /// <returns>The new lease, or <see langword="null"/> when the caller must retire <paramref name="session"/>.</returns>
@@ -1025,7 +1053,7 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             lock (_idleGate)
             {
-                if (!_live.ContainsKey(session) || !session.IsReusable)
+                if (Volatile.Read(ref _disposed) != 0 || !_live.ContainsKey(session) || !session.IsReusable)
                 {
                     return null;
                 }

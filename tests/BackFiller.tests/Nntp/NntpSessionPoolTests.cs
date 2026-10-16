@@ -212,6 +212,70 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// An acquire that has already passed the initial disposed check cannot take a lease after drain was observed.
+        /// The created session is retired once, and the drain does not return while a new lease is outstanding.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_rejects_issuance_after_drain_was_observed()
+        {
+            var readyToIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseIssue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drainObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer();
+            server.Respond(static command =>
+                command.StartsWith("AUTHINFO", StringComparison.OrdinalIgnoreCase)
+                    ? "281 authentication accepted\r\n"
+                    : "430 missing\r\n");
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var pool = CreatePool(factory, max: 1);
+            pool.BeforeCreatedSessionIssue = () =>
+            {
+                readyToIssue.TrySetResult();
+                return releaseIssue.Task;
+            };
+            pool.AfterDrainObserved = () =>
+            {
+                drainObserved.TrySetResult();
+                return releaseDrain.Task;
+            };
+            var acquire = pool.AcquireAsync(CancellationToken.None);
+            try
+            {
+                await readyToIssue.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var dispose = pool.DrainAndDisposeAsync(CancellationToken.None);
+                await drainObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                releaseIssue.TrySetResult();
+                await Assert.ThrowsAsync<ObjectDisposedException>(async () => await acquire);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                releaseDrain.TrySetResult();
+                await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+            }
+            finally
+            {
+                pool.BeforeCreatedSessionIssue = null;
+                pool.AfterDrainObserved = null;
+                releaseIssue.TrySetResult();
+                releaseDrain.TrySetResult();
+                try
+                {
+                    var leaked = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                    await leaked.DisposeAsync();
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// Unreusable session after failed ARTICLE is not returned to the idle pool.
         /// </summary>
 

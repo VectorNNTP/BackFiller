@@ -56,6 +56,13 @@ namespace VectorNNTP.BackFiller.Nntp
         private int _upgradeOwnsTransport;
 
         /// <summary>
+        /// Cancelled by the first <see cref="DisposeAsync"/> so an in-progress STARTTLS handshake ends
+        /// without the caller's token. A callback exception is logged and does not skip the rest of disposal.
+        /// Not disposed here: the handshake may still be linking this source.
+        /// </summary>
+        private readonly CancellationTokenSource _handshakeCancellation = new();
+
+        /// <summary>
         /// Test gate invoked after STARTTLS has captured its transport and before the handshake reads that transport.
         /// Null in production. Disposal during the gate must not make the handshake observe a null field.
         /// </summary>
@@ -688,6 +695,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
         /// The transport reference is captured under <see cref="_transportGate"/> before any await, and the fields are cleared there.
         /// A STARTTLS upgrade that already owns the plaintext transport disposes the TLS wrapper itself. This method does not dispose that transport again.
+        /// The first call cancels the session handshake token, so a handshake still inside <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> ends even when the caller's token is not cancelled.
+        /// <see cref="AggregateException"/> or <see cref="ObjectDisposedException"/> from that cancellation is logged and does not skip transport disposal, <see cref="_busy"/> disposal, or the transition to <see cref="NntpSessionState.Closed"/>.
         /// An upgrade that publishes before this capture is the stream that is closed here, so the wrapper is not left on a closed session.
         /// After the transport dispose is attempted, <see cref="_stream"/> and <see cref="_reader"/> stay clear.
         /// That drops the receive buffer and the article scratch buffer owned by the reader.
@@ -710,6 +719,15 @@ namespace VectorNNTP.BackFiller.Nntp
 
                 _stream = null;
                 _reader = null;
+            }
+
+            try
+            {
+                await _handshakeCancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
+            {
+                NntpLogMessages.WireHandshakeCancellationFailed(_logger, _wireIdentity, ex.GetType().Name);
             }
 
             State = NntpSessionState.Retiring;
@@ -842,7 +860,9 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>Wraps the captured transport with TLS and installs a new reader over the encrypted stream.</summary>
-        /// <param name="cancellationToken">Cancels the handshake together with <see cref="NntpSessionOptions.ConnectTimeout"/>.</param>
+        /// <param name="cancellationToken">
+        /// Cancels the handshake together with <see cref="NntpSessionOptions.ConnectTimeout"/> and the token cancelled by <see cref="DisposeAsync"/>.
+        /// </param>
         /// <returns><see langword="null"/> when the handshake completed. A handshake exception other than cancellation returns a non-reusable provider failure.</returns>
         /// <remarks>
         /// The plaintext transport is captured under <see cref="_transportGate"/> and then owned by this method until publication or failure.
@@ -913,14 +933,27 @@ namespace VectorNNTP.BackFiller.Nntp
             SslStream ssl;
             try
             {
+                using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    _handshakeCancellation.Token);
                 ssl = await NntpTlsClient.AuthenticateAsClientAsync(
                         stream,
                         _provider.Host,
                         _options.ConnectTimeout,
                         _options.ServerCertificateValidationCallback,
-                        cancellationToken,
+                        handshakeCts.Token,
                         _tlsStreamFactory)
                     .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (Volatile.Read(ref _disposed) != 0 && !cancellationToken.IsCancellationRequested)
+            {
+                ReleaseUpgradeOwnership();
+                _unhealthy = true;
+                return ArticleRetrievalResult.Failed(
+                    ArticleRetrievalKind.ProviderFailure,
+                    null,
+                    "NNTP session was disposed during STARTTLS.",
+                    sessionReusable: false);
             }
             catch (OperationCanceledException)
             {
