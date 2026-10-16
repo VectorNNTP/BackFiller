@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Microsoft.Extensions.Logging.Abstractions;
 using VectorNNTP.BackFiller.Nntp;
 using VectorNNTP.BackFiller.Articles;
@@ -85,6 +86,27 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             var result = await session.ConnectAsync(factory, CancellationToken.None);
             Assert.Equal(ArticleRetrievalKind.ProviderFailure, result!.Kind);
+            await session.DisposeAsync();
+        }
+
+        /// <summary>
+        /// A real <see cref="SocketException"/> from connect is a non-reusable provider failure whose reason is the exception type name.
+        /// </summary>
+        [Fact]
+        public async Task Connect_socket_exception_is_a_non_reusable_provider_failure()
+        {
+            var factory = new ScriptedNntpTransportFactory
+            {
+                ConnectException = new SocketException((int)SocketError.ConnectionRefused),
+            };
+            var session = CreateSession();
+
+            var result = await session.ConnectAsync(factory, CancellationToken.None);
+            Assert.NotNull(result);
+            Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+            Assert.False(result.SessionReusable);
+            Assert.Equal(nameof(SocketException), result.Reason);
+            Assert.Equal(NntpSessionState.Retiring, session.State);
             await session.DisposeAsync();
         }
 

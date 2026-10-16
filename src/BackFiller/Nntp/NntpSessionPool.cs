@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Sockets;
 using VectorNNTP.BackFiller.Logging;
 
 namespace VectorNNTP.BackFiller.Nntp
@@ -36,7 +37,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Pool logger. Also passed to each <see cref="NntpProviderSession"/>.</summary>
         private readonly ILogger _logger;
 
-        /// <summary>Clock for DATE keepalive delays. Production uses <see cref="TimeProvider.System"/>.</summary>
+        /// <summary>
+        /// Clock for DATE keepalive delays and the periodic replenish wait.
+        /// Production uses <see cref="TimeProvider.System"/>, which keeps <see cref="ReplenishInterval"/>.
+        /// </summary>
         private readonly TimeProvider _time;
 
         /// <summary>How long <see cref="DisposeAsync"/> and <see cref="AwaitKeepAlivesAsync"/> wait. Defaults to two seconds.</summary>
@@ -72,7 +76,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Serializes session creation and <see cref="ShrinkToBoundAsync"/>.</summary>
         private readonly SemaphoreSlim _fillGate = new(1, 1);
 
-        /// <summary>Sessions counted against the current max. Decremented when a create is abandoned or a live session is retired.</summary>
+        /// <summary>
+        /// Sessions counted against the current max.
+        /// Incremented before a connection number is reserved and decremented exactly once when that attempt is abandoned or the live session is retired.
+        /// </summary>
         private int _created;
 
         /// <summary>Leases issued by <see cref="Issue"/> and not yet finished by <see cref="ReturnAsync"/>.</summary>
@@ -110,7 +117,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <see cref="NntpProviderSession.ConnectAsync"/>.
         /// </param>
         /// <param name="shutdownGrace">How long <see cref="DisposeAsync"/> waits for leases. Two seconds when null.</param>
-        /// <param name="timeProvider">Clock for DATE delays. <see cref="TimeProvider.System"/> when null.</param>
+        /// <param name="timeProvider">Clock for DATE delays and replenish waits. <see cref="TimeProvider.System"/> when null.</param>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="provider"/>, <paramref name="options"/>, <paramref name="transport"/>,
         /// <paramref name="logger"/>, or <paramref name="establishment"/> is null.
@@ -521,12 +528,23 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </param>
         /// <returns>The ready session. It is in <see cref="_live"/> and is not yet idle.</returns>
         /// <exception cref="InvalidOperationException"><see cref="_created"/> would exceed <see cref="BackFillerProviderDefinition.MaxSessions"/>, or no connection number is free.</exception>
-        /// <exception cref="NntpProviderConnectException">Connect returned a failure or the session is not ready. The session is retired without replenish.</exception>
-        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> cancels the gate wait or connect.</exception>
+        /// <exception cref="NntpProviderConnectException">
+        /// Connect returned a failure, the session is not ready, or the transport threw <see cref="SocketException"/>.
+        /// The created-count, connection number, and live membership for this attempt are released before this exception propagates.
+        /// </exception>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> cancels the gate wait or connect. The same reservation is released.</exception>
         /// <remarks>
         /// The application-wide <see cref="_establishment"/> gate is held only around
         /// <see cref="NntpProviderSession.ConnectAsync"/> (TCP through Ready). Slot allocation and
         /// session construction run before the wait so cancelled waiters do not leave half-open sockets.
+        /// Every unsuccessful path after the <see cref="_created"/> increment releases that reservation exactly once.
+        /// <see cref="RetireSessionAsync"/> does the release when the session was inserted into <see cref="_live"/>;
+        /// a concurrent retire or dispose that already removed it does not decrement again.
+        /// A reservation that never reached <see cref="_live"/> is released by <see cref="ReleaseUnregisteredReservation"/>.
+        /// <see cref="NntpProviderSession.ConnectAsync"/> classifies <see cref="SocketException"/> as a provider failure.
+        /// A socket exception that still escapes is translated to <see cref="NntpProviderConnectException"/> here so
+        /// replenishment treats it as a failed attempt. The gate is released once, and only after this attempt acquired it.
+        /// A session that already became ready is left in <see cref="_live"/> if publication of that success throws.
         /// </remarks>
         private async Task<NntpProviderSession> CreateReadySessionAsync(CancellationToken cancellationToken)
         {
@@ -547,27 +565,34 @@ namespace VectorNNTP.BackFiller.Nntp
                 throw;
             }
 
-            var session = new NntpProviderSession(_provider, _options, _logger, connectionNumber);
-            _live[session] = 0;
+            NntpProviderSession session;
             try
             {
-                NntpLogMessages.SessionEstablishmentWaiting(_logger, _provider.Backbone, connectionNumber);
-                await _establishment.WaitAsync(cancellationToken).ConfigureAwait(false);
+                session = new NntpProviderSession(_provider, _options, _logger, connectionNumber);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch
             {
-                NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
-                await RetireSessionAsync(session, "NNTP connect was cancelled", replenish: false)
-                    .ConfigureAwait(false);
+                ReleaseUnregisteredReservation(connectionNumber);
                 throw;
             }
 
+            var registered = false;
+            var published = false;
+            var gateHeld = false;
             try
             {
+                _live[session] = 0;
+                registered = true;
+
+                NntpLogMessages.SessionEstablishmentWaiting(_logger, _provider.Backbone, connectionNumber);
+                await _establishment.WaitAsync(cancellationToken).ConfigureAwait(false);
+                gateHeld = true;
+
                 NntpLogMessages.SessionEstablishmentStarted(_logger, _provider.Backbone, connectionNumber);
                 var failure = await session.ConnectAsync(_transport, cancellationToken).ConfigureAwait(false);
                 if (failure is null && session.State == NntpSessionState.Ready)
                 {
+                    published = true;
                     NntpLogMessages.SessionEstablishmentCompleted(_logger, _provider.Backbone, connectionNumber);
                     NotifyActiveSessionCountChanged();
                     return session;
@@ -586,17 +611,140 @@ namespace VectorNNTP.BackFiller.Nntp
                         failure?.Reason ?? "connect failed");
                 }
 
-                await RetireSessionAsync(session, failure?.Reason ?? "connect failed", replenish: false)
-                    .ConfigureAwait(false);
                 throw new NntpProviderConnectException(
                     failure?.Kind ?? ArticleRetrievalKind.ProviderFailure,
                     failure?.StatusCode,
                     failure?.Reason ?? "NNTP connect failed.");
             }
+            // codeql[cs/catch-of-all-exceptions] Failed creation must release its own reservation for every exception type and must not leave the session in the live set.
+            catch (Exception ex)
+            {
+                if (published)
+                {
+                    throw;
+                }
+
+                if (registered && ex is not NntpProviderConnectException)
+                {
+                    if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                    {
+                        NntpLogMessages.SessionEstablishmentCancelled(_logger, _provider.Backbone, connectionNumber);
+                    }
+                    else
+                    {
+                        NntpLogMessages.SessionEstablishmentFailed(
+                            _logger,
+                            _provider.Backbone,
+                            connectionNumber,
+                            ex.GetType().Name);
+                    }
+                }
+
+                try
+                {
+                    await AbandonFailedCreationAsync(
+                            session,
+                            connectionNumber,
+                            registered,
+                            CreationFailureReason(ex, cancellationToken))
+                        .ConfigureAwait(false);
+                }
+                // codeql[cs/catch-of-all-exceptions] Rollback already released capacity or observed that another owner did. Cleanup must not replace the creation failure or decrement a second time.
+                catch (Exception cleanup)
+                {
+                    NntpLogMessages.SessionEstablishmentFailed(
+                        _logger,
+                        _provider.Backbone,
+                        connectionNumber,
+                        cleanup.GetType().Name);
+                }
+
+                if (ex is SocketException)
+                {
+                    throw new NntpProviderConnectException(
+                        ArticleRetrievalKind.ProviderFailure,
+                        null,
+                        ex.GetType().Name);
+                }
+
+                throw;
+            }
             finally
             {
-                _establishment.Release();
+                if (gateHeld)
+                {
+                    _establishment.Release();
+                }
             }
+        }
+
+        /// <summary>
+        /// Releases the capacity reserved for a session that did not become ready.
+        /// </summary>
+        /// <param name="session">Session constructed for this attempt.</param>
+        /// <param name="connectionNumber">Slot reserved by <see cref="AllocateConnectionNumber"/>.</param>
+        /// <param name="registered">
+        /// <see langword="true"/> when <paramref name="session"/> was inserted into <see cref="_live"/>.
+        /// </param>
+        /// <param name="reason">Retirement text used when <paramref name="registered"/> is <see langword="true"/>.</param>
+        /// <remarks>
+        /// A registered session is removed through <see cref="RetireSessionAsync"/>, which decrements <see cref="_created"/>
+        /// and frees the connection number only when this call wins <c>TryRemove</c>.
+        /// A concurrent retire or dispose that already removed the session leaves the counters unchanged.
+        /// An unregistered reservation is released by <see cref="ReleaseUnregisteredReservation"/> and the session is disposed here.
+        /// Replenishment is not requested. The periodic loop retries on its existing interval.
+        /// </remarks>
+        private async Task AbandonFailedCreationAsync(
+            NntpProviderSession session,
+            int connectionNumber,
+            bool registered,
+            string reason)
+        {
+            if (registered)
+            {
+                await RetireSessionAsync(session, reason, replenish: false).ConfigureAwait(false);
+                return;
+            }
+
+            ReleaseUnregisteredReservation(connectionNumber);
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>Chooses the retirement text for a creation attempt that threw.</summary>
+        /// <param name="failure">Exception that aborted the attempt.</param>
+        /// <param name="cancellationToken">Token supplied to <see cref="CreateReadySessionAsync"/>.</param>
+        /// <returns>
+        /// The connect-failure message when <paramref name="failure"/> is <see cref="NntpProviderConnectException"/>.
+        /// <c>NNTP connect was cancelled</c> when <paramref name="cancellationToken"/> cancelled an <see cref="OperationCanceledException"/>.
+        /// Otherwise the exception type name, which matches <see cref="NntpProviderSession.ConnectAsync"/> failure reasons.
+        /// </returns>
+        private static string CreationFailureReason(Exception failure, CancellationToken cancellationToken)
+        {
+            if (failure is NntpProviderConnectException)
+            {
+                return failure.Message;
+            }
+
+            if (failure is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                return "NNTP connect was cancelled";
+            }
+
+            return failure.GetType().Name;
+        }
+
+        /// <summary>
+        /// Returns a connection number and created-count reservation that never entered <see cref="_live"/>.
+        /// </summary>
+        /// <param name="connectionNumber">Slot from <see cref="AllocateConnectionNumber"/> for this attempt.</param>
+        /// <remarks>
+        /// Used only before live registration. After registration, <see cref="RetireSessionAsync"/> owns the same release.
+        /// Calling both for one attempt frees another session's number or drops <see cref="_created"/> below the live set.
+        /// </remarks>
+        private void ReleaseUnregisteredReservation(int connectionNumber)
+        {
+            ReleaseConnectionNumber(connectionNumber);
+            Interlocked.Decrement(ref _created);
         }
 
         /// <summary>Queues <paramref name="session"/> for acquire and starts its DATE loop when keepalive is enabled.</summary>
@@ -783,14 +931,32 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>Fills the deficit once every <see cref="ReplenishInterval"/> until <paramref name="cancellationToken"/> is cancelled.</summary>
         /// <param name="cancellationToken">Shutdown token. Cancellation ends the loop and is not rethrown.</param>
+        /// <remarks>
+        /// One failed fill does not end the loop. Connect failures surface as <see cref="NntpProviderConnectException"/>
+        /// and stop only the current round. Any other exception from that round is logged and the next interval still runs.
+        /// The wait is <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/> on <see cref="_time"/>.
+        /// <see cref="TimeProvider.System"/> keeps <see cref="ReplenishInterval"/>. Shutdown cancellation of the wait or the fill leaves the loop and is logged as session-fill shutdown.
+        /// </remarks>
         private async Task RunReplenishAsync(CancellationToken cancellationToken)
         {
             try
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    await Task.Delay(ReplenishInterval, cancellationToken).ConfigureAwait(false);
-                    await FillDeficitAsync(cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(ReplenishInterval, _time, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await FillDeficitAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    // codeql[cs/catch-of-all-exceptions] A transient connect failure must not permanently stop periodic replenishment. The next interval retries the same deficit.
+                    catch (Exception ex)
+                    {
+                        NntpLogMessages.SessionReplenishFailed(_logger, _provider.Backbone, ex.Message);
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -825,7 +991,10 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Creates idle sessions until the live count reaches the bound max or one create fails.</summary>
+        /// <summary>
+        /// Creates idle sessions until the live count reaches the bound max or one create fails.
+        /// A failed attempt does not stop <see cref="RunReplenishAsync"/>; that loop waits <see cref="ReplenishInterval"/> and tries again.
+        /// </summary>
         /// <param name="cancellationToken">Cancels the fill-gate wait and session creation. A disposed pool returns without creating.</param>
         private async Task FillDeficitAsync(CancellationToken cancellationToken)
         {
@@ -857,10 +1026,14 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="cancellationToken">Forwarded to <see cref="CreateReadySessionAsync"/>.</param>
         /// <returns>
         /// <see langword="true"/> when an idle session was queued.
-        /// <see langword="false"/> when connect failed or the pool is already at its max.
+        /// <see langword="false"/> when connect failed, including a <see cref="SocketException"/> reported as <see cref="NntpProviderConnectException"/>, or the pool is already at its max.
         /// </returns>
         /// <exception cref="ObjectDisposedException">The pool is disposed.</exception>
         /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+        /// <remarks>
+        /// Other exceptions propagate. <see cref="RunReplenishAsync"/> logs them and continues on the next interval.
+        /// <see cref="FillDeficitObservedAsync"/> logs them for an unawaited fill.
+        /// </remarks>
         private async Task<bool> TryCreateIdleSessionAsync(CancellationToken cancellationToken)
         {
             try
