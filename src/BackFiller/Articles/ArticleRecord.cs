@@ -109,8 +109,5 @@ namespace VectorNNTP.BackFiller.Articles
 
         /// <summary>Gets the References header value bytes in ArtData.</summary>
         internal ReadOnlySpan<byte> References => Fields.References.Slice(_artData);
-
-        /// <summary>Gets the Path header value bytes in ArtData.</summary>
-        private ReadOnlySpan<byte> Path => Fields.Path.Slice(_artData);
     }
 }

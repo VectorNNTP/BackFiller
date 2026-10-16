@@ -4,8 +4,7 @@ namespace VectorNNTP.BackFiller.Hosting.Systemd
     /// Host-lifetime health used for systemd watchdog decisions.
     /// </summary>
     /// <remarks>
-    /// BackFiller does not use NNTPD's <c>ApplicationLifecycle</c> state machine. Readiness for
-    /// watchdog purposes means all Generic Host hosted services started successfully, shutdown
+    /// Readiness for watchdog purposes means all Generic Host hosted services started successfully, shutdown
     /// has not begun, and no unexpected supervised-service termination has been recorded.
     /// Each flag is set to one with <see cref="Interlocked.Exchange(ref int, int)"/> and is never cleared.
     /// </remarks>

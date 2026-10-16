@@ -10,11 +10,9 @@ The worker consumes RabbitMQ Article Work, retrieves articles from upstream NNTP
 
 `ApplicationServiceManager` starts registered `IApplicationService` instances in registration order. On startup failure it stops the services that already started (rollback) and leaves the manager idle so start can be tried again. Stop runs in reverse order. One `BackFillerShutdownOptions.GracePeriodSeconds` budget covers the whole stop or rollback loop. It is not granted separately to each service. Overlapping start and stop throw `InvalidOperationException` before waiting on the manager gate.
 
-After start, non-null `IApplicationService.Execution` tasks are watched. A fault, a successful completion, or cancellation of that execution raises `UnexpectedServiceTermination`. `BackFillerApplicationHostedService` marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`. `IApplicationLifecycleOptions.StopHostOnUnexpectedServiceTermination` exists and is not read.
+After start, non-null `IApplicationService.Execution` tasks are watched. A fault, a successful completion, or cancellation of that execution raises `UnexpectedServiceTermination`. `BackFillerApplicationHostedService` marks `BackFillerApplicationHealth` unhealthy and calls `IHostApplicationLifetime.StopApplication`.
 
 `SystemdLifecycleNotifier` sends `READY=1` at most once after `IHostApplicationLifetime.ApplicationStarted`. Startup failure does not report ready. Once shutdown begins, further readiness notifications are suppressed. `SystemdWatchdogService` sends keep-alives only while `IApplicationHealth.IsHealthyForWatchdog` is true. Readiness is not inferred from DI registration order.
-
-`ApplicationLifecycle` in `src/BackFiller/Core/ApplicationLifecycle.cs` defines a Created → Starting → Running → Stopping → Stopped state machine. Nothing in `src/BackFiller/` or `tests/BackFiller.tests/` constructs it. It is not the live host lifecycle.
 
 Article Work shutdown uses `BackFillerShutdownOptions`:
 
@@ -99,4 +97,3 @@ This process does not implement:
 - NNTP compression, streaming feeds, or `LIST` extensions
 - PGPVERIFY or SPAMD (`docs/standards/pgpverify/` and `docs/standards/spamd/` are not in this repository)
 - a BenchmarkDotNet project or a `TransitPublisherTests` baseline
-- the `ApplicationLifecycle` state machine as the running host

@@ -18,13 +18,6 @@ namespace VectorNNTP.BackFiller.Configuration
         internal const int MaximumInclusive = 255;
 
         /// <summary>
-        /// Returns whether <paramref name="serverId"/> is unset (missing configuration).
-        /// </summary>
-        /// <param name="serverId">Bound server id, or <see langword="null"/> when omitted.</param>
-        /// <returns><see langword="true"/> when the value was not configured.</returns>
-        private static bool IsMissing(int? serverId) => serverId is null;
-
-        /// <summary>
         /// Returns whether a configured <paramref name="serverId"/> is inside the accepted range.
         /// </summary>
         /// <param name="serverId">Configured server id.</param>

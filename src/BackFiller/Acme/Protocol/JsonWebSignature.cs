@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace VectorNNTP.BackFiller.Acme.Protocol
 {
-    /// <summary>Builds ACME JWS (RFC 8555 §6.2) and external-account-binding HMAC JWS.</summary>
+    /// <summary>Builds ACME JWS (RFC 8555 §6.2).</summary>
     internal static class JsonWebSignature
     {
         /// <summary>Encodes a signed JWS object for an ACME request.</summary>
@@ -19,33 +19,6 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
 
             byte[] signingInput = Encoding.ASCII.GetBytes(protectedHeader + "." + encodedPayload);
             string signature = Base64Url.Encode(key.Sign(signingInput));
-
-            return $"{{\"protected\":\"{protectedHeader}\",\"payload\":\"{encodedPayload}\",\"signature\":\"{signature}\"}}";
-        }
-
-        /// <summary>Encodes an HS256 JWS for external account binding.</summary>
-        /// <param name="hmacKey">Raw HMAC key. Not logged.</param>
-        /// <param name="keyId">Protected-header <c>kid</c> issued by the CA.</param>
-        /// <param name="url">Protected-header <c>url</c>, the <c>newAccount</c> URL.</param>
-        /// <param name="payload">JWK JSON that is signed.</param>
-        /// <returns>Flattened JWS JSON embedded by account registration when binding is supplied.</returns>
-        internal static string EncodeHmac(byte[] hmacKey, string keyId, Uri url, string payload)
-        {
-            using var stream = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                writer.WriteStartObject();
-                writer.WriteString("alg", "HS256");
-                writer.WriteString("kid", keyId);
-                writer.WriteString("url", url.AbsoluteUri);
-                writer.WriteEndObject();
-            }
-
-            string protectedHeader = Base64Url.Encode(stream.ToArray());
-            string encodedPayload = Base64Url.Encode(Encoding.UTF8.GetBytes(payload));
-
-            byte[] signingInput = Encoding.ASCII.GetBytes(protectedHeader + "." + encodedPayload);
-            string signature = Base64Url.Encode(System.Security.Cryptography.HMACSHA256.HashData(hmacKey, signingInput));
 
             return $"{{\"protected\":\"{protectedHeader}\",\"payload\":\"{encodedPayload}\",\"signature\":\"{signature}\"}}";
         }

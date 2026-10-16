@@ -47,37 +47,5 @@ namespace VectorNNTP.BackFiller.Configuration
 
             return true;
         }
-
-        /// <summary>
-        /// Returns whether <paramref name="suffix"/> is a syntactically valid DNS suffix.
-        /// </summary>
-        /// <param name="suffix">Canonical (already trimmed/lowercased) suffix.</param>
-        /// <returns><see langword="true"/> when the suffix is valid.</returns>
-        private static bool IsValidDnsSuffix(string suffix)
-        {
-            if (string.IsNullOrWhiteSpace(suffix)
-                || suffix.Contains(' ', StringComparison.Ordinal)
-                || suffix.Contains("://", StringComparison.Ordinal)
-                || suffix.Length > ApplicationFqdn.MaximumLength)
-            {
-                return false;
-            }
-
-            var labels = suffix.Split('.');
-            if (labels.Length < 2)
-            {
-                return false;
-            }
-
-            foreach (var label in labels)
-            {
-                if (!IsValidDnsLabel(label))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
     }
 }

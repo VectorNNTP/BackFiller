@@ -50,16 +50,6 @@ namespace VectorNNTP.BackFiller.ArticleWork
         }
 
         /// <summary>
-        /// Channel-scoped RabbitMQ delivery tag passed to Basic.Ack or Basic.Nack on the original consumer channel only.
-        /// </summary>
-        private ulong DeliveryTag => _deliveryTag;
-
-        /// <summary>
-        /// Connection generation the consumer channel must still report for <see cref="TrySettleAsync"/> to call the broker.
-        /// </summary>
-        private long Generation => _generation;
-
-        /// <summary>
         /// Whether this lease has already consumed its one settlement attempt, including when the broker RPC then failed.
         /// </summary>
         /// <remarks>

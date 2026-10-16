@@ -443,16 +443,6 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         }
 
         /// <summary>
-        /// Writes the canonical Path bytes that a later materializer would produce.
-        /// </summary>
-        /// <param name="mode">Normalize leaves application hops unchanged. Traverse always prepends the parser FQDN.</param>
-        /// <param name="destination">Destination receiving ASCII Path bytes.</param>
-        /// <param name="bytesWritten">Bytes written on success.</param>
-        /// <returns><see langword="true"/> when Path analysis succeeded and <paramref name="destination"/> was large enough.</returns>
-        private bool TryWriteCanonicalPath(ArticlePathMode mode, Span<byte> destination, out int bytesWritten)
-            => TryWriteCanonicalPath(mode, ArticlePathCanonicalizer.OrganizationalTrackerHost, destination, out bytesWritten);
-
-        /// <summary>
         /// Writes the canonical Path bytes using <paramref name="organizationalTrackerHost"/> as the tracker component.
         /// </summary>
         /// <param name="mode">Normalize leaves application hops unchanged. Traverse always prepends the parser FQDN.</param>

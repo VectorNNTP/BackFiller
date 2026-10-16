@@ -62,35 +62,6 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
     internal sealed class AcmeCaRateLimitException : AcmeCaException
     {
         /// <summary>
-        /// Creates a rate-limit failure with no message and with <see cref="RetryAfter"/> left <see langword="null"/>.
-        /// Does not set <see cref="AcmeCaException.ErrorType"/>.
-        /// </summary>
-        private AcmeCaRateLimitException()
-        {
-        }
-
-        /// <summary>
-        /// Creates a rate-limit failure from <paramref name="message"/> only.
-        /// <see cref="RetryAfter"/> stays <see langword="null"/> and <see cref="AcmeCaException.ErrorType"/> is not set.
-        /// </summary>
-        /// <param name="message">Operator-safe summary.</param>
-        private AcmeCaRateLimitException(string message)
-            : base(message)
-        {
-        }
-
-        /// <summary>
-        /// Creates a rate-limit failure from <paramref name="message"/> and <paramref name="innerException"/>.
-        /// <see cref="RetryAfter"/> stays <see langword="null"/> and <see cref="AcmeCaException.ErrorType"/> is not set.
-        /// </summary>
-        /// <param name="message">Operator-safe summary.</param>
-        /// <param name="innerException">Failure that caused this exception.</param>
-        private AcmeCaRateLimitException(string message, Exception innerException)
-            : base(message, innerException)
-        {
-        }
-
-        /// <summary>
         /// Records HTTP 429 / <see cref="AcmeErrorTypes.RateLimited"/>, the CA detail, and the parsed Retry-After time.
         /// </summary>
         /// <param name="message">Operator-safe summary passed to <see cref="AcmeCaException"/>.</param>

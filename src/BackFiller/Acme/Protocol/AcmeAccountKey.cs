@@ -35,20 +35,6 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// <summary>Base64url SHA-256 of <see cref="Jwk"/>; used in DNS-01 key authorizations.</summary>
         private string Thumbprint { get; }
 
-        /// <summary>Creates a new RSA account key (minimum 2048 bits).</summary>
-        /// <param name="keySize">RSA modulus size in bits. Values below 2048 throw.</param>
-        /// <returns>An owned account key. The caller disposes it.</returns>
-        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="keySize"/> is below 2048.</exception>
-        private static AcmeAccountKey CreateRsa(int keySize = 2048)
-        {
-            if (keySize < 2048)
-            {
-                throw new ArgumentOutOfRangeException(nameof(keySize), "RSA keys must be at least 2048 bits.");
-            }
-
-            return new AcmeAccountKey(RSA.Create(keySize));
-        }
-
         /// <summary>
         /// Imports a PKCS#8 DER RSA private key. Consumes the entire buffer; preserves key material losslessly.
         /// </summary>
@@ -80,33 +66,6 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
                 throw;
             }
         }
-
-        /// <summary>
-        /// Proves DER → <see cref="AcmeAccountKey"/> → DER preserves RSA private key material (modulus and D).
-        /// </summary>
-        /// <param name="pkcs8Der">PKCS#8 DER bytes to import and export.</param>
-        /// <exception cref="CryptographicException">Thrown when modulus or D differs after the round trip, or import fails.</exception>
-        private static void AssertPkcs8DerRoundTripPreservesRsaMaterial(ReadOnlySpan<byte> pkcs8Der)
-        {
-            using var original = RSA.Create();
-            original.ImportPkcs8PrivateKey(pkcs8Der, out _);
-            RSAParameters before = original.ExportParameters(includePrivateParameters: true);
-
-            using AcmeAccountKey key = ImportPkcs8Der(pkcs8Der);
-            using var verify = RSA.Create();
-            verify.ImportPkcs8PrivateKey(key.ExportPkcs8Der(), out _);
-            RSAParameters after = verify.ExportParameters(includePrivateParameters: true);
-
-            if (!before.Modulus!.AsSpan().SequenceEqual(after.Modulus!)
-                || !before.D!.AsSpan().SequenceEqual(after.D!))
-            {
-                throw new CryptographicException("PKCS#8 DER import did not preserve RSA private key material.");
-            }
-        }
-
-        /// <summary>Exports the private key as PKCS#8 DER.</summary>
-        /// <returns>PKCS#8 DER bytes of <see cref="_rsa"/>.</returns>
-        private byte[] ExportPkcs8Der() => _rsa.ExportPkcs8PrivateKey();
 
         /// <summary>Signs <paramref name="data"/> for JWS (RSA PKCS#1 v1.5 / SHA-256).</summary>
         /// <param name="data">ASCII signing input <c>protected.payload</c>.</param>

@@ -81,9 +81,6 @@ namespace VectorNNTP.BackFiller.Acme
         /// </summary>
         internal Task? Execution => _execution;
 
-        /// <summary>Gets whether the service initialized ACME components (for tests).</summary>
-        private bool AcmeInitialized => _manager is not null;
-
         /// <summary>
         /// When TLS is disabled, logs and returns without creating ACME state.
         /// Otherwise ensures a certificate, publishes the PFX, marks readiness, and starts the renewal loop.

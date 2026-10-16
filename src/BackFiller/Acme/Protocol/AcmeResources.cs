@@ -331,37 +331,16 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
     {
         /// <summary>Identifier <c>type</c> value <c>dns</c>. The only type written by issuance.</summary>
         internal const string Dns = "dns";
-
-        /// <summary>Identifier <c>type</c> value <c>ip</c>. Deserialized when a CA sends it; issuance does not request it.</summary>
-        private const string Ip = "ip";
     }
 
     /// <summary>ACME status wire values used by order / authorization polling.</summary>
     internal static class AcmeStatus
     {
-        /// <summary>Status <c>pending</c>.</summary>
-        private const string Pending = "pending";
-
-        /// <summary>Status <c>ready</c>. Readiness treats this order status as ready to finalize.</summary>
-        private const string Ready = "ready";
-
-        /// <summary>Status <c>processing</c>.</summary>
-        private const string Processing = "processing";
-
         /// <summary>Status <c>valid</c>. Order polling returns when the order status equals this value.</summary>
         internal const string Valid = "valid";
 
         /// <summary>Status <c>invalid</c>. Order polling and readiness fail when an order or authorization status equals this value.</summary>
         internal const string Invalid = "invalid";
-
-        /// <summary>Status <c>deactivated</c>.</summary>
-        private const string Deactivated = "deactivated";
-
-        /// <summary>Status <c>expired</c>.</summary>
-        private const string Expired = "expired";
-
-        /// <summary>Status <c>revoked</c>.</summary>
-        private const string Revoked = "revoked";
     }
 
     /// <summary>Common ACME problem type URNs.</summary>
@@ -378,20 +357,5 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// The transport throws <see cref="AcmeCaRateLimitException"/> for this type and for HTTP 429.
         /// </summary>
         internal const string RateLimited = "urn:ietf:params:acme:error:rateLimited";
-
-        /// <summary><c>urn:ietf:params:acme:error:accountDoesNotExist</c>. Stored for comparison; the client does not branch on it.</summary>
-        private const string AccountDoesNotExist = "urn:ietf:params:acme:error:accountDoesNotExist";
-
-        /// <summary><c>urn:ietf:params:acme:error:orderNotReady</c>. Stored for comparison; the client does not branch on it.</summary>
-        private const string OrderNotReady = "urn:ietf:params:acme:error:orderNotReady";
-
-        /// <summary><c>urn:ietf:params:acme:error:dns</c>. Stored for comparison; the client does not branch on it.</summary>
-        private const string Dns = "urn:ietf:params:acme:error:dns";
-
-        /// <summary><c>urn:ietf:params:acme:error:unauthorized</c>. Stored for comparison; the client does not branch on it.</summary>
-        private const string Unauthorized = "urn:ietf:params:acme:error:unauthorized";
-
-        /// <summary><c>urn:ietf:params:acme:error:incorrectResponse</c>. Stored for comparison; the client does not branch on it.</summary>
-        private const string IncorrectResponse = "urn:ietf:params:acme:error:incorrectResponse";
     }
 }

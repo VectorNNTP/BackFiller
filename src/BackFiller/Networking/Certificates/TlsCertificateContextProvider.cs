@@ -70,27 +70,11 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
         internal SslStreamCertificateContext Context =>
             (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).Context;
 
-        /// <summary>Gets the holder generation (tests).</summary>
-        private int Generation =>
-            (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).Generation;
-
-        /// <summary>Gets whether the underlying holder has been disposed (tests).</summary>
-        private bool HolderIsDisposed =>
-            (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).IsDisposed;
-
-        /// <summary>Gets how many times the holder committed disposal (tests).</summary>
-        private int HolderDisposeCount =>
-            (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).DisposeCount;
-
-        /// <summary>Gets the leased holder for lifetime tests.</summary>
-        private TlsCertificateHolder Holder =>
-            _holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease));
-
         /// <summary>
         /// Releases this lease's reference to the certificate context holder.
         /// </summary>
         /// <remarks>
-        /// Safe to call more than once. After dispose, <see cref="Context"/> and related members throw
+        /// Safe to call more than once. After dispose, <see cref="Context"/> throws
         /// <see cref="ObjectDisposedException"/>. The holder (and context) may remain alive for other leases
         /// or until the provider drops its publication reference.
         /// </remarks>
@@ -241,22 +225,16 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
         /// <summary><c>1</c> after <see cref="DisposeCore"/> commits disposal.</summary>
         private int _disposed;
 
-        /// <summary>Times <see cref="DisposeCore"/> passed the one-shot dispose gate. Expected to stay 0 or 1.</summary>
-        private int _disposeCount;
-
-        /// <summary>Stores the context, leaf, owned certificate collection, and generation. Does not take an extra reference.</summary>
+        /// <summary>Stores the context, owned certificate collection, and generation. Does not take an extra reference.</summary>
         /// <param name="context">Context built for TLS. Disposed in <see cref="DisposeCore"/> when it implements <see cref="IDisposable"/>.</param>
-        /// <param name="leaf">Certificate that supplied the private key. Also present in <paramref name="ownedCerts"/>.</param>
-        /// <param name="ownedCerts">PKCS#12 collection disposed with the holder. Includes <paramref name="leaf"/> and intermediates.</param>
+        /// <param name="ownedCerts">PKCS#12 collection disposed with the holder. Includes the leaf and intermediates.</param>
         /// <param name="generation">Value taken from <see cref="s_generation"/> at creation.</param>
         private TlsCertificateHolder(
             SslStreamCertificateContext context,
-            X509Certificate2 leaf,
             X509Certificate2Collection ownedCerts,
             int generation)
         {
             Context = context;
-            Leaf = leaf;
             _ownedCerts = ownedCerts;
             Generation = generation;
         }
@@ -267,17 +245,8 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
         /// <summary>Immutable TLS context for this generation. Valid until <see cref="DisposeCore"/>.</summary>
         internal SslStreamCertificateContext Context { get; }
 
-        /// <summary>Leaf certificate that had the private key. Disposed as part of <see cref="_ownedCerts"/>.</summary>
-        private X509Certificate2 Leaf { get; }
-
-        /// <summary>Monotonic generation assigned when the PFX was loaded.</summary>
+        /// <summary>Monotonic generation assigned when the PFX was loaded. Written to the publication log.</summary>
         internal int Generation { get; }
-
-        /// <summary><see langword="true"/> after <see cref="DisposeCore"/> has committed disposal.</summary>
-        internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
-
-        /// <summary>Gets how many times <see cref="DisposeCore"/> committed disposal (tests).</summary>
-        internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
         /// <summary>
         /// Loads a PKCS#12 collection and publishes an offline <see cref="SslStreamCertificateContext"/>.
@@ -334,7 +303,7 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
                 // offline: true avoids OCSP/CRL network during context build at publish time.
                 var context = SslStreamCertificateContext.Create(leaf, intermediates, offline: true);
                 var generation = Interlocked.Increment(ref s_generation);
-                return new TlsCertificateHolder(context, leaf, collection, generation);
+                return new TlsCertificateHolder(context, collection, generation);
             }
             catch
             {
@@ -397,8 +366,6 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
             {
                 return;
             }
-
-            Interlocked.Increment(ref _disposeCount);
 
             // SslStreamCertificateContext does not own/dispose certificates in all TFMs; dispose our collection.
             foreach (var cert in _ownedCerts)

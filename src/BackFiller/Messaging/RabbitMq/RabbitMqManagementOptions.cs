@@ -11,9 +11,6 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// </remarks>
     internal sealed class RabbitMqManagementOptions
     {
-        /// <summary>Configuration key for this nested section relative to <see cref="RabbitMqOptions.SectionName"/>.</summary>
-        private const string SectionRelativeName = "Management";
-
         /// <summary>
         /// Absolute base URL of the RabbitMQ Management HTTP API root
         /// (scheme + host + port only; no <c>/api</c> path). Example:

@@ -81,34 +81,6 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         }
 
         /// <summary>
-        /// Validates a raw Path value and classifies the rewrite that a later materializer would apply.
-        /// </summary>
-        /// <param name="rawPath">Raw Path header value bytes, or empty when the header is absent.</param>
-        /// <param name="localIdentity">Local application FQDN. Analysis reports whether it is leftmost; writes use <see cref="ArticlePathMode"/>.</param>
-        /// <param name="pathPresent">Whether a Path header was present.</param>
-        /// <param name="kind">Rewrite classification when validation succeeds.</param>
-        /// <param name="containsOrganizationalTracker">
-        /// Whether a Path token equals the tracker host using existing case-insensitive token rules.
-        /// </param>
-        /// <param name="failureCode">Failure code when the Path value is invalid.</param>
-        /// <returns><see langword="true"/> when the Path is usable (including a missing header).</returns>
-        private static bool TryAnalyze(
-            ReadOnlySpan<byte> rawPath,
-            ReadOnlySpan<byte> localIdentity,
-            bool pathPresent,
-            out ArticlePathKind kind,
-            out bool containsOrganizationalTracker,
-            out NntpArticleParseFailureCode failureCode)
-            => TryAnalyze(
-                rawPath,
-                localIdentity,
-                pathPresent,
-                OrganizationalTrackerHost,
-                out kind,
-                out containsOrganizationalTracker,
-                out failureCode);
-
-        /// <summary>
         /// Validates a raw Path value against <paramref name="organizationalTracker"/> and classifies the rewrite.
         /// </summary>
         /// <param name="rawPath">Raw Path header value bytes, or empty when the header is absent.</param>
@@ -206,43 +178,6 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
                 : ArticlePathKind.NeedsLocalIdentityPrepend;
             return true;
         }
-
-        /// <summary>
-        /// Writes the canonical Path bytes that a later materializer would produce.
-        /// </summary>
-        /// <param name="rawPath">Original Path value bytes when present; ignored when <paramref name="kind"/> is <see cref="ArticlePathKind.Missing"/> or <see cref="ArticlePathKind.Empty"/>.</param>
-        /// <param name="localIdentity">Local application FQDN written as an application hop when needed.</param>
-        /// <param name="kind">Rewrite classification from path analysis.</param>
-        /// <param name="containsOrganizationalTracker">Whether the organizational tracker token is already present.</param>
-        /// <param name="mode">Normalize leaves application hops unchanged. Traverse always prepends <paramref name="localIdentity"/>.</param>
-        /// <param name="destination">Destination receiving ASCII Path bytes.</param>
-        /// <param name="bytesWritten">Bytes written on success.</param>
-        /// <returns><see langword="true"/> when <paramref name="destination"/> was large enough.</returns>
-        /// <remarks>
-        /// <see cref="ArticlePathMode.Traverse"/> with the tracker absent writes
-        /// <c>news.usenet.ninja!{application-fqdn}!existing</c>.
-        /// A later traverse writes <c>{application-fqdn}!existing</c> even when that FQDN is already present.
-        /// <see cref="ArticlePathMode.Normalize"/> does not write an application FQDN.
-        /// <c>news.usenet.ninja</c> is inserted when absent and reduced to the first occurrence.
-        /// Empty Path tokens from repeated <c>!</c> separators are dropped.
-        /// </remarks>
-        private static bool TryWriteCanonicalPath(
-            ReadOnlySpan<byte> rawPath,
-            ReadOnlySpan<byte> localIdentity,
-            ArticlePathKind kind,
-            bool containsOrganizationalTracker,
-            ArticlePathMode mode,
-            Span<byte> destination,
-            out int bytesWritten)
-            => TryWriteCanonicalPath(
-                rawPath,
-                localIdentity,
-                kind,
-                containsOrganizationalTracker,
-                mode,
-                OrganizationalTrackerHost,
-                destination,
-                out bytesWritten);
 
         /// <summary>
         /// Writes canonical Path bytes using <paramref name="organizationalTracker"/> as the organizational hop.

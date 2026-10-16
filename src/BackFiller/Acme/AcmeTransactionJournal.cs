@@ -91,15 +91,6 @@ namespace VectorNNTP.BackFiller.Acme
             _journalLockPath = _journalPath + ".lock";
         }
 
-        /// <summary>Normalized certificate FQDN stored in and required by the on-disk journal.</summary>
-        private string Fqdn => _fqdn;
-
-        /// <summary>Path of <c>journal/{fqdn}.json</c> under the ACME state root.</summary>
-        private string FilePath => _journalPath;
-
-        /// <summary>Exclusive lock path <c>{FilePath}.lock</c> that serializes same-FQDN writers across processes.</summary>
-        private string LockPath => _journalLockPath;
-
         /// <summary>Transaction id from the last <see cref="BeginTransaction"/> that has not completed; null when idle.</summary>
         internal string? ActiveTransactionId => _activeTransactionId;
 
@@ -382,22 +373,6 @@ namespace VectorNNTP.BackFiller.Acme
             {
                 _activeTransactionId = null;
             }
-        }
-
-        /// <summary>Loads historical transactions for this FQDN only, oldest first.</summary>
-        /// <returns>The persisted transactions, or an empty list when the file does not exist.</returns>
-        private IReadOnlyList<AcmeJournalTransaction> LoadHistory()
-        {
-            return WithGate(() => LoadDocument().Transactions);
-        }
-
-        /// <summary>
-        /// Loads recovery events that could not be attached to an original transaction.
-        /// </summary>
-        /// <returns>Unattributed events in write order.</returns>
-        private IReadOnlyList<AcmeJournalEvent> LoadUnattributedEvents()
-        {
-            return WithGate(() => LoadDocument().UnattributedEvents);
         }
 
         /// <summary>Appends <paramref name="journalEvent"/> to <see cref="_activeTransactionId"/>. Does nothing when no transaction is active.</summary>

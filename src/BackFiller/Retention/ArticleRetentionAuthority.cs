@@ -98,12 +98,6 @@ namespace VectorNNTP.BackFiller.Retention
         private int _physicalCount;
 
         /// <summary>
-        /// Monotonic source for <see cref="RetainedEntry.Generation"/>. Incremented when a new entry
-        /// is constructed. Sweep, reclaim, and cancel do not read it.
-        /// </summary>
-        private long _nextGeneration;
-
-        /// <summary>
         /// When <see langword="true"/>, <see cref="RetainCanonical"/> returns
         /// <see cref="ArticleRetentionKind.ShuttingDown"/>. Set by <see cref="BeginShutdown"/> and
         /// <see cref="DisposeAsync"/>. Cancel and sweep do not consult it.
@@ -404,9 +398,7 @@ namespace VectorNNTP.BackFiller.Retention
                     _bindPort,
                     record,
                     selectedDateHeaderName,
-                    now,
-                    now + _ttl,
-                    Interlocked.Increment(ref _nextGeneration));
+                    now + _ttl);
                 entry.Node = _insertionOrder.AddLast(entry);
                 _byMessageId[messageId] = entry;
                 _messageIdByArticleId[identity.ArticleIdHex] = messageId;
@@ -1107,18 +1099,14 @@ namespace VectorNNTP.BackFiller.Retention
             /// <param name="listenerPort">TLS listener port copied from the authority at admission.</param>
             /// <param name="record">CanonicalV1 record retained by reference.</param>
             /// <param name="selectedDateHeaderName">Date-family header name captured at admission.</param>
-            /// <param name="insertedUtc">Authority clock at admission.</param>
-            /// <param name="expiresUtc"><paramref name="insertedUtc"/> plus the authority TTL.</param>
-            /// <param name="generation">Value taken from <see cref="_nextGeneration"/>. Not read by later decisions.</param>
+            /// <param name="expiresUtc">First instant at which the entry is expired.</param>
             internal RetainedEntry(
                 ArticleIdentity identity,
                 string fqdn,
                 int listenerPort,
                 ArticleRecord record,
                 NntpArticleHeaderName selectedDateHeaderName,
-                DateTimeOffset insertedUtc,
-                DateTimeOffset expiresUtc,
-                long generation)
+                DateTimeOffset expiresUtc)
             {
                 Identity = identity;
                 Fqdn = fqdn;
@@ -1126,9 +1114,7 @@ namespace VectorNNTP.BackFiller.Retention
                 _record = record;
                 _selectedDateHeaderName = selectedDateHeaderName;
                 PayloadBytes = record.ArtSize;
-                InsertedUtc = insertedUtc;
                 ExpiresUtc = expiresUtc;
-                Generation = generation;
             }
 
             /// <summary>Message-ID and ArticleId hex. These are the index keys for the entry's lifetime.</summary>
@@ -1146,18 +1132,10 @@ namespace VectorNNTP.BackFiller.Retention
             /// </summary>
             internal int PayloadBytes { get; }
 
-            /// <summary>Authority clock at admission.</summary>
-            private DateTimeOffset InsertedUtc { get; }
-
             /// <summary>
             /// First instant at which the entry is expired. <see cref="IsExpiredLocked"/> treats equality as expired.
             /// </summary>
             internal DateTimeOffset ExpiresUtc { get; }
-
-            /// <summary>
-            /// Admission stamp from <see cref="_nextGeneration"/>. Stored only. Sweep and delivery do not compare it.
-            /// </summary>
-            private long Generation { get; }
 
             /// <summary>
             /// Link in <see cref="_insertionOrder"/>. <see langword="null"/> after <see cref="UnindexLocked"/> unlinks it.
@@ -1191,9 +1169,6 @@ namespace VectorNNTP.BackFiller.Retention
 
             /// <summary>Retained record, or <see langword="null"/> after physical disposal.</summary>
             internal ArticleRecord? Record => _record;
-
-            /// <summary>Date-family header name, or <see langword="null"/> after physical disposal.</summary>
-            private NntpArticleHeaderName? SelectedDateHeaderName => _selectedDateHeaderName;
 
             /// <summary>Volatile read of logical removal. Indexes no longer contain the entry when this is <see langword="true"/>.</summary>
             internal bool IsLogicallyRemoved => Volatile.Read(ref _logicallyRemoved) == 1;

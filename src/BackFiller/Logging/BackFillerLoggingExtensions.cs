@@ -11,12 +11,6 @@ namespace VectorNNTP.BackFiller.Logging
     internal static partial class BackFillerLoggingExtensions
     {
         /// <summary>
-        /// Single-line console template used by the bootstrap logger when the process switch for
-        /// ambient context enrichment is off. Matches <see cref="BackFillerFileLogging.SinkOutputTemplate"/>.
-        /// </summary>
-        private const string ConsoleOutputTemplate = BackFillerFileLogging.SinkOutputTemplate;
-
-        /// <summary>
         /// Creates an early bootstrap logger used before the Generic Host is built.
         /// </summary>
         /// <param name="commandLine">

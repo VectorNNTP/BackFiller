@@ -1,7 +1,7 @@
 namespace VectorNNTP.BackFiller.Tests.TestDoubles
 {
     /// <summary>
-    /// <see cref="TimeProvider"/> that moves only when a test calls <see cref="SetUtcNow"/> or <see cref="Advance"/>.
+    /// <see cref="TimeProvider"/> that moves only when a test calls <see cref="Advance"/>.
     /// Timers created here fire when the advanced clock reaches their due time.
     /// </summary>
     internal sealed class ManualTimeProvider : TimeProvider
@@ -35,18 +35,6 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             var timer = new ManualTimer(this, callback, state);
             timer.Change(dueTime, period);
             return timer;
-        }
-
-        /// <summary>True when at least one registered timer has a scheduled due time.</summary>
-        private bool HasPendingTimer
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _timers.Exists(static timer => timer.NextDue is not null);
-                }
-            }
         }
 
         /// <summary>Moves the clock forward and fires due timers in due-time order until the target is reached.</summary>
@@ -86,16 +74,6 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
                 }
 
                 due.Fire();
-            }
-        }
-
-        /// <summary>Sets the UTC instant without firing timers (unlike <see cref="Advance"/>).</summary>
-        /// <param name="utcNow">New clock value.</param>
-        private void SetUtcNow(DateTimeOffset utcNow)
-        {
-            lock (_gate)
-            {
-                _utcNow = utcNow;
             }
         }
 

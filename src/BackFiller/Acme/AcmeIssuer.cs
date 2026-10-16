@@ -383,7 +383,6 @@ namespace VectorNNTP.BackFiller.Acme
                 string location = acme.RegisterAccountAsync(
                         contacts,
                         termsOfServiceAgreed: true,
-                        externalAccountBinding: null,
                         CancellationToken.None)
                     .GetAwaiter()
                     .GetResult();

@@ -200,46 +200,6 @@ namespace VectorNNTP.BackFiller.Articles
             }
         }
 
-        /// <summary>Parses <c>Content-Length</c> as a non-negative destuffed-body size hint, or -1.</summary>
-        private static int TryParseContentLength(ReadOnlySpan<byte> headerLine)
-        {
-            if (!StartsWithFolded(headerLine, "CONTENT-LENGTH:"u8))
-            {
-                return -1;
-            }
-
-            return TryParseNonNegativeInt(headerLine["CONTENT-LENGTH:".Length..]);
-        }
-
-        /// <summary>
-        /// Parses yEnc <c>size=</c> from a destuffed <c>=ybegin</c> line.
-        /// That value is the original/decoded size, not wire bytes.
-        /// </summary>
-        private static int TryParseYencSize(ReadOnlySpan<byte> line)
-        {
-            if (line.Length < 8 || line[0] != (byte)'=' || !StartsWithFolded(line, "=YBEGIN"u8))
-            {
-                return -1;
-            }
-
-            var sizeToken = " SIZE="u8;
-            for (var i = 0; i + sizeToken.Length < line.Length; i++)
-            {
-                if (!StartsWithFolded(line[i..], sizeToken))
-                {
-                    continue;
-                }
-
-                return TryParseNonNegativeInt(line[(i + sizeToken.Length)..]);
-            }
-
-            return -1;
-        }
-
-        /// <summary>Returns whether <paramref name="line"/> is a destuffed yEnc begin marker.</summary>
-        private static bool IsYencBegin(ReadOnlySpan<byte> line) =>
-            line.Length >= 8 && line[0] == (byte)'=' && StartsWithFolded(line, "=YBEGIN"u8);
-
         /// <summary>
         /// Returns whether <paramref name="value"/> begins with <paramref name="upperAscii"/> after folding ASCII <c>a-z</c> to upper case.
         /// </summary>
@@ -268,40 +228,6 @@ namespace VectorNNTP.BackFiller.Articles
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Parses a non-negative decimal integer after optional leading SP or HTAB.
-        /// </summary>
-        /// <param name="text">Remainder of a header or <c>size=</c> token. Parsing stops at the first non-digit and does not require the span to end there.</param>
-        /// <returns>The integer, or <c>-1</c> when there is no digit or the value would exceed <see cref="int.MaxValue"/>. A leading sign is rejected.</returns>
-        private static int TryParseNonNegativeInt(ReadOnlySpan<byte> text)
-        {
-            var i = 0;
-            while (i < text.Length && (text[i] == (byte)' ' || text[i] == (byte)'\t'))
-            {
-                i++;
-            }
-
-            if (i >= text.Length || text[i] < (byte)'0' || text[i] > (byte)'9')
-            {
-                return -1;
-            }
-
-            var value = 0;
-            while (i < text.Length && text[i] >= (byte)'0' && text[i] <= (byte)'9')
-            {
-                var digit = text[i] - (byte)'0';
-                if (value > (int.MaxValue - digit) / 10)
-                {
-                    return -1;
-                }
-
-                value = (value * 10) + digit;
-                i++;
-            }
-
-            return value;
         }
     }
 }

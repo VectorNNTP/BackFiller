@@ -23,32 +23,6 @@ namespace VectorNNTP.BackFiller.Configuration
         internal const string Prefix = "VECTOR__";
 
         /// <summary>
-        /// Builds the canonical uppercase environment-variable name for a configuration key path.
-        /// </summary>
-        /// <param name="configurationKeys">Configuration key segments in declaration order (for example <c>RabbitMQ</c>, <c>Username</c>).</param>
-        /// <returns>The <c>VECTOR__</c> name, for example <c>VECTOR__RABBITMQ__USERNAME</c>.</returns>
-        private static string Variable(params string[] configurationKeys)
-        {
-            ArgumentNullException.ThrowIfNull(configurationKeys);
-            if (configurationKeys.Length == 0)
-            {
-                throw new ArgumentException("At least one configuration key is required.", nameof(configurationKeys));
-            }
-
-            var suffix = string.Join("__", configurationKeys.Select(static key =>
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    throw new ArgumentException("Configuration key segments must be non-empty.", nameof(configurationKeys));
-                }
-
-                return key.Trim().ToUpperInvariant();
-            }));
-
-            return Prefix + suffix;
-        }
-
-        /// <summary>
         /// Returns whether <paramref name="environmentVariableName"/> is a canonical VectorNNTP name.
         /// </summary>
         /// <param name="environmentVariableName">Candidate environment-variable name.</param>
