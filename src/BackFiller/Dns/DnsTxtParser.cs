@@ -19,7 +19,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="expectedId">Transaction id that must match the response.</param>
         /// <param name="results">Cleared, then filled with one concatenated TXT payload per accepted answer.</param>
         /// <returns><see langword="true"/> when the header and question section were well-formed.</returns>
-        internal static bool TryParseTxtRecords(ReadOnlySpan<byte> buffer, ushort expectedId, List<byte[]> results)
+        private static bool TryParseTxtRecords(ReadOnlySpan<byte> buffer, ushort expectedId, List<byte[]> results)
         {
             ArgumentNullException.ThrowIfNull(results);
             results.Clear();
@@ -87,7 +87,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="expectedId">Transaction id that must match the response.</param>
         /// <param name="expectedTxt">Concatenated TXT character-string bytes to compare.</param>
         /// <returns><see langword="false"/> when the header or question section is malformed or no TXT matches.</returns>
-        internal static bool ResponseContainsTxt(
+        private static bool ResponseContainsTxt(
             ReadOnlySpan<byte> buffer,
             ushort expectedId,
             ReadOnlySpan<byte> expectedTxt)

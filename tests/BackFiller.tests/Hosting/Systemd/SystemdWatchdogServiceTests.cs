@@ -270,13 +270,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
             /// <summary>Arms logging synchronization on messages containing <paramref name="fragment"/>.</summary>
             /// <param name="fragment">Required substring in formatted log text.</param>
-            public WatchdogEventLogger(string fragment) => _fragment = fragment;
+            internal WatchdogEventLogger(string fragment) => _fragment = fragment;
 
             /// <summary>Completes when a log line contains the configured fragment.</summary>
-            public Task Seen => Volatile.Read(ref _seen).Task;
+            internal Task Seen => Volatile.Read(ref _seen).Task;
 
             /// <summary>Replaces <see cref="Seen"/> with a fresh incomplete task.</summary>
-            public void Arm() =>
+            internal void Arm() =>
                 Volatile.Write(ref _seen, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
             /// <inheritdoc />

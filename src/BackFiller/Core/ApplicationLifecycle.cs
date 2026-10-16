@@ -22,7 +22,7 @@ namespace VectorNNTP.BackFiller.Core
     /// Concurrent <see cref="StartAsync"/> / <see cref="StopAsync"/> operations are serialized.
     /// </para>
     /// </remarks>
-    public sealed class ApplicationLifecycle : IAsyncDisposable
+    internal sealed class ApplicationLifecycle : IAsyncDisposable
     {
         /// <summary>
         /// Legal state changes. Any other pair causes <see cref="Transition"/> to throw
@@ -102,7 +102,7 @@ namespace VectorNNTP.BackFiller.Core
         /// <param name="options">Display name, optional startup timeout, and graceful-shutdown budget.</param>
         /// <param name="logger">Receives lifecycle events from <see cref="LifecycleLogMessages"/>.</param>
         /// <exception cref="ArgumentNullException">Any argument is null.</exception>
-        internal ApplicationLifecycle(
+        private ApplicationLifecycle(
             ApplicationServiceManager serviceManager,
             IApplicationLifecycleOptions options,
             ILogger<ApplicationLifecycle> logger)
@@ -124,7 +124,7 @@ namespace VectorNNTP.BackFiller.Core
         internal event EventHandler<ApplicationStateChangedEventArgs>? StateChanged;
 
         /// <summary>Gets the current lifecycle state (thread-safe).</summary>
-        internal ApplicationState State
+        private ApplicationState State
         {
             get
             {
@@ -139,12 +139,12 @@ namespace VectorNNTP.BackFiller.Core
         /// Gets a value indicating whether shutdown has been requested or the lifecycle has left
         /// <see cref="ApplicationState.Running"/> toward stop.
         /// </summary>
-        internal bool ShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
+        private bool ShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
 
         /// <summary>
         /// Gets a task that completes when an unexpected application-service termination is observed while running.
         /// </summary>
-        internal Task UnexpectedTermination => _unexpectedTerminationTcs.Task;
+        private Task UnexpectedTermination => _unexpectedTerminationTcs.Task;
 
         /// <summary>
         /// Starts the application asynchronously.
@@ -153,7 +153,7 @@ namespace VectorNNTP.BackFiller.Core
         /// <returns>A task that completes when the application enters <see cref="ApplicationState.Running"/>.</returns>
         /// <exception cref="InvalidOperationException">Thrown for invalid transitions or concurrent unsafe use.</exception>
         /// <exception cref="OperationCanceledException">Thrown when startup is cancelled.</exception>
-        internal async Task StartAsync(CancellationToken cancellationToken)
+        private async Task StartAsync(CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
@@ -221,7 +221,7 @@ namespace VectorNNTP.BackFiller.Core
         /// </summary>
         /// <param name="cancellationToken">Token that cooperates with the configured graceful shutdown timeout.</param>
         /// <returns>A task that completes when the application enters <see cref="ApplicationState.Stopped"/>.</returns>
-        internal Task StopAsync(CancellationToken cancellationToken)
+        private Task StopAsync(CancellationToken cancellationToken)
         {
             lock (_stateSync)
             {
@@ -266,7 +266,7 @@ namespace VectorNNTP.BackFiller.Core
         /// <exception cref="InvalidOperationException">
         /// Thrown when an application service terminates unexpectedly while <see cref="ApplicationState.Running"/>.
         /// </exception>
-        internal async Task WaitAsync(CancellationToken cancellationToken)
+        private async Task WaitAsync(CancellationToken cancellationToken)
         {
             var shutdown = Task.Delay(Timeout.Infinite, cancellationToken);
             var completed = await Task.WhenAny(UnexpectedTermination, _stoppedTcs.Task, shutdown)
@@ -599,6 +599,6 @@ namespace VectorNNTP.BackFiller.Core
         private ApplicationState FromState { get; }
 
         /// <summary>Gets the new lifecycle state.</summary>
-        internal ApplicationState ToState { get; }
+        private ApplicationState ToState { get; }
     }
 }

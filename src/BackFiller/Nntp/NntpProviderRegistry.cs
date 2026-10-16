@@ -146,7 +146,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="capacity">Usable-capacity publisher. Created when omitted.</param>
         /// <param name="consumers">Optional consumer reconciler for tests.</param>
         /// <param name="services">Optional host service provider for deferred consumer resolve.</param>
-        internal NntpProviderRegistry(
+        private NntpProviderRegistry(
             IBackFillerProviderCatalog catalog,
             INntpTransportFactory transport,
             NntpSessionOptions options,
@@ -181,7 +181,7 @@ namespace VectorNNTP.BackFiller.Nntp
             _consumers ?? _services?.GetService<IArticleWorkConsumerReconciliation>();
 
         /// <summary>Gets the usable-capacity snapshot published by this registry.</summary>
-        internal BackboneUsableCapacityState Capacity => _capacity;
+        private BackboneUsableCapacityState Capacity => _capacity;
 
         /// <summary>
         /// Returns the live pool for <paramref name="backbone"/> when it matches the catalog provider, creating that pool on first use.

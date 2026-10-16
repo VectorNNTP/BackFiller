@@ -17,7 +17,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// <c>RabbitMQ:Username</c> → <c>VECTOR__RABBITMQ__USERNAME</c>.
     /// </para>
     /// </remarks>
-    public static class VectorEnvironment
+    internal static class VectorEnvironment
     {
         /// <summary>Canonical environment-variable prefix, including the trailing separator.</summary>
         internal const string Prefix = "VECTOR__";
@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// </summary>
         /// <param name="configurationKeys">Configuration key segments in declaration order (for example <c>RabbitMQ</c>, <c>Username</c>).</param>
         /// <returns>The <c>VECTOR__</c> name, for example <c>VECTOR__RABBITMQ__USERNAME</c>.</returns>
-        internal static string Variable(params string[] configurationKeys)
+        private static string Variable(params string[] configurationKeys)
         {
             ArgumentNullException.ThrowIfNull(configurationKeys);
             if (configurationKeys.Length == 0)
@@ -74,7 +74,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <c>RabbitMQ:Username</c>. Obsolete <c>nntpd__</c> and <c>backfiller__</c>
         /// prefixes are not registered and are not aliases.
         /// </remarks>
-        public static IConfigurationBuilder AddVectorEnvironmentVariables(this IConfigurationBuilder builder)
+        internal static IConfigurationBuilder AddVectorEnvironmentVariables(this IConfigurationBuilder builder)
         {
             ArgumentNullException.ThrowIfNull(builder);
             return builder.AddEnvironmentVariables(prefix: Prefix);

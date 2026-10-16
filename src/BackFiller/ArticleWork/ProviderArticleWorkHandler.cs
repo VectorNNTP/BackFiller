@@ -59,7 +59,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="retriever">NNTP ARTICLE retriever.</param>
         /// <param name="retention">Canonical retention authority.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="retriever"/> or <paramref name="retention"/> is null.</exception>
-        public ProviderArticleWorkHandler(INntpArticleRetriever retriever, IArticleRetentionAuthority retention)
+        internal ProviderArticleWorkHandler(INntpArticleRetriever retriever, IArticleRetentionAuthority retention)
             : this(retriever, retention, new NntpArticleParser("backfiller.test"))
         {
         }
@@ -73,7 +73,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="retriever"/>, <paramref name="retention"/>, or <paramref name="parser"/> is null.
         /// </exception>
-        public ProviderArticleWorkHandler(
+        internal ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser)
@@ -86,7 +86,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="retention">Canonical retention authority.</param>
         /// <param name="parser">CanonicalV1 parser used when <paramref name="sharedConfiguration"/> is null.</param>
         /// <param name="sharedConfiguration">Published <c>nntpsharedconfig</c>. Captured once per article.</param>
-        public ProviderArticleWorkHandler(
+        private ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser,
@@ -102,7 +102,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         /// <param name="sharedConfiguration">Published <c>nntpsharedconfig</c>. Captured once per article.</param>
         /// <param name="serverId">BackFiller server id combined with <c>dnssuffix</c> for the Path hop and retained endpoint.</param>
         /// <param name="logger">Article-processing logger. Null uses <see cref="NullLogger{T}.Instance"/>.</param>
-        public ProviderArticleWorkHandler(
+        internal ProviderArticleWorkHandler(
             INntpArticleRetriever retriever,
             IArticleRetentionAuthority retention,
             NntpArticleParser parser,

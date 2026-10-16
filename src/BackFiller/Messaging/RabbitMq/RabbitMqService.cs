@@ -709,7 +709,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         private sealed class StoppingException : InvalidOperationException
         {
             /// <summary>Creates the shutdown refusal. The message is the historical gate text.</summary>
-            public StoppingException()
+            internal StoppingException()
                 : base("RabbitMQ service is stopping.")
             {
             }

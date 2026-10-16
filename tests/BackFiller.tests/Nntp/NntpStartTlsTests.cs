@@ -399,7 +399,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Starts listening on loopback, captures <see cref="Port"/>, and begins <see cref="_accept"/>.</summary>
             /// <param name="certificate">TLS certificate for the post-STARTTLS server side.</param>
-            public LoopbackStartTlsNntpServer(X509Certificate2 certificate)
+            internal LoopbackStartTlsNntpServer(X509Certificate2 certificate)
             {
                 _certificate = certificate;
                 _listener = new TcpListener(IPAddress.Loopback, 0);
@@ -416,7 +416,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Client command lines received after TLS, in order; snapshot is thread-safe via lock on the backing list.</summary>
             /// <value>A copy of accumulated command text without trailing line terminators.</value>
-            public IReadOnlyList<string> Commands
+            internal IReadOnlyList<string> Commands
             {
                 get
                 {

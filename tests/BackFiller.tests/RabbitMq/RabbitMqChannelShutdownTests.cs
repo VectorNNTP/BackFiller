@@ -60,7 +60,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
             /// <summary>Creates an open proxy whose <c>CloseAsync</c> fails with <paramref name="closeException"/>.</summary>
             /// <param name="closeException">Exception close must throw.</param>
-            public static ChannelDouble Create(Exception closeException)
+            internal static ChannelDouble Create(Exception closeException)
             {
                 IChannel channel = DispatchProxy.Create<IChannel, ChannelDouble>();
                 var proxy = AsProxy(channel);

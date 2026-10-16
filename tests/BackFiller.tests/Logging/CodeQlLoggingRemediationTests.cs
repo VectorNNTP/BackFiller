@@ -422,17 +422,17 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             public Exception? DisposeException { get; init; }
 
             /// <summary>Remaining flush attempts that should throw <see cref="FlushException"/>.</summary>
-            public int FailuresRemaining
+            internal int FailuresRemaining
             {
                 get => _failuresRemaining;
                 init => _failuresRemaining = value;
             }
 
             /// <summary>Flush attempts observed.</summary>
-            public int FlushCount => Volatile.Read(ref _flushCount);
+            internal int FlushCount => Volatile.Read(ref _flushCount);
 
             /// <summary>Dispose attempts observed.</summary>
-            public int DisposeCount => Volatile.Read(ref _disposeCount);
+            internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
             /// <inheritdoc />
             public void Emit(LogEvent logEvent)

@@ -17,7 +17,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// <c>HistoryDigest</c> stores these same bytes; it does not hash independently.
     /// </para>
     /// </remarks>
-    public readonly struct ArticleId : IEquatable<ArticleId>
+    internal readonly struct ArticleId : IEquatable<ArticleId>
     {
         /// <summary>BLAKE3 output length in bytes.</summary>
         internal const int Length = 32;
@@ -62,7 +62,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <param name="digest">Exactly <see cref="Length"/> digest bytes.</param>
         /// <returns>The identity value.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="digest"/> is not 32 bytes.</exception>
-        internal static ArticleId FromSpan(ReadOnlySpan<byte> digest)
+        private static ArticleId FromSpan(ReadOnlySpan<byte> digest)
         {
             if (digest.Length != Length)
             {

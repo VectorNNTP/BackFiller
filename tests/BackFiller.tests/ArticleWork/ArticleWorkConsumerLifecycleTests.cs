@@ -504,7 +504,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// </summary>
             /// <param name="handler">Handler for admitted work; defaults to a deferred no-op handler.</param>
             /// <returns>Disposable context with a running session.</returns>
-            public static async Task<ConsumerContext> StartSessionAsync(IArticleWorkHandler? handler = null)
+            internal static async Task<ConsumerContext> StartSessionAsync(IArticleWorkHandler? handler = null)
             {
                 var factory = new FakeBackFillerRabbitMqConnectionFactory();
                 var connections = RabbitMqServiceTests.CreateService(factory);

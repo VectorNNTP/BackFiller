@@ -48,7 +48,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
     internal static class ArticlePathCanonicalizer
     {
         /// <summary>Maximum accepted Path value length.</summary>
-        public const int MaxPathLength = 8192;
+        internal const int MaxPathLength = 8192;
 
         /// <summary>
         /// Organizational Vector tracker hostname. Present exactly once after any Vector application has seen the article.
@@ -92,7 +92,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// </param>
         /// <param name="failureCode">Failure code when the Path value is invalid.</param>
         /// <returns><see langword="true"/> when the Path is usable (including a missing header).</returns>
-        internal static bool TryAnalyze(
+        private static bool TryAnalyze(
             ReadOnlySpan<byte> rawPath,
             ReadOnlySpan<byte> localIdentity,
             bool pathPresent,
@@ -226,7 +226,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// <c>news.usenet.ninja</c> is inserted when absent and reduced to the first occurrence.
         /// Empty Path tokens from repeated <c>!</c> separators are dropped.
         /// </remarks>
-        internal static bool TryWriteCanonicalPath(
+        private static bool TryWriteCanonicalPath(
             ReadOnlySpan<byte> rawPath,
             ReadOnlySpan<byte> localIdentity,
             ArticlePathKind kind,

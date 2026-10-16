@@ -31,7 +31,7 @@ namespace VectorNNTP.BackFiller.Acme
     internal sealed class Dns01Solver
     {
         /// <summary>TTL used for challenge TXT records (matches pyNNTPD).</summary>
-        public const int ChallengeTtlSeconds = 120;
+        private const int ChallengeTtlSeconds = 120;
 
         /// <summary>Cloudflare client that creates, lists, and deletes challenge TXT records.</summary>
         private readonly Cloudflare.ICloudflareDnsClient _client;
@@ -111,7 +111,7 @@ namespace VectorNNTP.BackFiller.Acme
         private string Fqdn => _fqdn;
 
         /// <summary>Idempotent startup recovery of journalled TXT records.</summary>
-        internal async Task RecoverAsync(CancellationToken cancellationToken)
+        private async Task RecoverAsync(CancellationToken cancellationToken)
         {
             if (_recoveryDir is null)
             {

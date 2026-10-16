@@ -53,7 +53,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// </summary>
         /// <param name="suffix">Canonical (already trimmed/lowercased) suffix.</param>
         /// <returns><see langword="true"/> when the suffix is valid.</returns>
-        internal static bool IsValidDnsSuffix(string suffix)
+        private static bool IsValidDnsSuffix(string suffix)
         {
             if (string.IsNullOrWhiteSpace(suffix)
                 || suffix.Contains(' ', StringComparison.Ordinal)

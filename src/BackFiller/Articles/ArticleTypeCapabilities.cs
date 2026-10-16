@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// Every defined classifier flag. Database default for existing
         /// <c>nntpusers</c> rows (<c>65535</c>). Means no ArtType restriction.
         /// </summary>
-        public const ArticleType All =
+        private const ArticleType All =
             ArticleType.Default
             | ArticleType.Control
             | ArticleType.Cancel
@@ -29,10 +29,10 @@ namespace VectorNNTP.BackFiller.Articles
             | ArticleType.PgpMessage;
 
         /// <summary>Unsigned integer stored for <see cref="All"/>.</summary>
-        public const uint AllValue = (uint)All;
+        private const uint AllValue = (uint)All;
 
         /// <summary>Ordinary text only (<see cref="ArticleType.Default"/>).</summary>
-        public const ArticleType TextOnly = ArticleType.Default;
+        private const ArticleType TextOnly = ArticleType.Default;
 
         /// <summary>
         /// Returns whether <paramref name="allowed"/> permits <paramref name="articleType"/>.
@@ -40,7 +40,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <see cref="ArticleType.None"/>. Otherwise every flag present on the article
         /// must be present on the capability.
         /// </summary>
-        internal static bool Allows(ArticleType allowed, ArticleType articleType)
+        private static bool Allows(ArticleType allowed, ArticleType articleType)
         {
             if (allowed == All)
             {

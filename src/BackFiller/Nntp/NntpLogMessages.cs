@@ -47,7 +47,7 @@ namespace VectorNNTP.BackFiller.Nntp
             EventId = 5402,
             Level = LogLevel.Information,
             Message = "NNTP provider retrieval failed backbone={Backbone} kind={Kind} status={StatusCode} reason={Reason}")]
-        internal static partial void RetrievalFailed(ILogger logger, string Backbone, ArticleRetrievalKind Kind, int? StatusCode, string Reason);
+        private static partial void RetrievalFailed(ILogger logger, string Backbone, ArticleRetrievalKind Kind, int? StatusCode, string Reason);
 
         /// <summary>
         /// Written by the provider registry after it publishes pool ACTIVE counts.

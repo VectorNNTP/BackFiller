@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// Returns persisted account state, or <see langword="null"/> when absent.
         /// Malformed or incomplete state throws without deleting files.
         /// </summary>
-        internal AcmeAccountState? Load()
+        private AcmeAccountState? Load()
         {
             var keyPath = AcmePaths.AccountKeyPath(_stateDir);
             var metaPath = AcmePaths.AccountMetaPath(_stateDir);

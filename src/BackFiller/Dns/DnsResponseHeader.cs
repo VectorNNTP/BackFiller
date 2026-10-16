@@ -16,7 +16,7 @@ namespace VectorNNTP.BackFiller.Dns
         private const ushort ResponseSanityValue = 0x8000;
 
         /// <summary>DNS header TC (truncated) flag.</summary>
-        public const ushort TruncatedFlag = 0x0200;
+        private const ushort TruncatedFlag = 0x0200;
 
         /// <summary>
         /// Returns <see langword="true"/> when the buffer has a header, matching ID, and sane response flags.

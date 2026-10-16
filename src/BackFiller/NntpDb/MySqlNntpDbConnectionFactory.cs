@@ -9,7 +9,7 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// Provider pooling is controlled only by <c>ConnectionStrings:NntpDB</c>.
     /// This factory does not rewrite that string.
     /// </remarks>
-    public sealed class MySqlNntpDbConnectionFactory : INntpDbConnectionFactory
+    internal sealed class MySqlNntpDbConnectionFactory : INntpDbConnectionFactory
     {
         /// <inheritdoc />
         public async Task<INntpDbSession> OpenAsync(string connectionString, CancellationToken cancellationToken)
@@ -49,7 +49,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// </summary>
         /// <param name="connectionString">Configured connection string.</param>
         /// <returns>An unopened <see cref="MySqlConnection"/>.</returns>
-        internal static MySqlConnection CreateConnection(string connectionString)
+        private static MySqlConnection CreateConnection(string connectionString)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
             return new MySqlConnection(connectionString);

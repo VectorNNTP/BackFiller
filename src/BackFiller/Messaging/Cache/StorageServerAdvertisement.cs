@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     /// TLS listener port (<c>1</c>–<c>65535</c>) when the server is a placement target.
     /// Omitted advertisements remain valid liveness records and are not placement targets.
     /// </param>
-    public sealed record StorageServerAdvertisement(
+    internal sealed record StorageServerAdvertisement(
         int Version,
         int ServerId,
         string Fqdn,

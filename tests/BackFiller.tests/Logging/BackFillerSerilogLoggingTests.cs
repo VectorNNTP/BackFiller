@@ -680,7 +680,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             private readonly ConcurrentQueue<LogEvent> _events = new();
 
             /// <summary>Snapshot of queued events at read time.</summary>
-            public IReadOnlyCollection<LogEvent> Events => _events.ToArray();
+            internal IReadOnlyCollection<LogEvent> Events => _events.ToArray();
 
             /// <inheritdoc />
             public void Emit(LogEvent logEvent)

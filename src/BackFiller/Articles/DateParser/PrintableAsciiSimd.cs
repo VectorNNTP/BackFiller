@@ -62,7 +62,7 @@ namespace VectorNNTP.BackFiller.Articles.DateParser
         /// <param name="span">Input span.</param>
         /// <returns><see langword="true"/> when empty or every character is in range.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static bool IsAllPrintableAscii(ReadOnlySpan<char> span) =>
+        private static bool IsAllPrintableAscii(ReadOnlySpan<char> span) =>
             span.Length == 0
             || IsAllInRange(
                 span,

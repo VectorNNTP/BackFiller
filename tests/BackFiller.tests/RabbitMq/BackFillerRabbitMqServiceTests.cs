@@ -759,7 +759,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             /// <summary>Blocks the second connect until released for recovery race tests.</summary>
             /// <param name="secondConnectEntered">Signaled when the second attempt starts.</param>
             /// <param name="releaseSecondConnect">Released to finish the blocked connect.</param>
-            public HoldSecondConnectFactory(
+            internal HoldSecondConnectFactory(
                 TaskCompletionSource secondConnectEntered,
                 TaskCompletionSource releaseSecondConnect)
             {
@@ -769,7 +769,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
             /// <summary>Fake factory used for connections that are not held on the second attempt.</summary>
 
-            public FakeBackFillerRabbitMqConnectionFactory Inner => _inner;
+            internal FakeBackFillerRabbitMqConnectionFactory Inner => _inner;
 
             /// <summary>
             /// Delegates the first connect to the inner fake; second and later attempts block until released.

@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Retention
     internal readonly record struct ArticleIdentity(string MessageId, string ArticleIdHex)
     {
         /// <summary>Length of <see cref="ArticleIdHex"/>. Equals <see cref="ArticleId.HexLength"/>.</summary>
-        internal const int ArticleIdHexLength = ArticleId.HexLength;
+        private const int ArticleIdHexLength = ArticleId.HexLength;
 
         /// <summary>
         /// Creates an identity from the exact Message-ID and an already-computed <see cref="ArticleId"/>.

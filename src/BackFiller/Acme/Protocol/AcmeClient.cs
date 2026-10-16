@@ -46,7 +46,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
 
         /// <summary>Account Location URL used as JWS <c>kid</c> after registration or <see cref="BindExistingAccount"/>.</summary>
         /// <exception cref="InvalidOperationException">No account URL is bound yet.</exception>
-        internal string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
+        private string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
 
         /// <summary>
         /// Binds a previously persisted ACME account URL (kid) without calling newAccount.

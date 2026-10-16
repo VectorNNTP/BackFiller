@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private readonly List<ArticleWorkResponseIntent> _published = [];
 
         /// <summary>Gets recorded publish intents in admission order.</summary>
-        public IReadOnlyList<ArticleWorkResponseIntent> Published
+        internal IReadOnlyList<ArticleWorkResponseIntent> Published
         {
             get
             {

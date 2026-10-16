@@ -13,10 +13,10 @@ namespace VectorNNTP.BackFiller.Articles.Checksum
     internal static class IeeeCrc32
     {
         /// <summary>Reflected IEEE CRC-32 polynomial.</summary>
-        public const uint Polynomial = 0xEDB88320u;
+        internal const uint Polynomial = 0xEDB88320u;
 
         /// <summary>Initial accumulator value before feeding bytes.</summary>
-        public const uint InitialAccumulator = 0xFFFFFFFFu;
+        internal const uint InitialAccumulator = 0xFFFFFFFFu;
 
         /// <summary>
         /// 256-entry reflected lookup. Index <c>(crc ^ byte) &amp; 0xFF</c> holds the polynomial fold of that byte.

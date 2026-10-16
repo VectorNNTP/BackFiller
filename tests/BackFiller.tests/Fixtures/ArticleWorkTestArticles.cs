@@ -143,7 +143,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// Replaces the fixture Date header value in an ASCII article.
         /// </summary>
 
-        private static byte[] ReplaceDate(this byte[] article, string dateValue)
+        internal static byte[] ReplaceDate(this byte[] article, string dateValue)
         {
             var text = Encoding.ASCII.GetString(article);
             var replaced = text.Replace($"Date: {ValidDate}", $"Date: {dateValue}", StringComparison.Ordinal);

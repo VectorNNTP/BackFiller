@@ -93,7 +93,7 @@ namespace VectorNNTP.BackFiller.Nntp
         private TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Delay between periodic deficit fills toward <see cref="BackFillerProviderDefinition.MaxSessions"/>.</summary>
-        internal static readonly TimeSpan ReplenishInterval = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan ReplenishInterval = TimeSpan.FromSeconds(15);
 
         /// <summary>
         /// Creates a pool whose lease permits and connection-number ceiling start at <see cref="BackFillerProviderDefinition.MaxSessions"/> on <paramref name="provider"/>.

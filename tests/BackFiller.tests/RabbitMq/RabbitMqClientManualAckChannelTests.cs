@@ -327,7 +327,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
             public bool IsOpen { get; set; } = true;
 
             /// <summary>Consumers registered through BasicConsumeAsync.</summary>
-            public IReadOnlyList<IAsyncBasicConsumer> Registered
+            internal IReadOnlyList<IAsyncBasicConsumer> Registered
             {
                 get
                 {
@@ -340,7 +340,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
             /// <summary>Creates a dispatch-proxy <see cref="IChannel"/> double wired back to this instance.</summary>
 
-            public static ConsumeChannelDouble Create()
+            internal static ConsumeChannelDouble Create()
             {
                 var channel = DispatchProxy.Create<IChannel, ConsumeChannelDouble>();
                 var proxy = (ConsumeChannelDouble)(object)channel;
@@ -350,7 +350,7 @@ namespace VectorNNTP.BackFiller.Tests.RabbitMq
 
             /// <summary>Returns a copy of recorded lifecycle event labels under the gate lock.</summary>
 
-            public string[] Snapshot()
+            internal string[] Snapshot()
             {
                 lock (_gate)
                 {

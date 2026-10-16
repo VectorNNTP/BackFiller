@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>Destuffed byte count; aliases <see cref="Memory"/>.Length.</summary>
         /// <exception cref="ObjectDisposedException">Thrown after <see cref="Dispose"/>.</exception>
-        internal int Length => Memory.Length;
+        private int Length => Memory.Length;
 
         /// <summary>
         /// Drops the owned buffer. Later <see cref="Memory"/> and <see cref="Length"/> reads throw

@@ -234,7 +234,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             /// <param name="readiness">Readiness gate observed by tests.</param>
             /// <param name="journal">Startup journal for stage assertions.</param>
             /// <param name="dir">Optional temp directory cleaned up on dispose.</param>
-            public AdapterHarness(
+            internal AdapterHarness(
                 AcmeCertificateApplicationService adapter,
                 AcmeCertificateService inner,
                 IAcmeCertificateReadiness readiness,
@@ -291,7 +291,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
                 "vectornntp-bf-acme-" + Guid.NewGuid().ToString("N"));
 
             /// <summary>Creates the directory at <see cref="Path"/>.</summary>
-            public TempAcmeDir() => Directory.CreateDirectory(Path);
+            internal TempAcmeDir() => Directory.CreateDirectory(Path);
 
             /// <summary>
             /// Recursively deletes the temp directory; IO failures are ignored.
@@ -318,7 +318,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
         {
             /// <summary>Base factory that must not be invoked on exercised paths.</summary>
             /// <param name="options">Bound ACME options for the unused base.</param>
-            public UnusedAcmeFactory(AcmeCloudflareOptions options)
+            internal UnusedAcmeFactory(AcmeCloudflareOptions options)
                 : base(
                     Options.Create(options),
                     new UnusedCloudflareClient(),
@@ -337,7 +337,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             /// <summary>Factory that always supplies the injected certificate manager.</summary>
             /// <param name="manager">Prebuilt manager for issuer tests.</param>
             /// <param name="options">ACME options passed to the base factory.</param>
-            public InjectedManagerFactory(CertificateManager manager, IOptions<AcmeCloudflareOptions> options)
+            internal InjectedManagerFactory(CertificateManager manager, IOptions<AcmeCloudflareOptions> options)
                 : base(
                     options,
                     new UnusedCloudflareClient(),
@@ -459,7 +459,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
 
             /// <summary>Records readiness on publish without writing certificate files.</summary>
             /// <param name="readiness">Gate updated in <see cref="PublishFromPfx"/>.</param>
-            public MarkingPublisher(IAcmeCertificateReadiness readiness)
+            internal MarkingPublisher(IAcmeCertificateReadiness readiness)
             {
                 _readiness = readiness;
             }

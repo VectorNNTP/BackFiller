@@ -182,7 +182,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         internal int ConnectionNumber => _connectionNumber;
 
         /// <summary>Desired NNTP connection count that bounds how many consume sessions may run for this backbone.</summary>
-        internal int ConnectionLimit => _connectionLimit;
+        private int ConnectionLimit => _connectionLimit;
 
         /// <summary>Stable reconcile identity <c>backbone/connectionNumber</c> used by consumer reconciliation.</summary>
         internal string SessionKey => ComposeSessionKey(_backbone, _connectionNumber);
@@ -216,7 +216,7 @@ namespace VectorNNTP.BackFiller.ArticleWork
         internal int ActiveCount => Volatile.Read(ref _active);
 
         /// <summary>Cancelled when retirement or dispose must not admit new queued pipeline work.</summary>
-        internal CancellationToken QueueCancellationToken => _queueCts.Token;
+        private CancellationToken QueueCancellationToken => _queueCts.Token;
 
         /// <summary>Cancelled when in-flight handler work must observe shutdown during retirement.</summary>
         internal CancellationToken WorkCancellationToken => _workCts.Token;

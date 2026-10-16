@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Logging
     /// <summary>
     /// Replaces one completed uncompressed log with a gzip file.
     /// </summary>
-    public interface ILogFileCompressor
+    internal interface ILogFileCompressor
     {
         /// <summary>
         /// Writes <c>{sourceLogPath}.gz</c> and deletes <paramref name="sourceLogPath"/> only after that file is in place.

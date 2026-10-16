@@ -831,7 +831,7 @@ namespace VectorNNTP.BackFiller.Tests.Listener
 
             /// <summary>Starts a listener on a free or supplied runtime with test retention and certificates.</summary>
             /// <param name="runtime">Optional runtime; defaults to loopback on an ephemeral port.</param>
-            public static async Task<ListenerContext> StartAsync(BackFillerRuntimeOptions? runtime = null)
+            internal static async Task<ListenerContext> StartAsync(BackFillerRuntimeOptions? runtime = null)
             {
                 runtime ??= CreateRuntime(GetFreePort());
                 var authority = ArticleRetentionAuthorityTests.Create(TimeProvider.System, 1024 * 1024);

@@ -370,7 +370,7 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
 
             /// <summary>Captures prior values and applies <paramref name="variables"/> to the process environment.</summary>
             /// <param name="variables">Variables to set for the duration of the test.</param>
-            public IsolatedEnvironment(params (string Name, string Value)[] variables)
+            internal IsolatedEnvironment(params (string Name, string Value)[] variables)
             {
                 _previous = variables
                     .Select(static pair => (pair.Name, Environment.GetEnvironmentVariable(pair.Name)))
@@ -382,13 +382,13 @@ namespace VectorNNTP.BackFiller.Tests.Configuration
             }
 
             /// <summary>Configuration with only <see cref="VectorEnvironment"/> variables loaded.</summary>
-            public IConfiguration BuildPrefixedConfiguration() =>
+            internal IConfiguration BuildPrefixedConfiguration() =>
                 new ConfigurationBuilder()
                     .AddVectorEnvironmentVariables()
                     .Build();
 
             /// <summary>Configuration matching host order: environment variables then VECTOR overlay.</summary>
-            public IConfiguration BuildHostConfiguration() =>
+            internal IConfiguration BuildHostConfiguration() =>
                 new ConfigurationBuilder()
                     .AddEnvironmentVariables()
                     .AddVectorEnvironmentVariables()

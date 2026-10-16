@@ -7,7 +7,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     internal sealed class RabbitMqClientRpcChannel : IRabbitMqRpcChannel
     {
         /// <summary>AMQP header name carrying the logical request UUID.</summary>
-        internal const string RequestIdPropertyName = "RequestId";
+        private const string RequestIdPropertyName = "RequestId";
 
         /// <summary>
         /// Owned channel. <see cref="DisposeAsync"/> disposes it once and does not call <c>CloseAsync</c> first.
@@ -127,7 +127,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <summary>Creates the AMQP header table that carries <see cref="RequestIdPropertyName"/>.</summary>
-        internal static Dictionary<string, object?> CreateRequestIdHeaders(string requestId)
+        private static Dictionary<string, object?> CreateRequestIdHeaders(string requestId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
             return new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -137,7 +137,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         }
 
         /// <summary>Reads the logical request UUID from AMQP headers, if present.</summary>
-        internal static string? ReadRequestId(IDictionary<string, object?>? headers)
+        private static string? ReadRequestId(IDictionary<string, object?>? headers)
         {
             if (headers is null
                 || !headers.TryGetValue(RequestIdPropertyName, out var value)

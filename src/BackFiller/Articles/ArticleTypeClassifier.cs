@@ -9,13 +9,13 @@ namespace VectorNNTP.BackFiller.Articles
     /// header or prefix marker is sufficient. Does not implement Diablo
     /// <c>classifyLineAsTypes()</c> character-table / 8-line confirmation.
     /// </remarks>
-    public static class ArticleTypeClassifier
+    internal static class ArticleTypeClassifier
     {
         /// <summary>Maximum destuffed body prefix examined for markers (8 KiB).</summary>
         private const int MaxPrefixBytes = 8 * 1024;
 
         /// <summary>Classifies from destuffed headers and an optional destuffed body prefix.</summary>
-        public static ArticleType Classify(ReadOnlySpan<byte> headers, ReadOnlySpan<byte> bodyPrefix)
+        internal static ArticleType Classify(ReadOnlySpan<byte> headers, ReadOnlySpan<byte> bodyPrefix)
         {
             var type = ArticleType.None;
             ScanLines(headers, inHeader: true, ref type);
@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Applies one destuffed line (no CRLF) to <paramref name="type"/>.</summary>
-        internal static void ObserveLine(ReadOnlySpan<byte> line, bool inHeader, ref ArticleType type)
+        private static void ObserveLine(ReadOnlySpan<byte> line, bool inHeader, ref ArticleType type)
         {
             if (line.IsEmpty)
             {
@@ -201,7 +201,7 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Parses <c>Content-Length</c> as a non-negative destuffed-body size hint, or -1.</summary>
-        public static int TryParseContentLength(ReadOnlySpan<byte> headerLine)
+        private static int TryParseContentLength(ReadOnlySpan<byte> headerLine)
         {
             if (!StartsWithFolded(headerLine, "CONTENT-LENGTH:"u8))
             {
@@ -215,7 +215,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// Parses yEnc <c>size=</c> from a destuffed <c>=ybegin</c> line.
         /// That value is the original/decoded size, not wire bytes.
         /// </summary>
-        public static int TryParseYencSize(ReadOnlySpan<byte> line)
+        private static int TryParseYencSize(ReadOnlySpan<byte> line)
         {
             if (line.Length < 8 || line[0] != (byte)'=' || !StartsWithFolded(line, "=YBEGIN"u8))
             {
@@ -237,7 +237,7 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Returns whether <paramref name="line"/> is a destuffed yEnc begin marker.</summary>
-        public static bool IsYencBegin(ReadOnlySpan<byte> line) =>
+        private static bool IsYencBegin(ReadOnlySpan<byte> line) =>
             line.Length >= 8 && line[0] == (byte)'=' && StartsWithFolded(line, "=YBEGIN"u8);
 
         /// <summary>
@@ -246,7 +246,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <param name="value">Line or header bytes.</param>
         /// <param name="upperAscii">Needle already in uppercase ASCII. Bytes outside <c>a-z</c> in <paramref name="value"/> are compared unchanged.</param>
         /// <returns><see langword="false"/> when <paramref name="value"/> is shorter than the needle or any folded byte differs.</returns>
-        internal static bool StartsWithFolded(ReadOnlySpan<byte> value, ReadOnlySpan<byte> upperAscii)
+        private static bool StartsWithFolded(ReadOnlySpan<byte> value, ReadOnlySpan<byte> upperAscii)
         {
             if (value.Length < upperAscii.Length)
             {

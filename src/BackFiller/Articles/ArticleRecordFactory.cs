@@ -23,7 +23,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// request. Request matching remains an ingestion/orchestration responsibility.
     /// NNTPD TAKETHIS and POST construct the record before queue admission.
     /// </remarks>
-    public static class ArticleRecordFactory
+    internal static class ArticleRecordFactory
     {
         /// <summary>
         /// Parses and materializes an article, recording a receiving-system Path hop.
@@ -31,7 +31,7 @@ namespace VectorNNTP.BackFiller.Articles
         /// <param name="parser">Common article parser. Its local identity is the application FQDN.</param>
         /// <param name="destuffedArticle">Unstuffed article bytes. Not retained after success.</param>
         /// <returns>Accepted record referencing the materialized ArtData buffer, or a failure classification.</returns>
-        public static ArticleRecordCreateResult TryCreate(
+        internal static ArticleRecordCreateResult TryCreate(
             NntpArticleParser parser,
             ReadOnlyMemory<byte> destuffedArticle)
             => TryCreate(parser, destuffedArticle, ArticlePathMode.Traverse);
@@ -111,7 +111,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// <summary>
     /// Result of one article-record creation attempt.
     /// </summary>
-    public readonly struct ArticleRecordCreateResult
+    internal readonly struct ArticleRecordCreateResult
     {
         /// <summary>
         /// Stores the acceptance flag, record, and failure codes exactly as the factory methods pass them.
@@ -136,16 +136,16 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>True when parse and materialization produced a <see cref="ArticleParseStatus.CanonicalV1"/> record.</summary>
-        public bool IsAccepted { get; }
+        internal bool IsAccepted { get; }
 
         /// <summary>Canonical record referencing owned ArtData when accepted; otherwise default.</summary>
-        public ArticleRecord Record { get; }
+        internal ArticleRecord Record { get; }
 
         /// <summary>Parser rejection when <see cref="IsAccepted"/> is false and failure happened before materialization.</summary>
-        public NntpArticleParseFailureCode ParseFailure { get; }
+        internal NntpArticleParseFailureCode ParseFailure { get; }
 
         /// <summary>Materializer rejection when parse succeeded but canonicalization or size limits failed.</summary>
-        public NntpArticleCanonicalFailureCode MaterializeFailure { get; }
+        internal NntpArticleCanonicalFailureCode MaterializeFailure { get; }
 
         /// <summary>
         /// Gets the Date-family header name selected during parse.

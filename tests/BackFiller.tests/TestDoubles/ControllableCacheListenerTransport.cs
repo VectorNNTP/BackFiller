@@ -38,16 +38,16 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private int _readCalls;
 
         /// <summary>Observed outbound write call count.</summary>
-        public int WriteCalls => Volatile.Read(ref _writeCalls);
+        private int WriteCalls => Volatile.Read(ref _writeCalls);
 
         /// <summary>Writes that blocked waiting on the write gate.</summary>
-        public int BlockedWrites => Volatile.Read(ref _blockedWrites);
+        private int BlockedWrites => Volatile.Read(ref _blockedWrites);
 
         /// <summary>Observed inbound read call count.</summary>
-        public int ReadCalls => Volatile.Read(ref _readCalls);
+        private int ReadCalls => Volatile.Read(ref _readCalls);
 
         /// <summary>Copy of captured outbound frames in write order.</summary>
-        public IReadOnlyList<byte[]> WrittenFrames
+        private IReadOnlyList<byte[]> WrittenFrames
         {
             get
             {
@@ -60,7 +60,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Queues bytes for the session reader; no-op when empty or disposed.</summary>
         /// <param name="bytes">Next inbound chunk; copied into the channel.</param>
-        public void EnqueueInbound(ReadOnlyMemory<byte> bytes)
+        private void EnqueueInbound(ReadOnlyMemory<byte> bytes)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
             if (bytes.IsEmpty)
@@ -72,10 +72,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>Completes the inbound writer so reads eventually return zero unless faulted.</summary>
-        public void CompleteInbound() => _ = _inbound.Writer.TryComplete();
+        private void CompleteInbound() => _ = _inbound.Writer.TryComplete();
 
         /// <summary>After <paramref name="count"/> successful writes, further writes block until fail/release.</summary>
-        public void AllowSuccessfulWritesThenBlock(int count)
+        private void AllowSuccessfulWritesThenBlock(int count)
         {
             lock (_writeGate)
             {
@@ -85,7 +85,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>Fails the next (or currently blocked) write with <paramref name="exception"/>.</summary>
-        public void FailWrites(Exception? exception = null)
+        private void FailWrites(Exception? exception = null)
         {
             TaskCompletionSource? blocked;
             lock (_writeGate)
@@ -99,7 +99,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>Fails reads with the supplied exception (reader-side terminal failure).</summary>
-        public void FailReads(Exception exception)
+        private void FailReads(Exception exception)
         {
             ArgumentNullException.ThrowIfNull(exception);
             _ = _inbound.Writer.TryComplete(exception);

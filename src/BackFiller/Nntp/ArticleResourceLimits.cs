@@ -13,7 +13,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Maximum physical article line length in wire bytes.
         /// The NNTP reader in this assembly does not consult this constant.
         /// </summary>
-        internal const int MaxArticleLineBytes = 1024;
+        private const int MaxArticleLineBytes = 1024;
 
         /// <summary>
         /// Maximum NNTP status-line length in bytes excluding CRLF.

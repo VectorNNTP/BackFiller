@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.Articles.Processing
     /// <summary>
     /// Classifies why canonical Date/Path materialization could not produce a retainable article.
     /// </summary>
-    public enum NntpArticleCanonicalFailureCode
+    internal enum NntpArticleCanonicalFailureCode
     {
         /// <summary>Materialization succeeded.</summary>
         None = 0,

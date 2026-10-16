@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>Runs <paramref name="action"/> with SelfLog enabled and returns the captured text. Blocks the caller.</summary>
         /// <param name="action">Code whose SelfLog output the test wants.</param>
         /// <returns>Text SelfLog emitted during <paramref name="action"/>.</returns>
-        public static string Capture(Action action)
+        internal static string Capture(Action action)
         {
             Gate.Wait();
             try
@@ -35,7 +35,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>Runs <paramref name="action"/> with SelfLog enabled and returns the captured text without blocking on the action.</summary>
         /// <param name="action">Async code whose SelfLog output the test wants.</param>
         /// <returns>Text SelfLog emitted during <paramref name="action"/>.</returns>
-        public static async Task<string> CaptureAsync(Func<Task> action)
+        internal static async Task<string> CaptureAsync(Func<Task> action)
         {
             await Gate.WaitAsync().ConfigureAwait(false);
             try

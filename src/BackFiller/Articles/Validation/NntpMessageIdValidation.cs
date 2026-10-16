@@ -27,17 +27,17 @@ namespace VectorNNTP.BackFiller.Articles.Validation
     /// RFC 3977's opaque message-id description is not this grammar.
     /// </para>
     /// </remarks>
-    public static class NntpMessageIdValidation
+    internal static class NntpMessageIdValidation
     {
         /// <summary>Minimum candidate length in octets, including the angle brackets.</summary>
         /// <remarks>
         /// RFC 5536 limits the maximum, not this minimum. Lengths below 3 are rejected here.
         /// Lengths 3 and 4 still fail <c>dot-atom-text "@" id-right</c>.
         /// </remarks>
-        public const int MinMessageIdLength = 3;
+        private const int MinMessageIdLength = 3;
 
         /// <summary>Maximum RFC 5536 <c>msg-id</c> length in octets, including the angle brackets.</summary>
-        public const int MaxMessageIdLength = 250;
+        internal const int MaxMessageIdLength = 250;
 
         /// <summary>
         /// Determines whether <paramref name="messageId"/> is an RFC 5536 <c>msg-id</c>.
@@ -48,7 +48,7 @@ namespace VectorNNTP.BackFiller.Articles.Validation
         /// <c>"&lt;" dot-atom-text "@" (dot-atom-text / no-fold-literal) "&gt;"</c>.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsValidMessageId(ReadOnlySpan<byte> messageId)
+        internal static bool IsValidMessageId(ReadOnlySpan<byte> messageId)
         {
             var length = messageId.Length;
             if ((uint)(length - MinMessageIdLength) > (uint)(MaxMessageIdLength - MinMessageIdLength))

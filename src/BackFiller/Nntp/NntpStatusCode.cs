@@ -13,10 +13,10 @@ namespace VectorNNTP.BackFiller.Nntp
         internal const int DateFollows = 111;
 
         /// <summary>RFC 3977 greeting: service available, posting allowed.</summary>
-        internal const int ServiceReadyPostingAllowed = 200;
+        private const int ServiceReadyPostingAllowed = 200;
 
         /// <summary>RFC 3977 greeting: service available, posting prohibited.</summary>
-        internal const int ServiceReadyPostingProhibited = 201;
+        private const int ServiceReadyPostingProhibited = 201;
 
         /// <summary>RFC 3977 ARTICLE success; multiline article follows.</summary>
         internal const int ArticleFollows = 220;
@@ -43,25 +43,25 @@ namespace VectorNNTP.BackFiller.Nntp
         internal const int NoArticleWithMessageId = 430;
 
         /// <summary>RFC 3977/4643: authentication required for the command.</summary>
-        internal const int AuthenticationRequired = 480;
+        private const int AuthenticationRequired = 480;
 
         /// <summary>RFC 4643: authentication failed or rejected.</summary>
-        internal const int AuthenticationRejected = 481;
+        private const int AuthenticationRejected = 481;
 
         /// <summary>RFC 4643: authentication commands out of sequence.</summary>
-        internal const int AuthenticationOutOfSequence = 482;
+        private const int AuthenticationOutOfSequence = 482;
 
         /// <summary>RFC 3977: command unknown.</summary>
-        internal const int CommandUnknown = 500;
+        private const int CommandUnknown = 500;
 
         /// <summary>RFC 3977: command syntax error.</summary>
-        internal const int CommandSyntaxError = 501;
+        private const int CommandSyntaxError = 501;
 
         /// <summary>RFC 3977: command not permitted / service permanently unavailable.</summary>
-        internal const int CommandNotPermitted = 502;
+        private const int CommandNotPermitted = 502;
 
         /// <summary>RFC 3977: program fault / temporary unavailability.</summary>
-        internal const int ProgramFault = 503;
+        private const int ProgramFault = 503;
 
         /// <summary>Returns whether <paramref name="code"/> is a usable NNTP greeting.</summary>
         /// <param name="code">NNTP status code.</param>

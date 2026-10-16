@@ -150,7 +150,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="payload">Article bytes supplied to the handler callback.</param>
             /// <param name="overwriteAfterCallback">Whether to poison the buffer after callback returns.</param>
             /// <param name="failure">Optional failure result bypassing payload delivery.</param>
-            public OwnedBufferRetriever(
+            internal OwnedBufferRetriever(
                 byte[] payload,
                 bool overwriteAfterCallback = false,
                 ArticleRetrievalResult? failure = null)

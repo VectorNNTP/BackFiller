@@ -56,7 +56,7 @@ namespace VectorNNTP.BackFiller.Dns
             internal bool TimedOut { get; }
 
             /// <summary><see langword="true"/> when a socket error prevented a usable response.</summary>
-            internal bool Failed { get; }
+            private bool Failed { get; }
 
             /// <summary>Creates a timeout outcome.</summary>
             internal static Result Timeout() => new(timedOut: true, failed: false);

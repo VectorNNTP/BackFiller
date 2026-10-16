@@ -22,7 +22,7 @@ namespace VectorNNTP.BackFiller.Cloudflare
     internal sealed class CloudflareDnsReconciliationService
     {
         /// <summary>Maximum wall-clock budget for best-effort clean-up after a failed or cancelled startup reconcile.</summary>
-        public static readonly TimeSpan FailedStartCleanupTimeout = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan FailedStartCleanupTimeout = TimeSpan.FromSeconds(15);
 
         /// <summary>FQDN, zone id, and bind addresses used for reconcile and cleanup.</summary>
         private readonly IOptions<AcmeCloudflareOptions> _options;

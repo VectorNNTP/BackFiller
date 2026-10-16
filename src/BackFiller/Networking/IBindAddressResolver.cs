@@ -6,7 +6,7 @@ namespace VectorNNTP.BackFiller.Networking
     /// Resolves configured <see cref="AcmeCloudflareOptions.BindAddress"/> entries into the eligible IP set
     /// the host will use for listen sockets and authoritative DNS publication.
     /// </summary>
-    public interface IBindAddressResolver
+    internal interface IBindAddressResolver
     {
         /// <summary>
         /// Resolves <paramref name="options"/> bind entries into eligible IPv4/IPv6 addresses.

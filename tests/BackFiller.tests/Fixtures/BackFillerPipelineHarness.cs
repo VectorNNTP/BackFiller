@@ -112,7 +112,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
 
         /// <summary>Fake publish channel behind the publisher; fails the test if a real channel is installed.</summary>
 
-        public FakeBackFillerRabbitMqPublishChannel PublishChannel =>
+        internal FakeBackFillerRabbitMqPublishChannel PublishChannel =>
             Assert.IsType<FakeBackFillerRabbitMqPublishChannel>(Publisher.Channel);
 
         /// <summary>
@@ -125,7 +125,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="maxRetainedPayloadBytes">Optional retention byte cap override.</param>
         /// <returns>Harness with RabbitMQ started and a default Giganews provider loaded.</returns>
 
-        public static async Task<BackFillerPipelineHarness> StartAsync(
+        internal static async Task<BackFillerPipelineHarness> StartAsync(
             FakePublishConfirmBehavior confirm = FakePublishConfirmBehavior.Confirm,
             TimeSpan? retentionTtl = null,
             int? maxArticleBytes = null,
@@ -221,7 +221,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="password">AUTHINFO password on the fake account row.</param>
         /// <param name="maxConnections">Session pool size on the fake account row.</param>
 
-        public async Task LoadProviderAsync(
+        internal async Task LoadProviderAsync(
             string backbone = "Giganews",
             string hostname = "news.example.test",
             int port = 563,
@@ -259,7 +259,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="blockArticle">Optional gate delaying article body delivery on the server.</param>
         /// <returns>The enqueued scripted server instance.</returns>
 
-        public ScriptedNntpServer EnqueueArticle(byte[] payload, TaskCompletionSource? blockArticle = null)
+        internal ScriptedNntpServer EnqueueArticle(byte[] payload, TaskCompletionSource? blockArticle = null)
         {
             var server = CreateArticleServer(payload, blockArticle);
             Nntp.Enqueue(server);
@@ -273,7 +273,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="payload">Article body bytes placed between 220 follows and the terminating dot.</param>
         /// <param name="blockArticle">Optional gate delaying article body delivery on the server.</param>
 
-        public static ScriptedNntpServer CreateArticleServer(byte[] payload, TaskCompletionSource? blockArticle = null)
+        private static ScriptedNntpServer CreateArticleServer(byte[] payload, TaskCompletionSource? blockArticle = null)
         {
             var server = new ScriptedNntpServer
             {
@@ -297,7 +297,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="channelStillCurrent">Optional gate; defaults to always true.</param>
         /// <param name="cancellationToken">Cancellation forwarded to the pipeline.</param>
 
-        public Task<ArticleWorkOutcome> ProcessAsync(
+        private Task<ArticleWorkOutcome> ProcessAsync(
             RabbitMqManualAckDelivery delivery,
             FakeBackFillerRabbitMqChannel channel,
             Func<bool>? channelStillCurrent = null,
@@ -322,7 +322,7 @@ namespace VectorNNTP.BackFiller.Tests.Fixtures
         /// <param name="channelStillCurrent">Optional gate; defaults to always true.</param>
         /// <param name="cancellationToken">Cancellation forwarded to the pipeline.</param>
 
-        public Task<ArticleWorkOutcome> ProcessCanonicalAsync(
+        internal Task<ArticleWorkOutcome> ProcessCanonicalAsync(
             FakeBackFillerRabbitMqChannel channel,
             ulong deliveryTag = 7,
             long generation = 1,

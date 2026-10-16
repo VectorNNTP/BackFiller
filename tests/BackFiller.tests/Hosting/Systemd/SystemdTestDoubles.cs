@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         public Exception? ThrowOnNotify { get; set; }
 
         /// <summary>Snapshot of recorded notify lines (READY, STOPPING, WATCHDOG, STATUS).</summary>
-        public IReadOnlyList<string> Notifications
+        internal IReadOnlyList<string> Notifications
         {
             get
             {
@@ -39,13 +39,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         }
 
         /// <summary>Count of successful READY=1 recordings.</summary>
-        public int ReadyCount => Volatile.Read(ref _readyCount);
+        internal int ReadyCount => Volatile.Read(ref _readyCount);
 
         /// <summary>Count of successful STOPPING=1 recordings.</summary>
-        public int StoppingCount => Volatile.Read(ref _stoppingCount);
+        internal int StoppingCount => Volatile.Read(ref _stoppingCount);
 
         /// <summary>Count of successful WATCHDOG=1 recordings.</summary>
-        public int WatchdogCount => Volatile.Read(ref _watchdogCount);
+        internal int WatchdogCount => Volatile.Read(ref _watchdogCount);
 
         /// <summary>Completes after the first <see cref="NotifyReady"/> records.</summary>
         public TaskCompletionSource ReadySent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -66,10 +66,10 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         private readonly TaskCompletionSource _secondWatchdogAttempt = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Total entries into <see cref="NotifyWatchdog"/>.</summary>
-        public int WatchdogAttemptCount => Volatile.Read(ref _watchdogAttempts);
+        internal int WatchdogAttemptCount => Volatile.Read(ref _watchdogAttempts);
 
         /// <summary>Completes when <see cref="NotifyWatchdog"/> is entered for the second time, before that call records or throws.</summary>
-        public Task SecondWatchdogAttempt => _secondWatchdogAttempt.Task;
+        internal Task SecondWatchdogAttempt => _secondWatchdogAttempt.Task;
 
         /// <summary>
         /// Runs on the watchdog thread after a successful notify is recorded and before
@@ -192,7 +192,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         }
 
         /// <summary>Completes when <see cref="IsHealthyForWatchdog"/> is read while false.</summary>
-        public Task UnhealthyRead => _unhealthyRead.Task;
+        private Task UnhealthyRead => _unhealthyRead.Task;
     }
 
     /// <summary>
@@ -207,16 +207,16 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
 
         /// <summary>Wraps <paramref name="inner"/> and completes <see cref="ReadReturned"/> on each health read.</summary>
         /// <param name="inner">Health implementation under test.</param>
-        public ObservingApplicationHealth(IApplicationHealth inner)
+        internal ObservingApplicationHealth(IApplicationHealth inner)
         {
             _inner = inner;
         }
 
         /// <summary>Completes when the current expected read occurs; reset via <see cref="ExpectNextRead"/>.</summary>
-        public Task ReadReturned => Volatile.Read(ref _readReturned).Task;
+        private Task ReadReturned => Volatile.Read(ref _readReturned).Task;
 
         /// <summary>Arms a fresh completion source for the next health read.</summary>
-        public void ExpectNextRead() =>
+        private void ExpectNextRead() =>
             Volatile.Write(ref _readReturned, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
         /// <inheritdoc />
@@ -236,7 +236,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
     {
         /// <summary>Linux process managed by systemd with notify enabled and optional watchdog timeout.</summary>
         /// <param name="watchdog">Watchdog interval from systemd when non-null.</param>
-        public static FakeSystemdRuntime LinuxUnderSystemd(TimeSpan? watchdog = null) => new()
+        internal static FakeSystemdRuntime LinuxUnderSystemd(TimeSpan? watchdog = null) => new()
         {
             IsLinux = true,
             IsSystemdService = true,
@@ -245,7 +245,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         };
 
         /// <summary>Linux interactive console: not a systemd service, notify and watchdog off.</summary>
-        public static FakeSystemdRuntime LinuxConsole() => new()
+        internal static FakeSystemdRuntime LinuxConsole() => new()
         {
             IsLinux = true,
             IsSystemdService = false,
@@ -254,7 +254,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
         };
 
         /// <summary>Non-Linux host: all systemd features disabled.</summary>
-        public static FakeSystemdRuntime NonLinux() => new()
+        internal static FakeSystemdRuntime NonLinux() => new()
         {
             IsLinux = false,
             IsSystemdService = false,
@@ -290,13 +290,13 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Cancels <see cref="ApplicationStarted"/>.</summary>
-        public void SignalStarted() => _started.Cancel();
+        internal void SignalStarted() => _started.Cancel();
 
         /// <summary>Cancels <see cref="ApplicationStopping"/>.</summary>
-        public void SignalStopping() => _stopping.Cancel();
+        internal void SignalStopping() => _stopping.Cancel();
 
         /// <summary>Cancels <see cref="ApplicationStopped"/>.</summary>
-        public void SignalStopped() => _stopped.Cancel();
+        private void SignalStopped() => _stopped.Cancel();
 
         /// <summary>Mimics host stop request: sets flags and cancels stopping if not already canceled.</summary>
         public void StopApplication()

@@ -3,7 +3,7 @@ using MySqlConnector;
 namespace VectorNNTP.BackFiller.NntpDb
 {
     /// <summary>MySqlConnector-backed logical connection. Dispose returns it to the provider pool.</summary>
-    public sealed class MySqlNntpDbSession : INntpDbSession
+    internal sealed class MySqlNntpDbSession : INntpDbSession
     {
         /// <summary>Open provider connection. Dispose returns it to the MySqlConnector pool.</summary>
         private readonly MySqlConnection _connection;
@@ -12,7 +12,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// Takes ownership of an already-open MySqlConnector connection. <see cref="DisposeAsync"/> returns it to the provider pool.
         /// </summary>
         /// <param name="connection">Open provider connection. This session owns its disposal.</param>
-        public MySqlNntpDbSession(MySqlConnection connection)
+        internal MySqlNntpDbSession(MySqlConnection connection)
         {
             ArgumentNullException.ThrowIfNull(connection);
             _connection = connection;
@@ -53,7 +53,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <summary>Maps the <c>SELECT 1</c> scalar to an integer.</summary>
         /// <param name="result">Provider scalar.</param>
         /// <returns>The integer result.</returns>
-        internal static int ConvertSelectOneScalar(object? result) =>
+        private static int ConvertSelectOneScalar(object? result) =>
             result switch
             {
                 int value => value,

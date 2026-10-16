@@ -691,7 +691,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <param name="useTls">Forwarded to the provider definition and observed on the transport connect attempt.</param>
         /// <param name="user">AUTHINFO user. Null leaves the session anonymous.</param>
         /// <param name="password">AUTHINFO password paired with <paramref name="user"/>.</param>
-        internal static NntpProviderSession CreateSession(
+        private static NntpProviderSession CreateSession(
             bool useTls = false,
             string? user = null,
             string? password = null) =>

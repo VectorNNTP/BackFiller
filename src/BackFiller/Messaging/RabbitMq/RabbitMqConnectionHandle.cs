@@ -29,7 +29,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// not this handle alone.
     /// </para>
     /// </remarks>
-    public readonly struct RabbitMqConnectionHandle
+    internal readonly struct RabbitMqConnectionHandle
     {
         /// <summary>Service that answers <see cref="IsCurrent"/>. <see langword="null"/> on a default handle.</summary>
         private readonly RabbitMqService? _owner;

@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// <summary>
     /// Reports whether an IP address is assigned to a local network interface and enumerates local unicast addresses.
     /// </summary>
-    public interface ILocalIpAddressAssignee
+    internal interface ILocalIpAddressAssignee
     {
         /// <summary>
         /// Returns whether <paramref name="address"/> is present as a unicast address on any local NIC.

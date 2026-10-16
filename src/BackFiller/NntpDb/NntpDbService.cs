@@ -21,7 +21,7 @@ namespace VectorNNTP.BackFiller.NntpDb
     /// retry. There is no degraded or in-memory fallback.
     /// </para>
     /// </remarks>
-    public sealed class NntpDbService : IApplicationService, IAsyncDisposable
+    internal sealed class NntpDbService : IApplicationService, IAsyncDisposable
     {
         /// <summary>Delay between transient startup attempts, shortened when less than this remains before the deadline.</summary>
         private static readonly TimeSpan StartupRetryDelay = TimeSpan.FromSeconds(1);
@@ -96,15 +96,15 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <summary>
         /// Whether <see cref="StartAsync"/> entered its critical section and was not rolled back by failure (tests).
         /// </summary>
-        internal bool HasStarted => Volatile.Read(ref _started) == 1;
+        private bool HasStarted => Volatile.Read(ref _started) == 1;
 
         /// <summary>
         /// Whether <see cref="OpenAsync"/> may open sessions after successful startup health check (tests).
         /// </summary>
-        internal bool IsAccepting => Volatile.Read(ref _accepting) == 1;
+        private bool IsAccepting => Volatile.Read(ref _accepting) == 1;
 
         /// <summary>Startup <c>SELECT 1</c> attempts counted across transient retries (tests).</summary>
-        internal int StartupConnectAttempts { get; private set; }
+        private int StartupConnectAttempts { get; set; }
 
         /// <inheritdoc />
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -150,7 +150,7 @@ namespace VectorNNTP.BackFiller.NntpDb
         /// <param name="cancellationToken">Token used to cancel the open.</param>
         /// <returns>An open logical session. Dispose returns it to MySqlConnector's pool.</returns>
         /// <exception cref="InvalidOperationException">Startup has not succeeded, or the service has stopped.</exception>
-        public async ValueTask<INntpDbSession> OpenAsync(CancellationToken cancellationToken = default)
+        internal async ValueTask<INntpDbSession> OpenAsync(CancellationToken cancellationToken = default)
         {
             if (Volatile.Read(ref _accepting) == 0)
             {

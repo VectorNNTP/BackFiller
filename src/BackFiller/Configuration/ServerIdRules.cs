@@ -12,17 +12,17 @@ namespace VectorNNTP.BackFiller.Configuration
     internal static class ServerIdRules
     {
         /// <summary>Inclusive lower bound.</summary>
-        public const int MinimumInclusive = 1;
+        internal const int MinimumInclusive = 1;
 
         /// <summary>Inclusive upper bound.</summary>
-        public const int MaximumInclusive = 255;
+        internal const int MaximumInclusive = 255;
 
         /// <summary>
         /// Returns whether <paramref name="serverId"/> is unset (missing configuration).
         /// </summary>
         /// <param name="serverId">Bound server id, or <see langword="null"/> when omitted.</param>
         /// <returns><see langword="true"/> when the value was not configured.</returns>
-        internal static bool IsMissing(int? serverId) => serverId is null;
+        private static bool IsMissing(int? serverId) => serverId is null;
 
         /// <summary>
         /// Returns whether a configured <paramref name="serverId"/> is inside the accepted range.

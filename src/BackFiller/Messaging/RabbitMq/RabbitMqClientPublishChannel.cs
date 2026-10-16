@@ -125,7 +125,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>
         /// Builds AMQP properties for a confirmed publication.
         /// </summary>
-        internal static BasicProperties CreateProperties(RabbitMqConfirmedPublication publication)
+        private static BasicProperties CreateProperties(RabbitMqConfirmedPublication publication)
         {
             ArgumentNullException.ThrowIfNull(publication);
             var properties = new BasicProperties
@@ -183,7 +183,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <param name="appId">Generated application FQDN.</param>
         /// <param name="expiration">Per-message TTL in milliseconds, as an AMQP string.</param>
         /// <returns>The properties instance passed to <c>BasicPublishAsync</c>.</returns>
-        internal static BasicProperties CreateHandoffProperties(string messageId, string appId, string expiration)
+        private static BasicProperties CreateHandoffProperties(string messageId, string appId, string expiration)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
             ArgumentException.ThrowIfNullOrWhiteSpace(appId);

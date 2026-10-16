@@ -12,13 +12,13 @@ namespace VectorNNTP.BackFiller.Configuration
     /// There is no application-specific prefix and no alias for those secrets.
     /// Never log a complete instance: it contains API keys and PFX passwords.
     /// </remarks>
-    public class AcmeCloudflareOptions
+    internal class AcmeCloudflareOptions
     {
         /// <summary>
         /// Shared ACME/Cloudflare secrets bind from the configuration root. There is no
         /// application section name for those secrets.
         /// </summary>
-        internal const string SectionName = "";
+        private const string SectionName = "";
 
         /// <summary>Configuration key for the Cloudflare API key secret.</summary>
         internal const string CloudFlareApiKeyConfigurationKey = "CloudFlareApiKey";
@@ -92,7 +92,7 @@ namespace VectorNNTP.BackFiller.Configuration
         public int BindPortTls { get; set; }
 
         /// <summary>Gets whether TLS/ACME configuration is enabled.</summary>
-        public bool IsTlsListenerEnabled => BindPortTls > 0;
+        internal bool IsTlsListenerEnabled => BindPortTls > 0;
 
         /// <summary>Gets or sets the ACME directory URL.</summary>
         public string AcmeDirectoryUrl { get; set; } = DefaultAcmeDirectoryUrl;
@@ -186,7 +186,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// When <see langword="false"/>, the account email, certificate password, and API key are left unchanged.
         /// NNTPD, BackFiller, and StorageServer pass <see langword="false"/> because those values come from <c>nntpsharedconfig</c>.
         /// </param>
-        public static void OverlaySharedFromRoot(
+        private static void OverlaySharedFromRoot(
             AcmeCloudflareOptions options,
             IConfiguration configuration,
             bool includeSharedSecrets = true)
@@ -219,7 +219,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// </summary>
         /// <param name="options">The options instance to update.</param>
         /// <param name="configuration">The full configuration root.</param>
-        internal static void OverlayAcmeAccountEmail(AcmeCloudflareOptions options, IConfiguration configuration)
+        private static void OverlayAcmeAccountEmail(AcmeCloudflareOptions options, IConfiguration configuration)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(configuration);

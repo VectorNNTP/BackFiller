@@ -17,13 +17,13 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
     internal static class StorageArticleLookupWireProtocol
     {
         /// <summary>Current application protocol version.</summary>
-        public const int CurrentVersion = 1;
+        private const int CurrentVersion = 1;
 
         /// <summary>AMQP <c>ContentType</c> for lookup bodies.</summary>
-        public const string JsonContentType = "application/json";
+        private const string JsonContentType = "application/json";
 
         /// <summary>Serializes a version-1 lookup request.</summary>
-        internal static byte[] SerializeRequestV1(StorageArticleLookupRequest request)
+        private static byte[] SerializeRequestV1(StorageArticleLookupRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);
             if (request.Version != CurrentVersion)
@@ -48,7 +48,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         }
 
         /// <summary>Attempts to parse a version-1 lookup request.</summary>
-        internal static bool TryParseRequestV1(
+        private static bool TryParseRequestV1(
             ReadOnlySpan<byte> payload,
             out StorageArticleLookupRequest? request,
             out string reason)
@@ -92,7 +92,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         }
 
         /// <summary>Serializes a version-1 positive lookup response.</summary>
-        internal static byte[] SerializeResponseV1(StorageArticleLookupResponse response)
+        private static byte[] SerializeResponseV1(StorageArticleLookupResponse response)
         {
             ArgumentNullException.ThrowIfNull(response);
             if (response.Version != CurrentVersion)
@@ -140,7 +140,7 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
         }
 
         /// <summary>Attempts to parse a version-1 positive lookup response.</summary>
-        internal static bool TryParseResponseV1(
+        private static bool TryParseResponseV1(
             ReadOnlySpan<byte> payload,
             out StorageArticleLookupResponse? response,
             out string reason)
@@ -364,5 +364,33 @@ namespace VectorNNTP.BackFiller.Messaging.Cache
             value = property.GetString() ?? string.Empty;
             return true;
         }
+
+        /// <summary>
+        /// NNTPD → StorageServer fleet article-presence lookup request ("who has article X?").
+        /// </summary>
+        /// <param name="Version">Wire protocol version. Current is <c>1</c>.</param>
+        /// <param name="RequestId">Logical lookup identity shared across all StorageServer deliveries.</param>
+        /// <param name="ArticleId">Canonical article identity to look up.</param>
+        private sealed record StorageArticleLookupRequest(
+            int Version,
+            Guid RequestId,
+            ArticleId ArticleId);
+
+        /// <summary>
+        /// StorageServer → NNTPD positive article-presence response ("I have it").
+        /// </summary>
+        /// <param name="Version">Wire protocol version. Current is <c>1</c>.</param>
+        /// <param name="RequestId">Logical lookup identity from the request.</param>
+        /// <param name="ServerId">Responding StorageServer numeric identity.</param>
+        /// <param name="Fqdn">Responding StorageServer FQDN.</param>
+        /// <param name="ArticleId">Article identity confirmed present.</param>
+        /// <param name="ListenerPort">TLS listener port used for subsequent retrieval.</param>
+        private sealed record StorageArticleLookupResponse(
+            int Version,
+            Guid RequestId,
+            int ServerId,
+            string Fqdn,
+            ArticleId ArticleId,
+            int ListenerPort);
     }
 }

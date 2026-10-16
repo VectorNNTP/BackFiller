@@ -10,27 +10,27 @@ namespace VectorNNTP.BackFiller.Dns
     internal static class DnsWireFormat
     {
         /// <summary>Maximum length of a single DNS label in bytes (RFC 1035 §2.3.4).</summary>
-        public const int MaxLabelLength = 63;
+        private const int MaxLabelLength = 63;
 
         /// <summary>Maximum DNS name length in wire format, including the trailing root label (RFC 1035 §3.1).</summary>
-        public const int MaxWireNameLength = 255;
+        internal const int MaxWireNameLength = 255;
 
         /// <summary>Maximum presentation-form DNS hostname length (RFC 1035 §2.3.4).</summary>
-        public const int MaxPresentationNameLength = 253;
+        private const int MaxPresentationNameLength = 253;
 
         /// <summary>Fixed DNS header size in bytes (RFC 1035 §4.1.1).</summary>
-        public const int HeaderSize = 12;
+        internal const int HeaderSize = 12;
 
         /// <summary>QTYPE (2) + QCLASS (2) after QNAME in the question section (RFC 1035 §4.1.2).</summary>
-        public const int QuestionSuffixSize = 4;
+        internal const int QuestionSuffixSize = 4;
 
         /// <summary>Maximum labels used for stack-allocated split buffers.</summary>
-        public const int MaxLabelCount = 128;
+        internal const int MaxLabelCount = 128;
 
         /// <summary>
         /// TYPE + CLASS + TTL + RDLENGTH size before RDATA in a resource record.
         /// </summary>
-        public const int ResourceRecordFixedFieldsSize = 10;
+        internal const int ResourceRecordFixedFieldsSize = 10;
 
         /// <summary>
         /// Validates a DNS name and computes wire QNAME length in a single label split.
@@ -103,7 +103,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="name">Presentation-form dotted name.</param>
         /// <param name="error">Failure text when validation fails; otherwise null.</param>
         /// <returns><see langword="true"/> when the name can be encoded as a QNAME.</returns>
-        internal static bool TryValidateDnsName(string name, out string? error)
+        private static bool TryValidateDnsName(string name, out string? error)
             => TryValidateDnsName(name.AsSpan(), out error);
 
         /// <summary>
@@ -121,7 +121,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="name">Presentation-form dotted name.</param>
         /// <returns>Total wire bytes required for the QNAME.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is invalid.</exception>
-        internal static int ComputeWireNameLength(string name)
+        private static int ComputeWireNameLength(string name)
         {
             ReadOnlySpan<char> span = name.AsSpan();
             Span<Range> labelRanges = stackalloc Range[MaxLabelCount];
@@ -140,7 +140,7 @@ namespace VectorNNTP.BackFiller.Dns
         /// <param name="destination">Buffer that must hold at least the computed QNAME length.</param>
         /// <returns>Number of bytes written to <paramref name="destination"/>.</returns>
         /// <exception cref="ArgumentException">Thrown when the name is invalid or <paramref name="destination"/> is too short.</exception>
-        internal static int EncodeDnsName(string name, Span<byte> destination)
+        private static int EncodeDnsName(string name, Span<byte> destination)
         {
             ReadOnlySpan<char> span = name.AsSpan();
             Span<Range> labelRanges = stackalloc Range[MaxLabelCount];

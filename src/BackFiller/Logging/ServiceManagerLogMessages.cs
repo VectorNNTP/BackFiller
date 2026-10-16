@@ -19,7 +19,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1100,
             Level = LogLevel.Information,
             Message = "Starting {ServiceCount} application service(s) in registration order")]
-        internal static partial void StartingServices(ILogger logger, int ServiceCount);
+        private static partial void StartingServices(ILogger logger, int ServiceCount);
 
         /// <summary>Emitted immediately before each service's <c>StartAsync</c>.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1101,
             Level = LogLevel.Information,
             Message = "Starting application service {ServiceName} ({Index}/{Total})")]
-        internal static partial void StartingService(ILogger logger, string ServiceName, int Index, int Total);
+        private static partial void StartingService(ILogger logger, string ServiceName, int Index, int Total);
 
         /// <summary>
         /// Emitted when a service start is canceled by the caller, before already-started services are rolled back.
@@ -43,7 +43,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1102,
             Level = LogLevel.Warning,
             Message = "Startup of application service {ServiceName} was canceled after {ElapsedMs} ms. Rolling back {StartedCount} started service(s)")]
-        internal static partial void ServiceStartupCanceled(
+        private static partial void ServiceStartupCanceled(
             ILogger logger,
             string ServiceName,
             long ElapsedMs,
@@ -61,7 +61,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1103,
             Level = LogLevel.Error,
             Message = "Application service {ServiceName} failed during startup after {ElapsedMs} ms. Rolling back {StartedCount} started service(s)")]
-        internal static partial void ServiceStartupFailed(
+        private static partial void ServiceStartupFailed(
             ILogger logger,
             Exception exception,
             string ServiceName,
@@ -76,7 +76,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1104,
             Level = LogLevel.Information,
             Message = "Application service {ServiceName} started in {ElapsedMs} ms")]
-        internal static partial void ServiceStarted(ILogger logger, string ServiceName, long ElapsedMs);
+        private static partial void ServiceStarted(ILogger logger, string ServiceName, long ElapsedMs);
 
         /// <summary>Emitted after every registered service has started and execution monitoring has begun.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -84,7 +84,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1105,
             Level = LogLevel.Information,
             Message = "All application services started successfully")]
-        internal static partial void AllServicesStarted(ILogger logger);
+        private static partial void AllServicesStarted(ILogger logger);
 
         /// <summary>Emitted when stop finds no services still tracked as started.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -92,7 +92,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1106,
             Level = LogLevel.Information,
             Message = "No started application services to stop")]
-        internal static partial void NoServicesToStop(ILogger logger);
+        private static partial void NoServicesToStop(ILogger logger);
 
         /// <summary>Emitted once before the reverse-order stop loop.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -102,7 +102,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1107,
             Level = LogLevel.Information,
             Message = "Stopping {ServiceCount} application service(s) in reverse startup order with overall timeout {Timeout}")]
-        internal static partial void StoppingServices(ILogger logger, int ServiceCount, TimeSpan Timeout);
+        private static partial void StoppingServices(ILogger logger, int ServiceCount, TimeSpan Timeout);
 
         /// <summary>Emitted immediately before each service's <c>StopAsync</c>.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -115,7 +115,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1108,
             Level = LogLevel.Information,
             Message = "Stopping application service {ServiceName} ({Remaining} remaining including current)")]
-        internal static partial void StoppingService(ILogger logger, string ServiceName, int Remaining);
+        private static partial void StoppingService(ILogger logger, string ServiceName, int Remaining);
 
         /// <summary>
         /// Emitted when a service's stop returns successfully but the overall budget was already exhausted by that call,
@@ -129,7 +129,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1109,
             Level = LogLevel.Error,
             Message = "Graceful shutdown timed out after {Timeout} while stopping application service {ServiceName} (elapsed {ElapsedMs} ms; stop returned after budget)")]
-        internal static partial void GracefulShutdownTimedOutAfterBudget(
+        private static partial void GracefulShutdownTimedOutAfterBudget(
             ILogger logger,
             TimeSpan Timeout,
             string ServiceName,
@@ -145,7 +145,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1110,
             Level = LogLevel.Warning,
             Message = "Application service {ServiceName} stop completed after graceful shutdown budget was already exhausted ({ElapsedMs} ms)")]
-        internal static partial void ServiceStopCompletedAfterBudget(
+        private static partial void ServiceStopCompletedAfterBudget(
             ILogger logger,
             string ServiceName,
             long ElapsedMs);
@@ -158,7 +158,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1111,
             Level = LogLevel.Information,
             Message = "Application service {ServiceName} stopped in {ElapsedMs} ms")]
-        internal static partial void ServiceStopped(ILogger logger, string ServiceName, long ElapsedMs);
+        private static partial void ServiceStopped(ILogger logger, string ServiceName, long ElapsedMs);
 
         /// <summary>
         /// Emitted when a service stop is canceled by the caller's token.
@@ -171,7 +171,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1112,
             Level = LogLevel.Warning,
             Message = "Shutdown of application service {ServiceName} was canceled after {ElapsedMs} ms. Continuing best-effort abort of remaining services")]
-        internal static partial void ServiceShutdownCanceled(ILogger logger, string ServiceName, long ElapsedMs);
+        private static partial void ServiceShutdownCanceled(ILogger logger, string ServiceName, long ElapsedMs);
 
         /// <summary>
         /// Emitted when a service stop throws <see cref="OperationCanceledException"/> because the shutdown budget
@@ -185,7 +185,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1113,
             Level = LogLevel.Error,
             Message = "Graceful shutdown timed out after {Timeout} while stopping application service {ServiceName} (elapsed {ElapsedMs} ms)")]
-        internal static partial void GracefulShutdownTimedOut(
+        private static partial void GracefulShutdownTimedOut(
             ILogger logger,
             TimeSpan Timeout,
             string ServiceName,
@@ -201,7 +201,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1114,
             Level = LogLevel.Warning,
             Message = "Application service {ServiceName} stop aborted after graceful shutdown budget was already exhausted")]
-        internal static partial void ServiceStopAbortedAfterBudget(ILogger logger, string ServiceName);
+        private static partial void ServiceStopAbortedAfterBudget(ILogger logger, string ServiceName);
 
         /// <summary>Emitted when a service stop throws an exception other than budget or caller cancellation.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -212,7 +212,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1115,
             Level = LogLevel.Error,
             Message = "Application service {ServiceName} failed during shutdown after {ElapsedMs} ms")]
-        internal static partial void ServiceShutdownFailed(
+        private static partial void ServiceShutdownFailed(
             ILogger logger,
             Exception exception,
             string ServiceName,
@@ -224,7 +224,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1116,
             Level = LogLevel.Information,
             Message = "All application services stopped successfully")]
-        internal static partial void AllServicesStopped(ILogger logger);
+        private static partial void AllServicesStopped(ILogger logger);
 
         /// <summary>Emitted before reverse-order rollback of services that started before a startup failure.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -233,7 +233,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1117,
             Level = LogLevel.Warning,
             Message = "Rolling back {ServiceCount} partially started application service(s) in reverse order")]
-        internal static partial void RollingBackServices(ILogger logger, int ServiceCount);
+        private static partial void RollingBackServices(ILogger logger, int ServiceCount);
 
         /// <summary>Emitted after a rollback <c>StopAsync</c> returns.</summary>
         /// <param name="logger">Service-manager logger.</param>
@@ -242,7 +242,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1118,
             Level = LogLevel.Information,
             Message = "Rolled back application service {ServiceName}")]
-        internal static partial void ServiceRolledBack(ILogger logger, string ServiceName);
+        private static partial void ServiceRolledBack(ILogger logger, string ServiceName);
 
         /// <summary>
         /// Emitted when a rollback <c>StopAsync</c> throws. Rollback continues with the remaining services.
@@ -254,7 +254,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1119,
             Level = LogLevel.Error,
             Message = "Failed to roll back application service {ServiceName} after startup failure")]
-        internal static partial void ServiceRollbackFailed(ILogger logger, Exception exception, string ServiceName);
+        private static partial void ServiceRollbackFailed(ILogger logger, Exception exception, string ServiceName);
 
         /// <summary>
         /// Emitted when a watched <c>Execution</c> task faults while the shutdown watch is not canceled.
@@ -266,7 +266,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1120,
             Level = LogLevel.Error,
             Message = "Application service {ServiceName} terminated unexpectedly with a fault")]
-        internal static partial void ServiceTerminatedWithFault(ILogger logger, Exception exception, string ServiceName);
+        private static partial void ServiceTerminatedWithFault(ILogger logger, Exception exception, string ServiceName);
 
         /// <summary>
         /// Emitted when a watched <c>Execution</c> task is canceled while the shutdown watch is not canceled.
@@ -277,7 +277,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1121,
             Level = LogLevel.Warning,
             Message = "Application service {ServiceName} execution was canceled unexpectedly while the application was running")]
-        internal static partial void ServiceExecutionCanceledUnexpectedly(ILogger logger, string ServiceName);
+        private static partial void ServiceExecutionCanceledUnexpectedly(ILogger logger, string ServiceName);
 
         /// <summary>
         /// Emitted when a watched <c>Execution</c> task completes without fault or cancellation while the shutdown watch is not canceled.
@@ -288,7 +288,7 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1122,
             Level = LogLevel.Warning,
             Message = "Application service {ServiceName} execution completed unexpectedly while the application was running")]
-        internal static partial void ServiceExecutionCompletedUnexpectedly(ILogger logger, string ServiceName);
+        private static partial void ServiceExecutionCompletedUnexpectedly(ILogger logger, string ServiceName);
 
         /// <summary>
         /// Emitted when awaiting the execution monitor during shutdown throws an exception other than cancellation.
@@ -299,6 +299,6 @@ namespace VectorNNTP.BackFiller.Logging
             EventId = 1123,
             Level = LogLevel.Debug,
             Message = "Execution monitor completed with an exception during shutdown")]
-        internal static partial void ExecutionMonitorExceptionDuringShutdown(ILogger logger, Exception exception);
+        private static partial void ExecutionMonitorExceptionDuringShutdown(ILogger logger, Exception exception);
     }
 }

@@ -18,7 +18,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private readonly List<CollectedLog> _entries = [];
 
         /// <summary>Formatted messages in capture order (thread-safe snapshot).</summary>
-        public IReadOnlyList<string> Messages
+        internal IReadOnlyList<string> Messages
         {
             get
             {
@@ -30,7 +30,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>Structured capture entries in insertion order (thread-safe snapshot).</summary>
-        public IReadOnlyList<CollectedLog> Entries
+        internal IReadOnlyList<CollectedLog> Entries
         {
             get
             {

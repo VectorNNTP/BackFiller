@@ -67,7 +67,7 @@ namespace VectorNNTP.BackFiller.Acme
         private string Fqdn => _fqdn;
 
         /// <summary>Returns paths for the active generation (after recovery).</summary>
-        internal CertificatePaths Paths()
+        private CertificatePaths Paths()
         {
             Recover();
             var active = ReadCurrentId();
@@ -80,7 +80,7 @@ namespace VectorNNTP.BackFiller.Acme
         }
 
         /// <summary>Returns the active generation id, or <see langword="null"/> when none is current.</summary>
-        internal string? CurrentGenerationId()
+        private string? CurrentGenerationId()
         {
             Recover();
             var active = ReadCurrentId();
@@ -198,7 +198,7 @@ namespace VectorNNTP.BackFiller.Acme
         }
 
         /// <summary>Idempotent recovery for interrupted promotions inside this FQDN only.</summary>
-        internal void Recover()
+        private void Recover()
         {
             AcmePaths.EnsureCertificateIdentityLayout(_stateDir, _fqdn);
             var pointer = AcmePaths.CurrentGenerationPointerPath(_stateDir, _fqdn);

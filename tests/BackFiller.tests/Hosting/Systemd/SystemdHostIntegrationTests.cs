@@ -130,22 +130,22 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             listener.Stop();
             return port;
         }
-    }
 
-    /// <summary>IApplicationService test double that always fails start to regress missing READY notify.</summary>
-    internal sealed class FailingAcmeApplicationService : IApplicationService
-    {
-        /// <inheritdoc />
-        public string Name => "FailingAcme";
+        /// <summary>IApplicationService test double that always fails start to regress missing READY notify.</summary>
+        private sealed class FailingAcmeApplicationService : IApplicationService
+        {
+            /// <inheritdoc />
+            public string Name => "FailingAcme";
 
-        /// <inheritdoc />
-        public Task? Execution => null;
+            /// <inheritdoc />
+            public Task? Execution => null;
 
-        /// <inheritdoc />
-        public Task StartAsync(CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("ACME startup failed");
+            /// <inheritdoc />
+            public Task StartAsync(CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("ACME startup failed");
 
-        /// <inheritdoc />
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+            /// <inheritdoc />
+            public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        }
     }
 }

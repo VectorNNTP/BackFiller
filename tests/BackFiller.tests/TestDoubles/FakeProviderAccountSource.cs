@@ -25,10 +25,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public int BlockAfterQueryCount { get; set; } = 1;
 
         /// <summary>Total <see cref="QueryAsync"/> invocations observed, including those that block or throw.</summary>
-        public int QueryCount => Volatile.Read(ref _queryCount);
+        internal int QueryCount => Volatile.Read(ref _queryCount);
 
         /// <summary>Rows returned from queries; does not hit a database.</summary>
-        public IReadOnlyList<ProviderAccountRow> Rows
+        internal IReadOnlyList<ProviderAccountRow> Rows
         {
             get
             {

@@ -116,14 +116,14 @@ namespace VectorNNTP.BackFiller.Tests.Articles
         /// <param name="name">Fixture file name.</param>
         /// <param name="expected">Expected rejection reason.</param>
         [Theory]
-        [InlineData("bad-nul-header", NntpArticleParseFailureCode.ContainsIllegalControlByte)]
-        [InlineData("bad-no-body", NntpArticleParseFailureCode.MissingHeaderBodySeparator)]
-        [InlineData("bad-no-header", NntpArticleParseFailureCode.MissingMessageId)]
-        public void Parser_rejects_incomplete_or_nul_fixtures(string name, NntpArticleParseFailureCode expected)
+        [InlineData("bad-nul-header", nameof(NntpArticleParseFailureCode.ContainsIllegalControlByte))]
+        [InlineData("bad-no-body", nameof(NntpArticleParseFailureCode.MissingHeaderBodySeparator))]
+        [InlineData("bad-no-header", nameof(NntpArticleParseFailureCode.MissingMessageId))]
+        public void Parser_rejects_incomplete_or_nul_fixtures(string name, string expected)
         {
             var parsed = new NntpArticleParser("backfiller.test").Parse(Load(name));
             Assert.False(parsed.IsAccepted);
-            Assert.Equal(expected, parsed.FailureCode);
+            Assert.Equal(Enum.Parse<NntpArticleParseFailureCode>(expected), parsed.FailureCode);
         }
 
         /// <summary>Compares logical and stuffed bodies line-by-line, accounting for one added dot per dot-leading line.</summary>

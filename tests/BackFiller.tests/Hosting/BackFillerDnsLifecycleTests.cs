@@ -271,7 +271,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             private int _resolveCount;
 
             /// <summary>Number of <see cref="Resolve"/> calls observed.</summary>
-            public int ResolveCount => Volatile.Read(ref _resolveCount);
+            internal int ResolveCount => Volatile.Read(ref _resolveCount);
 
             /// <inheritdoc />
             public ResolvedBindAddresses Resolve(AcmeCloudflareOptions options)
@@ -294,7 +294,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             /// <summary>Wraps an inner service and forwards start/stop after recording order.</summary>
             /// <param name="inner">Service whose <see cref="Name"/> and lifecycle are delegated.</param>
             /// <param name="order">Mutable list receiving <c>start:</c> and <c>stop:</c> entries.</param>
-            public OrderRecordingService(IApplicationService inner, List<string> order)
+            internal OrderRecordingService(IApplicationService inner, List<string> order)
             {
                 ArgumentNullException.ThrowIfNull(inner);
                 ArgumentNullException.ThrowIfNull(order);
@@ -307,7 +307,7 @@ namespace VectorNNTP.BackFiller.Tests.Hosting
             /// <param name="name">Recorded service name in order entries.</param>
             /// <param name="order">Mutable list receiving lifecycle order.</param>
             /// <param name="startException">When set, thrown from <see cref="StartAsync"/> after recording start.</param>
-            public OrderRecordingService(string name, List<string> order, Exception? startException = null)
+            internal OrderRecordingService(string name, List<string> order, Exception? startException = null)
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(name);
                 ArgumentNullException.ThrowIfNull(order);

@@ -5,10 +5,10 @@ namespace VectorNNTP.BackFiller.Logging
     /// <summary>
     /// Gzip-compresses a completed log beside itself using a temporary file and an atomic move.
     /// </summary>
-    public sealed class GzipLogFileCompressor : ILogFileCompressor
+    internal sealed class GzipLogFileCompressor : ILogFileCompressor
     {
         /// <summary>Suffix of the temporary file that becomes <c>.gz</c> only after the write finishes.</summary>
-        public const string PartialSuffix = ".gz.partial";
+        private const string PartialSuffix = ".gz.partial";
 
         /// <inheritdoc />
         public bool TryCompressAndReplace(string sourceLogPath)

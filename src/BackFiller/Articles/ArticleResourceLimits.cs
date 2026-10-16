@@ -20,12 +20,12 @@ namespace VectorNNTP.BackFiller.Articles
         /// then again to the stuffed wire image that becomes canonical ArtData and retained <c>ArtSize</c>.
         /// Stuffing dots count only toward that stuffed length. The NNTP multiline terminator is not part of either length.
         /// </remarks>
-        public const int MaxArticleBytes = 5 * 1024 * 1024;
+        internal const int MaxArticleBytes = 5 * 1024 * 1024;
 
         /// <summary>Maximum accepted ARTICLE/header line length in characters.</summary>
-        public const int MaxArticleLineCharacters = 1024;
+        private const int MaxArticleLineCharacters = 1024;
 
         /// <summary>Maximum accepted ARTICLE/header line length in wire bytes.</summary>
-        public const int MaxArticleLineBytes = MaxArticleLineCharacters;
+        internal const int MaxArticleLineBytes = MaxArticleLineCharacters;
     }
 }

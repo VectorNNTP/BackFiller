@@ -32,7 +32,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
     /// <summary>
     /// Deterministic parser rejection or terminal parse-state classification.
     /// </summary>
-    public enum NntpArticleParseFailureCode
+    internal enum NntpArticleParseFailureCode
     {
         /// <summary>Parsing completed successfully.</summary>
         None = 0,
@@ -113,7 +113,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
     /// <summary>
     /// Frequently accessed NNTP header names without allocating strings per header.
     /// </summary>
-    public enum NntpArticleHeaderName
+    internal enum NntpArticleHeaderName
     {
         /// <summary>Header name is not one of the parser's known fast-path names.</summary>
         Unknown = 0,
@@ -215,7 +215,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
     internal struct NntpArticleHeaderInlineStore
     {
         /// <summary>Number of header slots stored inline on <see cref="NntpArticleParseResult"/>.</summary>
-        public const int Capacity = 48;
+        internal const int Capacity = 48;
 
         /// <summary>
         /// Inline-array seed. The compiler repeats this slot <see cref="Capacity"/> times; each slot holds one <see cref="NntpArticleHeaderEntry"/>.
@@ -341,7 +341,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         internal NntpArticleParseFailureCode FailureCode { get; }
 
         /// <summary>Gets the detected article type classification.</summary>
-        internal NntpArticleType ArticleType { get; }
+        private NntpArticleType ArticleType { get; }
 
         /// <summary>Gets the original article bytes supplied to the parser.</summary>
         internal ReadOnlyMemory<byte> ArticleBytes { get; }
@@ -356,10 +356,10 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         internal int HeaderCount { get; }
 
         /// <summary>Gets parsed header entries in original wire order.</summary>
-        internal NntpArticleHeaderList Headers => new(this);
+        private NntpArticleHeaderList Headers => new(this);
 
         /// <summary>Gets the date parse classification when date canonicalization fails.</summary>
-        internal DateParseFailureReason DateFailureReason { get; }
+        private DateParseFailureReason DateFailureReason { get; }
 
         /// <summary>Gets the canonical UTC instant when date resolution succeeds.</summary>
         internal DateTime CanonicalUtc { get; }
@@ -377,13 +377,13 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// Gets a value indicating whether a Path token equals the organizational tracker hostname
         /// <c>news.usenet.ninja</c> using existing case-insensitive token rules.
         /// </summary>
-        internal bool ContainsOrganizationalTracker { get; }
+        private bool ContainsOrganizationalTracker { get; }
 
         /// <summary>Gets the original Path-header bytes when present.</summary>
-        internal ReadOnlyMemory<byte> OriginalPathValue { get; }
+        private ReadOnlyMemory<byte> OriginalPathValue { get; }
 
         /// <summary>Gets the original Message-ID header value bytes.</summary>
-        internal ReadOnlyMemory<byte> OriginalMessageIdValue { get; }
+        private ReadOnlyMemory<byte> OriginalMessageIdValue { get; }
 
         /// <summary>Gets a value indicating whether yEnc markers were detected in the body scan window.</summary>
         internal bool YEncDetected { get; }
@@ -449,7 +449,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// <param name="destination">Destination receiving ASCII Path bytes.</param>
         /// <param name="bytesWritten">Bytes written on success.</param>
         /// <returns><see langword="true"/> when Path analysis succeeded and <paramref name="destination"/> was large enough.</returns>
-        internal bool TryWriteCanonicalPath(ArticlePathMode mode, Span<byte> destination, out int bytesWritten)
+        private bool TryWriteCanonicalPath(ArticlePathMode mode, Span<byte> destination, out int bytesWritten)
             => TryWriteCanonicalPath(mode, ArticlePathCanonicalizer.OrganizationalTrackerHost, destination, out bytesWritten);
 
         /// <summary>

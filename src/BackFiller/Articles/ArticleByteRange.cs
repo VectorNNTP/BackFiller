@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// <summary>
     /// Integer offset/length into an <see cref="ArticleRecord"/> ArtData buffer.
     /// </summary>
-    public readonly struct ArticleByteRange : IEquatable<ArticleByteRange>
+    internal readonly struct ArticleByteRange : IEquatable<ArticleByteRange>
     {
         /// <summary>Sentinel with <see cref="Offset"/> -1 and <see cref="IsPresent"/> false for missing header fields.</summary>
         internal static ArticleByteRange Absent { get; } = new(-1, 0);
@@ -20,13 +20,13 @@ namespace VectorNNTP.BackFiller.Articles
         }
 
         /// <summary>Gets the byte offset into ArtData, or -1 when the field is absent.</summary>
-        internal int Offset { get; }
+        private int Offset { get; }
 
         /// <summary>Header value length in bytes; zero is allowed when <see cref="IsPresent"/> is true.</summary>
-        internal int Length { get; }
+        private int Length { get; }
 
         /// <summary>True when <see cref="Offset"/> is non-negative and <see cref="Slice"/> may index ArtData.</summary>
-        public bool IsPresent => Offset >= 0;
+        internal bool IsPresent => Offset >= 0;
 
         /// <summary>
         /// Slices <paramref name="artData"/> for this range.

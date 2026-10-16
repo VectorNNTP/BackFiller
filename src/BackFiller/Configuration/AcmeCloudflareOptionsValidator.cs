@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Configuration
 
         /// <summary>Initializes a new validator that checks shared ACME and DNS fields.</summary>
         /// <param name="localIpAddressAssignee">Reports whether an explicit bind address is assigned to a local interface.</param>
-        public AcmeCloudflareOptionsValidator(ILocalIpAddressAssignee localIpAddressAssignee)
+        internal AcmeCloudflareOptionsValidator(ILocalIpAddressAssignee localIpAddressAssignee)
             : this(localIpAddressAssignee, validateSharedDatabaseFields: true)
         {
         }
@@ -170,7 +170,7 @@ namespace VectorNNTP.BackFiller.Configuration
         /// <param name="options">Options whose bind list is checked. An empty list is a failure.</param>
         /// <param name="localIpAddressAssignee">Assignment check for non-wildcard entries.</param>
         /// <param name="failures">Receives one message per invalid entry. Wildcard entries are accepted without a NIC check.</param>
-        internal static void CollectBindAddressFailures(
+        private static void CollectBindAddressFailures(
             AcmeCloudflareOptions options,
             ILocalIpAddressAssignee localIpAddressAssignee,
             List<string> failures)

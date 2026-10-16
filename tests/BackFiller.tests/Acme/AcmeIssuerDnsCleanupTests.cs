@@ -191,7 +191,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             private readonly ScriptedAcmeHandler _handler = new();
 
             /// <summary>Tracked HTTP responses created by the scripted handler.</summary>
-            public IReadOnlyList<ScriptedAcmeHandler.TrackedResponse> Responses => _handler.Responses;
+            internal IReadOnlyList<ScriptedAcmeHandler.TrackedResponse> Responses => _handler.Responses;
 
             /// <summary>
             /// Returns an HTTP client bound to the shared scripted handler without disposing it with the client.
@@ -210,7 +210,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             private readonly List<TrackedResponse> _responses = [];
 
             /// <summary>Snapshot of responses returned to ACME clients (thread-safe copy).</summary>
-            public IReadOnlyList<TrackedResponse> Responses
+            internal IReadOnlyList<TrackedResponse> Responses
             {
                 get
                 {
@@ -275,7 +275,7 @@ namespace VectorNNTP.BackFiller.Tests.Acme
             {
                 /// <summary>Creates a tracked response with the given status.</summary>
                 /// <param name="statusCode">Initial HTTP status.</param>
-                public TrackedResponse(HttpStatusCode statusCode)
+                internal TrackedResponse(HttpStatusCode statusCode)
                     : base(statusCode)
                 {
                 }

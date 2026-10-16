@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Configuration
     /// are removed and are not a fallback. The RabbitMQ file is
     /// <c>VectorNNTP.RabbitMQ.json</c> and stays a separate document.
     /// </remarks>
-    public static class ApplicationJsonConfiguration
+    internal static class ApplicationJsonConfiguration
     {
         /// <summary>Gets the entry assembly's short name.</summary>
         /// <returns>The <see cref="AssemblyName.Name"/> of the entry assembly.</returns>
@@ -36,7 +36,7 @@ namespace VectorNNTP.BackFiller.Configuration
 
         /// <summary>Gets <c>{entry assembly name}.json</c>.</summary>
         /// <returns>The primary application JSON configuration filename.</returns>
-        public static string PrimaryJsonFileName() => EntryAssemblyName + ".json";
+        internal static string PrimaryJsonFileName() => EntryAssemblyName + ".json";
 
         /// <summary>Gets <c>{entry assembly name}.{environment}.json</c>.</summary>
         /// <param name="environmentName">Host environment name, for example <c>Development</c>.</param>

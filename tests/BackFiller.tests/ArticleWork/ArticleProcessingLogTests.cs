@@ -323,7 +323,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="payload">Article bytes for the callback, or null to skip consumption (failures).</param>
             /// <param name="result">Base retrieval result (kind, code, session reuse).</param>
             /// <param name="commandStartedTimestamp">Value assigned to <see cref="ArticleRetrievalResult.CommandStartedTimestamp"/> on return.</param>
-            public ScriptedRetriever(byte[]? payload, ArticleRetrievalResult result, long commandStartedTimestamp)
+            internal ScriptedRetriever(byte[]? payload, ArticleRetrievalResult result, long commandStartedTimestamp)
             {
                 _payload = payload;
                 _result = result;

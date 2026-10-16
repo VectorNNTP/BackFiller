@@ -15,7 +15,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Initial UTC clock for the provider.</summary>
         /// <param name="utcNow">Starting instant.</param>
-        public ManualTimeProvider(DateTimeOffset utcNow)
+        internal ManualTimeProvider(DateTimeOffset utcNow)
         {
             _utcNow = utcNow;
         }
@@ -38,7 +38,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>True when at least one registered timer has a scheduled due time.</summary>
-        public bool HasPendingTimer
+        private bool HasPendingTimer
         {
             get
             {
@@ -51,7 +51,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Moves the clock forward and fires due timers in due-time order until the target is reached.</summary>
         /// <param name="delta">Non-negative advance amount.</param>
-        public void Advance(TimeSpan delta)
+        internal void Advance(TimeSpan delta)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(delta.Ticks);
             DateTimeOffset target;
@@ -91,7 +91,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Sets the UTC instant without firing timers (unlike <see cref="Advance"/>).</summary>
         /// <param name="utcNow">New clock value.</param>
-        public void SetUtcNow(DateTimeOffset utcNow)
+        private void SetUtcNow(DateTimeOffset utcNow)
         {
             lock (_gate)
             {
@@ -101,7 +101,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Adds a timer created by <see cref="CreateTimer"/> to the set evaluated during <see cref="Advance"/>.</summary>
         /// <param name="timer">Timer instance to track; must belong to this provider.</param>
-        internal void Register(ManualTimer timer)
+        private void Register(ManualTimer timer)
         {
             lock (_gate)
             {
@@ -111,7 +111,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Removes a disposed or disabled timer so <see cref="Advance"/> no longer considers it.</summary>
         /// <param name="timer">Timer to drop from the active list.</param>
-        internal void Unregister(ManualTimer timer)
+        private void Unregister(ManualTimer timer)
         {
             lock (_gate)
             {
@@ -120,7 +120,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>Current UTC under the provider lock (for timer scheduling).</summary>
-        internal DateTimeOffset Snapshot
+        private DateTimeOffset Snapshot
         {
             get
             {
@@ -132,7 +132,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         }
 
         /// <summary>ITimer implementation driven by the owning provider's manual clock advances.</summary>
-        internal sealed class ManualTimer : ITimer
+        private sealed class ManualTimer : ITimer
         {
             /// <summary>Clock that supplies <see cref="Snapshot"/> for scheduling.</summary>
             private readonly ManualTimeProvider _owner;
@@ -147,7 +147,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             /// <param name="owner">Clock that drives due times.</param>
             /// <param name="callback">Invoked when due.</param>
             /// <param name="state">Opaque callback state.</param>
-            public ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state)
+            internal ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state)
             {
                 _owner = owner;
                 _callback = callback;
@@ -175,7 +175,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             }
 
             /// <summary>Invokes the callback and schedules the next due time when periodic; called only from <see cref="ManualTimeProvider.Advance"/>.</summary>
-            public void Fire()
+            internal void Fire()
             {
                 NextDue = _period == Timeout.InfiniteTimeSpan ? null : _owner.Snapshot + _period;
                 _callback(_state);

@@ -5,7 +5,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
     /// <param name="IsReplacement">
     /// <see langword="true"/> when a prior generation existed and callers must drop work tied to it.
     /// </param>
-    public sealed record RabbitMqConnectionReplacedEventArgs(
+    internal sealed record RabbitMqConnectionReplacedEventArgs(
         long ConnectionGeneration,
         bool IsReplacement);
 }

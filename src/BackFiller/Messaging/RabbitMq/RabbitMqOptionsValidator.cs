@@ -34,7 +34,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// </summary>
         /// <param name="rabbitMq">Options instance to validate.</param>
         /// <param name="failures">Failure list to append to.</param>
-        internal static void ValidateConnection(RabbitMqOptions rabbitMq, List<string> failures)
+        private static void ValidateConnection(RabbitMqOptions rabbitMq, List<string> failures)
         {
             ArgumentNullException.ThrowIfNull(rabbitMq);
             ArgumentNullException.ThrowIfNull(failures);
@@ -568,7 +568,7 @@ namespace VectorNNTP.BackFiller.Messaging.RabbitMq
         /// <summary>
         /// Validates Management BaseUrl shape and request timeout (BaseUrl must already be non-empty).
         /// </summary>
-        internal static void ValidateManagementShape(RabbitMqManagementOptions management, List<string> failures)
+        private static void ValidateManagementShape(RabbitMqManagementOptions management, List<string> failures)
         {
             ArgumentNullException.ThrowIfNull(management);
             ArgumentNullException.ThrowIfNull(failures);

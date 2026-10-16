@@ -33,7 +33,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         internal string Jwk { get; }
 
         /// <summary>Base64url SHA-256 of <see cref="Jwk"/>; used in DNS-01 key authorizations.</summary>
-        internal string Thumbprint { get; }
+        private string Thumbprint { get; }
 
         /// <summary>Creates a new RSA account key (minimum 2048 bits).</summary>
         /// <param name="keySize">RSA modulus size in bits. Values below 2048 throw.</param>
@@ -86,7 +86,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// </summary>
         /// <param name="pkcs8Der">PKCS#8 DER bytes to import and export.</param>
         /// <exception cref="CryptographicException">Thrown when modulus or D differs after the round trip, or import fails.</exception>
-        internal static void AssertPkcs8DerRoundTripPreservesRsaMaterial(ReadOnlySpan<byte> pkcs8Der)
+        private static void AssertPkcs8DerRoundTripPreservesRsaMaterial(ReadOnlySpan<byte> pkcs8Der)
         {
             using var original = RSA.Create();
             original.ImportPkcs8PrivateKey(pkcs8Der, out _);
@@ -117,7 +117,7 @@ namespace VectorNNTP.BackFiller.Acme.Protocol
         /// <summary>Builds the ACME key authorization string for <paramref name="token"/>.</summary>
         /// <param name="token">Challenge token from the CA.</param>
         /// <returns><c>{token}.{thumbprint}</c>.</returns>
-        internal string GetKeyAuthorization(string token) => token + "." + Thumbprint;
+        private string GetKeyAuthorization(string token) => token + "." + Thumbprint;
 
         /// <summary>Computes the DNS-01 TXT value (base64url SHA-256 of the key authorization).</summary>
         /// <param name="token">Challenge token from the CA.</param>

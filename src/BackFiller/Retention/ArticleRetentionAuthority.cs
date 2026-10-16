@@ -1147,7 +1147,7 @@ namespace VectorNNTP.BackFiller.Retention
             internal int PayloadBytes { get; }
 
             /// <summary>Authority clock at admission.</summary>
-            internal DateTimeOffset InsertedUtc { get; }
+            private DateTimeOffset InsertedUtc { get; }
 
             /// <summary>
             /// First instant at which the entry is expired. <see cref="IsExpiredLocked"/> treats equality as expired.
@@ -1157,7 +1157,7 @@ namespace VectorNNTP.BackFiller.Retention
             /// <summary>
             /// Admission stamp from <see cref="_nextGeneration"/>. Stored only. Sweep and delivery do not compare it.
             /// </summary>
-            internal long Generation { get; }
+            private long Generation { get; }
 
             /// <summary>
             /// Link in <see cref="_insertionOrder"/>. <see langword="null"/> after <see cref="UnindexLocked"/> unlinks it.
@@ -1193,7 +1193,7 @@ namespace VectorNNTP.BackFiller.Retention
             internal ArticleRecord? Record => _record;
 
             /// <summary>Date-family header name, or <see langword="null"/> after physical disposal.</summary>
-            internal NntpArticleHeaderName? SelectedDateHeaderName => _selectedDateHeaderName;
+            private NntpArticleHeaderName? SelectedDateHeaderName => _selectedDateHeaderName;
 
             /// <summary>Volatile read of logical removal. Indexes no longer contain the entry when this is <see langword="true"/>.</summary>
             internal bool IsLogicallyRemoved => Volatile.Read(ref _logicallyRemoved) == 1;

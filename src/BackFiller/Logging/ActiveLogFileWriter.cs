@@ -44,7 +44,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// so the next size check sees it. When <see langword="true"/>, bytes stay in the writer
         /// until <see cref="FlushToDisk"/> or dispose.
         /// </param>
-        public ActiveLogFileWriter(
+        internal ActiveLogFileWriter(
             string path,
             ITextFormatter formatter,
             long? fileSizeLimitBytes,
@@ -77,7 +77,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// An event that begins under the cap is written in full.
         /// </summary>
         /// <returns><see langword="false"/> when the file was already at the cap and nothing was written.</returns>
-        public bool TryEmit(LogEvent logEvent)
+        internal bool TryEmit(LogEvent logEvent)
         {
             ArgumentNullException.ThrowIfNull(logEvent);
             if (_fileSizeLimitBytes is { } limit && _counted!.CountedLength >= limit)
@@ -95,7 +95,7 @@ namespace VectorNNTP.BackFiller.Logging
         }
 
         /// <summary>Flushes the writer and asks the operating system to persist the file.</summary>
-        public void FlushToDisk()
+        internal void FlushToDisk()
         {
             _output.Flush();
             _file.Flush(flushToDisk: true);
@@ -113,14 +113,14 @@ namespace VectorNNTP.BackFiller.Logging
 
             /// <summary>Starts the count at the stream length so an existing file is already at the cap when full.</summary>
             /// <param name="stream">File stream opened for append. Not null.</param>
-            public CountingStream(Stream stream)
+            internal CountingStream(Stream stream)
             {
                 _stream = stream;
                 CountedLength = stream.Length;
             }
 
             /// <summary>Bytes present at open plus bytes written through this wrapper.</summary>
-            public long CountedLength { get; private set; }
+            internal long CountedLength { get; private set; }
 
             /// <summary>Always false. This stream is write-only.</summary>
             public override bool CanRead => false;

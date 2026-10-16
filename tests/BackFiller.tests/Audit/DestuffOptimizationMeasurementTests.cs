@@ -483,7 +483,7 @@ namespace VectorNNTP.BackFiller.Tests.Audit
             private int _offset;
 
             /// <summary>Installs <paramref name="frame"/> without copying it and rewinds the read cursor.</summary>
-            public void Begin(byte[] frame)
+            internal void Begin(byte[] frame)
             {
                 _frame = frame;
                 _offset = 0;

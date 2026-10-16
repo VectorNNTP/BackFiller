@@ -105,34 +105,34 @@ namespace VectorNNTP.BackFiller.Tests.Hosting.Systemd
             Assert.True(console.IsLinux && !console.IsSystemdService && !console.IsWatchdogConfigured);
             Assert.True(!windows.IsLinux && !windows.IsSystemdService && !windows.IsWatchdogConfigured);
         }
-    }
 
-    /// <summary>Temporarily sets process environment variables and restores prior values on dispose.</summary>
-    internal sealed class EnvironmentVariableScope : IDisposable
-    {
-        /// <summary>Captured values to restore in <see cref="Dispose"/>.</summary>
-        private readonly (string Name, string? Previous)[] _previous;
-
-        /// <summary>Applies <paramref name="values"/> for the scope lifetime.</summary>
-        /// <param name="values">Variables to set; previous values are saved.</param>
-        public EnvironmentVariableScope(params (string Name, string? Value)[] values)
+        /// <summary>Temporarily sets process environment variables and restores prior values on dispose.</summary>
+        private sealed class EnvironmentVariableScope : IDisposable
         {
-            _previous = values
-                .Select(v => (v.Name, Environment.GetEnvironmentVariable(v.Name)))
-                .ToArray();
+            /// <summary>Captured values to restore in <see cref="Dispose"/>.</summary>
+            private readonly (string Name, string? Previous)[] _previous;
 
-            foreach (var (name, value) in values)
+            /// <summary>Applies <paramref name="values"/> for the scope lifetime.</summary>
+            /// <param name="values">Variables to set; previous values are saved.</param>
+            internal EnvironmentVariableScope(params (string Name, string? Value)[] values)
             {
-                Environment.SetEnvironmentVariable(name, value);
+                _previous = values
+                    .Select(v => (v.Name, Environment.GetEnvironmentVariable(v.Name)))
+                    .ToArray();
+
+                foreach (var (name, value) in values)
+                {
+                    Environment.SetEnvironmentVariable(name, value);
+                }
             }
-        }
 
-        /// <inheritdoc />
-        public void Dispose()
-        {
-            foreach (var (name, previous) in _previous)
+            /// <inheritdoc />
+            public void Dispose()
             {
-                Environment.SetEnvironmentVariable(name, previous);
+                foreach (var (name, previous) in _previous)
+                {
+                    Environment.SetEnvironmentVariable(name, previous);
+                }
             }
         }
     }

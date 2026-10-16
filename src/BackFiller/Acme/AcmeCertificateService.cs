@@ -12,7 +12,7 @@ namespace VectorNNTP.BackFiller.Acme
     /// After a usable PFX is ensured or renewed, an immutable TLS certificate context is published
     /// for the TLS listener (atomic swap; existing connections are unaffected).
     /// </remarks>
-    public sealed class AcmeCertificateService : IAsyncDisposable
+    internal sealed class AcmeCertificateService : IAsyncDisposable
     {
         /// <summary>Background renewal check interval (default 6 hours).</summary>
         private static readonly TimeSpan RenewalCheckInterval = TimeSpan.FromHours(6);
@@ -82,7 +82,7 @@ namespace VectorNNTP.BackFiller.Acme
         internal Task? Execution => _execution;
 
         /// <summary>Gets whether the service initialized ACME components (for tests).</summary>
-        internal bool AcmeInitialized => _manager is not null;
+        private bool AcmeInitialized => _manager is not null;
 
         /// <summary>
         /// When TLS is disabled, logs and returns without creating ACME state.

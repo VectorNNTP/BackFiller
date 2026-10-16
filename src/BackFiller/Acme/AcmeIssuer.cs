@@ -14,7 +14,7 @@ namespace VectorNNTP.BackFiller.Acme
     internal sealed class AcmeIssuer : ICertificateIssuer
     {
         /// <summary>Named <see cref="IHttpClientFactory"/> client for ACME HTTP.</summary>
-        public const string HttpClientName = "AcmeDirectory";
+        internal const string HttpClientName = "AcmeDirectory";
 
         /// <summary>RSA size, in bits, for both the account key and the leaf key.</summary>
         private const int KeySizeBits = 2048;
@@ -78,7 +78,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// <param name="readinessTimeout">Order-ready wait. <see langword="null"/> uses <see cref="AcmeOrderReadiness.DefaultTimeout"/>.</param>
         /// <param name="readinessInterval">Order-ready poll delay. <see langword="null"/> uses <see cref="AcmeOrderReadiness.DefaultInterval"/>.</param>
         /// <param name="journal">Optional transaction journal.</param>
-        internal AcmeIssuer(
+        private AcmeIssuer(
             IOptions<AcmeCloudflareOptions> options,
             AccountStore accountStore,
             Dns01Solver dnsSolver,

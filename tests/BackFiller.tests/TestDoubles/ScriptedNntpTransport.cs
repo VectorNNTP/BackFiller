@@ -38,14 +38,14 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public TaskCompletionSource? BlockConnect { get; set; }
 
         /// <summary>Gets the highest concurrent <see cref="ConnectAsync"/> occupancy observed.</summary>
-        public int MaxObservedConcurrentConnects => Volatile.Read(ref _maxObservedConnects);
+        internal int MaxObservedConcurrentConnects => Volatile.Read(ref _maxObservedConnects);
 
         /// <summary>Gets how many <see cref="ConnectAsync"/> calls are inside the method right now.</summary>
-        public int CurrentConcurrentConnects => Volatile.Read(ref _currentConnects);
+        internal int CurrentConcurrentConnects => Volatile.Read(ref _currentConnects);
 
         /// <summary>Queues a scripted server handed out FIFO on the next successful connect.</summary>
         /// <param name="server">In-memory peer whose client stream is returned from connect.</param>
-        public void Enqueue(ScriptedNntpServer server)
+        internal void Enqueue(ScriptedNntpServer server)
         {
             ArgumentNullException.ThrowIfNull(server);
             _servers.Enqueue(server);
@@ -127,7 +127,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Builds a server with the given greeting and default 430 handler.</summary>
         /// <param name="greeting">Initial status line written on accept.</param>
-        public ScriptedNntpServer(string greeting = "200 posting allowed")
+        internal ScriptedNntpServer(string greeting = "200 posting allowed")
         {
             _onCommand = _ => "430 no such article\r\n"u8.ToArray();
             Greeting = greeting;
@@ -137,7 +137,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public string Greeting { get; }
 
         /// <summary>ASCII command lines read from the client after accept, in order.</summary>
-        public IReadOnlyList<string> Commands =>
+        internal IReadOnlyList<string> Commands =>
             _commands.Select(static bytes => Encoding.ASCII.GetString(bytes)).ToArray();
 
         /// <summary>Reserved for TLS negotiation tests; the scripted server does not perform a real handshake.</summary>
@@ -196,7 +196,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Installs a string responder for commands not handled by built-in CAPABILITIES, STARTTLS, or QUIT logic.</summary>
         /// <param name="responder">Maps the full command line to a response encoded as ASCII bytes.</param>
-        public void Respond(Func<string, string> responder)
+        internal void Respond(Func<string, string> responder)
         {
             ArgumentNullException.ThrowIfNull(responder);
             _onCommand = command => Encoding.ASCII.GetBytes(responder(command));
@@ -204,7 +204,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Installs a byte responder for generic commands; use when the response is not plain ASCII text.</summary>
         /// <param name="responder">Maps the full command line to raw response bytes.</param>
-        public void RespondBytes(Func<string, byte[]> responder)
+        internal void RespondBytes(Func<string, byte[]> responder)
         {
             ArgumentNullException.ThrowIfNull(responder);
             _onCommand = responder;
@@ -215,7 +215,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// Does not listen on a network socket.
         /// </summary>
         /// <returns>A stream backed by in-memory pipes to this scripted peer.</returns>
-        public async Task<Stream> AcceptClientAsync()
+        internal async Task<Stream> AcceptClientAsync()
         {
             if (CompleteWithoutGreeting)
             {
@@ -466,7 +466,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <summary>Reads the next LF-terminated line from the pipe, stripping a trailing CR when present.</summary>
         /// <returns>Line bytes without the delimiter, or null when the pipe completes before a line feed.</returns>
-        public async Task<byte[]?> ReadLineAsync()
+        internal async Task<byte[]?> ReadLineAsync()
         {
             while (true)
             {

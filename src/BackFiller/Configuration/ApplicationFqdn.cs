@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Configuration
     internal static class ApplicationFqdn
     {
         /// <summary>Maximum DNS FQDN length.</summary>
-        public const int MaximumLength = 253;
+        internal const int MaximumLength = 253;
 
         /// <summary>
         /// Formats the host label <c>{prefix}{serverId:00}</c>.

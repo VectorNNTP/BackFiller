@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Articles.OverviewDb
     internal sealed class OverviewArticleV1
     {
         /// <summary>Current contract version encoded in every payload.</summary>
-        public const uint CurrentSchemaVersion = 1;
+        internal const uint CurrentSchemaVersion = 1;
 
         /// <summary>Gets or sets the schema version. Must be <see cref="CurrentSchemaVersion"/>.</summary>
         internal uint SchemaVersion { get; set; }

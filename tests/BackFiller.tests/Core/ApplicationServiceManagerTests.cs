@@ -134,7 +134,7 @@ namespace VectorNNTP.BackFiller.Tests.Core
             /// <summary>Creates a service with the given logical name and background execution task.</summary>
             /// <param name="name">Reported service name.</param>
             /// <param name="execution">Task whose completion or fault drives termination events.</param>
-            public MonitoredService(string name, Task execution)
+            internal MonitoredService(string name, Task execution)
             {
                 Name = name;
                 Execution = execution;
@@ -165,7 +165,7 @@ namespace VectorNNTP.BackFiller.Tests.Core
             /// <param name="name">Logical service name used in recorded markers.</param>
             /// <param name="order">Shared list mutated by start/stop.</param>
             /// <param name="startException">When set, thrown from <see cref="StartAsync"/> after recording start.</param>
-            public TrackingService(string name, List<string> order, Exception? startException = null)
+            internal TrackingService(string name, List<string> order, Exception? startException = null)
             {
                 Name = name;
                 _order = order;

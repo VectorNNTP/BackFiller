@@ -17,49 +17,49 @@ namespace VectorNNTP.BackFiller.Acme
     internal sealed class AcmeTransactionJournal
     {
         /// <summary>Current journal schema version.</summary>
-        public const int SchemaVersion = 1;
+        private const int SchemaVersion = 1;
 
         /// <summary>Transaction has started and has not finished.</summary>
-        public const string StatusInProgress = "in_progress";
+        private const string StatusInProgress = "in_progress";
 
         /// <summary>Issuance completed and a certificate was persisted.</summary>
-        public const string StatusSucceeded = "succeeded";
+        private const string StatusSucceeded = "succeeded";
 
         /// <summary>Issuance failed.</summary>
-        public const string StatusFailed = "failed";
+        private const string StatusFailed = "failed";
 
         /// <summary>A certificate request was recorded.</summary>
-        public const string EventCertificateRequestStarted = "certificate_request_started";
+        private const string EventCertificateRequestStarted = "certificate_request_started";
 
         /// <summary>A DNS-01 TXT record was created in Cloudflare.</summary>
-        public const string EventDnsChallengeCreated = "dns_challenge_created";
+        private const string EventDnsChallengeCreated = "dns_challenge_created";
 
         /// <summary>Authoritative resolvers reported the challenge TXT.</summary>
-        public const string EventDnsChallengePropagated = "dns_challenge_propagated";
+        private const string EventDnsChallengePropagated = "dns_challenge_propagated";
 
         /// <summary>ACME challenge validation was triggered.</summary>
-        public const string EventAcmeValidationStarted = "acme_validation_started";
+        private const string EventAcmeValidationStarted = "acme_validation_started";
 
         /// <summary>The ACME order reached the ready state.</summary>
-        public const string EventAcmeValidationSucceeded = "acme_validation_succeeded";
+        private const string EventAcmeValidationSucceeded = "acme_validation_succeeded";
 
         /// <summary>A DNS-01 TXT record was deleted.</summary>
-        public const string EventDnsChallengeRemoved = "dns_challenge_removed";
+        private const string EventDnsChallengeRemoved = "dns_challenge_removed";
 
         /// <summary>An orphaned DNS-01 TXT record was deleted during recovery.</summary>
-        public const string EventDnsChallengeRecoveredAndRemoved = "dns_challenge_recovered_and_removed";
+        private const string EventDnsChallengeRecoveredAndRemoved = "dns_challenge_recovered_and_removed";
 
         /// <summary>The issuer returned certificate material.</summary>
-        public const string EventCertificateIssued = "certificate_issued";
+        private const string EventCertificateIssued = "certificate_issued";
 
         /// <summary>Certificate bytes were written to a generation directory.</summary>
-        public const string EventCertificatePersisted = "certificate_persisted";
+        private const string EventCertificatePersisted = "certificate_persisted";
 
         /// <summary>The FQDN current pointer was switched to the new generation.</summary>
-        public const string EventCertificatePromoted = "certificate_promoted";
+        private const string EventCertificatePromoted = "certificate_promoted";
 
         /// <summary>Issuance failed.</summary>
-        public const string EventCertificateIssuanceFailed = "certificate_issuance_failed";
+        private const string EventCertificateIssuanceFailed = "certificate_issuance_failed";
 
         /// <summary>In-process lock per journal path so same-FQDN writers do not interleave before the file lock.</summary>
         private static readonly ConcurrentDictionary<string, object> FileGates = new(StringComparer.OrdinalIgnoreCase);
@@ -95,10 +95,10 @@ namespace VectorNNTP.BackFiller.Acme
         private string Fqdn => _fqdn;
 
         /// <summary>Path of <c>journal/{fqdn}.json</c> under the ACME state root.</summary>
-        internal string FilePath => _journalPath;
+        private string FilePath => _journalPath;
 
         /// <summary>Exclusive lock path <c>{FilePath}.lock</c> that serializes same-FQDN writers across processes.</summary>
-        internal string LockPath => _journalLockPath;
+        private string LockPath => _journalLockPath;
 
         /// <summary>Transaction id from the last <see cref="BeginTransaction"/> that has not completed; null when idle.</summary>
         internal string? ActiveTransactionId => _activeTransactionId;
@@ -386,7 +386,7 @@ namespace VectorNNTP.BackFiller.Acme
 
         /// <summary>Loads historical transactions for this FQDN only, oldest first.</summary>
         /// <returns>The persisted transactions, or an empty list when the file does not exist.</returns>
-        internal IReadOnlyList<AcmeJournalTransaction> LoadHistory()
+        private IReadOnlyList<AcmeJournalTransaction> LoadHistory()
         {
             return WithGate(() => LoadDocument().Transactions);
         }
@@ -395,7 +395,7 @@ namespace VectorNNTP.BackFiller.Acme
         /// Loads recovery events that could not be attached to an original transaction.
         /// </summary>
         /// <returns>Unattributed events in write order.</returns>
-        internal IReadOnlyList<AcmeJournalEvent> LoadUnattributedEvents()
+        private IReadOnlyList<AcmeJournalEvent> LoadUnattributedEvents()
         {
             return WithGate(() => LoadDocument().UnattributedEvents);
         }

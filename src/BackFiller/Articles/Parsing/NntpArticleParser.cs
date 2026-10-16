@@ -22,7 +22,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
     /// validates the body in place. Invalid yEnc is reported as <see cref="NntpArticleParseFailureCode.YEncDecodingFailed"/>.
     /// </para>
     /// </remarks>
-    public sealed class NntpArticleParser
+    internal sealed class NntpArticleParser
     {
         /// <summary>Maximum accepted Newsgroups value length.</summary>
         private const int MaxNewsgroupsLength = 4096;
@@ -60,7 +60,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// </summary>
         /// <param name="localIdentity">Local FQDN used for Path rewrite classification and canonical Path writes.</param>
         /// <param name="options">Parser guardrail options.</param>
-        internal NntpArticleParser(ReadOnlySpan<byte> localIdentity, NntpArticleParserOptions options)
+        private NntpArticleParser(ReadOnlySpan<byte> localIdentity, NntpArticleParserOptions options)
         {
             if (localIdentity.IsEmpty || IsAllAsciiWhitespace(localIdentity))
             {
@@ -75,7 +75,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// Initializes a new parser instance with default parser limits.
         /// </summary>
         /// <param name="localIdentity">Local FQDN used for Path rewrite classification and canonical Path writes.</param>
-        internal NntpArticleParser(ReadOnlySpan<byte> localIdentity)
+        private NntpArticleParser(ReadOnlySpan<byte> localIdentity)
             : this(localIdentity, NntpArticleParserOptions.Default)
         {
         }
@@ -85,7 +85,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// </summary>
         /// <param name="localIdentity">Local FQDN used for Path rewrite classification and canonical Path writes.</param>
         /// <param name="options">Parser guardrail options.</param>
-        internal NntpArticleParser(string localIdentity, NntpArticleParserOptions options)
+        private NntpArticleParser(string localIdentity, NntpArticleParserOptions options)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(localIdentity);
             _localIdentity = Encoding.ASCII.GetBytes(localIdentity.Trim());
@@ -96,7 +96,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
         /// Initializes a new parser instance from an ASCII local identity string and default limits.
         /// </summary>
         /// <param name="localIdentity">Local FQDN used for Path rewrite classification and canonical Path writes.</param>
-        public NntpArticleParser(string localIdentity)
+        internal NntpArticleParser(string localIdentity)
             : this(localIdentity, NntpArticleParserOptions.Default)
         {
         }
@@ -566,7 +566,7 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
             /// <param name="headers">Inline or previously rented header span.</param>
             /// <param name="count">Live header count.</param>
             /// <param name="rented">Rented buffer, or null while the inline span is in use.</param>
-            public HeaderAssembly(Span<NntpArticleHeaderEntry> headers, int count, NntpArticleHeaderEntry[]? rented)
+            internal HeaderAssembly(Span<NntpArticleHeaderEntry> headers, int count, NntpArticleHeaderEntry[]? rented)
             {
                 Headers = headers;
                 Count = count;
@@ -574,13 +574,13 @@ namespace VectorNNTP.BackFiller.Articles.Parsing
             }
 
             /// <summary>Current header span. Replaced when a larger buffer is rented.</summary>
-            public Span<NntpArticleHeaderEntry> Headers;
+            internal Span<NntpArticleHeaderEntry> Headers;
 
             /// <summary>Live header count.</summary>
-            public int Count;
+            internal int Count;
 
             /// <summary>Rented buffer. Null while the inline span is in use.</summary>
-            public NntpArticleHeaderEntry[]? Rented;
+            internal NntpArticleHeaderEntry[]? Rented;
         }
 
         /// <summary>

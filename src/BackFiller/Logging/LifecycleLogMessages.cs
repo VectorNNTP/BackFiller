@@ -8,13 +8,13 @@ namespace VectorNNTP.BackFiller.Logging
     internal static class NntpdLogCategories
     {
         /// <summary>Category for application lifecycle transitions.</summary>
-        public const string Lifecycle = "VectorNNTP.NNTPD.Lifecycle";
+        private const string Lifecycle = "VectorNNTP.NNTPD.Lifecycle";
 
         /// <summary>Category for application service manager events.</summary>
-        public const string Services = "VectorNNTP.NNTPD.Services";
+        private const string Services = "VectorNNTP.NNTPD.Services";
 
         /// <summary>Category for host integration events.</summary>
-        public const string Hosting = "VectorNNTP.NNTPD.Hosting";
+        private const string Hosting = "VectorNNTP.NNTPD.Hosting";
     }
 
     /// <summary>

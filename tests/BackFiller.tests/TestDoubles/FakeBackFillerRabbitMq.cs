@@ -12,10 +12,10 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private int _attemptCount;
 
         /// <summary>Successful connects after configured failures are exhausted.</summary>
-        public int ConnectCount => Volatile.Read(ref _connectCount);
+        internal int ConnectCount => Volatile.Read(ref _connectCount);
 
         /// <summary>Every connect attempt, including those that throw before creating a connection.</summary>
-        public int AttemptCount => Volatile.Read(ref _attemptCount);
+        internal int AttemptCount => Volatile.Read(ref _attemptCount);
 
         /// <summary>Most recently created fake connection from a successful connect.</summary>
         public FakeBackFillerRabbitMqConnection? LastConnection { get; private set; }
@@ -118,7 +118,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <param name="port">Broker port recorded for assertions.</param>
         /// <param name="virtualHost">Virtual host recorded for assertions.</param>
         /// <param name="clientProvidedName">Client-provided connection name.</param>
-        public FakeBackFillerRabbitMqConnection(string host, int port, string virtualHost, string clientProvidedName)
+        internal FakeBackFillerRabbitMqConnection(string host, int port, string virtualHost, string clientProvidedName)
         {
             Host = host;
             Port = port;
@@ -275,7 +275,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <param name="replyCode">Reported reply code on the lost event.</param>
         /// <param name="replyText">Reported reply text on the lost event.</param>
         /// <param name="initiator">Reported initiator label on the lost event.</param>
-        public void SimulateLost(
+        internal void SimulateLost(
             ushort replyCode = 320,
             string replyText = "connection lost",
             string initiator = "Peer")
@@ -390,7 +390,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private int _maxNackInFlight;
 
         /// <summary>Peak concurrent gated nack operations observed while <see cref="NackGate"/> is configured.</summary>
-        public int MaxNackInFlight => Volatile.Read(ref _maxNackInFlight);
+        internal int MaxNackInFlight => Volatile.Read(ref _maxNackInFlight);
 
         /// <summary>Signaled when an ack enters the broker-op section, before waiting on <see cref="AckGate"/>.</summary>
         public TaskCompletionSource? AckStarted { get; set; }
@@ -633,7 +633,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         private int _maxBrokerOps;
 
         /// <summary>Peak concurrent ack/nack operations inside the broker-op gate on this channel.</summary>
-        public int MaxBrokerOpsInFlight => Volatile.Read(ref _maxBrokerOps);
+        internal int MaxBrokerOpsInFlight => Volatile.Read(ref _maxBrokerOps);
 
         /// <summary>Increments in-flight broker settlement depth and updates <see cref="MaxBrokerOpsInFlight"/>.</summary>
         private void EnterBrokerOp()
@@ -653,7 +653,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// <summary>Invokes the consumer callback registered by the last successful consume; does not read from a broker queue.</summary>
         /// <param name="delivery">Delivery passed through to the registered handler.</param>
         /// <returns>The handler task, or throws when no consumer was registered.</returns>
-        public Task DeliverAsync(RabbitMqManualAckDelivery delivery)
+        internal Task DeliverAsync(RabbitMqManualAckDelivery delivery)
         {
             if (_onDelivery is null)
             {

@@ -679,7 +679,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             public ArticleWorkResponsePublisher Publisher { get; }
 
             /// <summary>Current fake publish channel (throws if publisher channel is not the fake).</summary>
-            public FakeBackFillerRabbitMqPublishChannel PublishChannel =>
+            internal FakeBackFillerRabbitMqPublishChannel PublishChannel =>
                 Assert.IsType<FakeBackFillerRabbitMqPublishChannel>(Publisher.Channel);
 
             /// <summary>
@@ -688,7 +688,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="behavior">Simulated publisher confirm outcome.</param>
             /// <param name="logger">Optional logger for publication diagnostics.</param>
             /// <returns>Disposable publication test context.</returns>
-            public static async Task<PublicationContext> StartAsync(
+            internal static async Task<PublicationContext> StartAsync(
                 FakePublishConfirmBehavior behavior,
                 ILogger<ArticleWorkResponsePublisher>? logger = null)
             {

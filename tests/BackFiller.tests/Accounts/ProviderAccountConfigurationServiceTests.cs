@@ -686,7 +686,7 @@ namespace VectorNNTP.BackFiller.Tests.Accounts
             /// <param name="shared">Shared configuration source stub.</param>
             /// <param name="acme">ACME options snapshot.</param>
             /// <param name="rabbit">RabbitMQ options snapshot.</param>
-            public ServiceHarness(
+            internal ServiceHarness(
                 ProviderAccountConfigurationService service,
                 ProviderConfigurationCatalog catalog,
                 NntpProviderRegistry registry,

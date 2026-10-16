@@ -3,7 +3,7 @@ namespace VectorNNTP.BackFiller.Articles
     /// <summary>
     /// Minimal parse/validation state for an <see cref="ArticleRecord"/>.
     /// </summary>
-    public enum ArticleParseStatus : byte
+    internal enum ArticleParseStatus : byte
     {
         /// <summary>This record has not undergone the canonical Vector parse pipeline.</summary>
         None = 0,

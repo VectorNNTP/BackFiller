@@ -900,7 +900,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <summary>Delivers one canonical article-work payload on <see cref="Channel"/>.</summary>
             /// <param name="deliveryTag">Broker delivery tag the settlement assertions use.</param>
             /// <returns>The consume task.</returns>
-            public Task Deliver(ulong deliveryTag) =>
+            internal Task Deliver(ulong deliveryTag) =>
                 Channel.DeliverAsync(ArticleWorkTestDeliveries.Canonical(deliveryTag));
 
             /// <summary>Starts a session that records successful publishes, with a 30-second grace and the given flags.</summary>
@@ -908,7 +908,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="drainQueued">Captured drain-queued flag.</param>
             /// <param name="finishActive">Captured finish-active flag.</param>
             /// <param name="prefetch">Session prefetch. Default 1.</param>
-            public static Task<ShutdownContext> StartAsync(
+            internal static Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 bool drainQueued,
                 bool finishActive,
@@ -925,7 +925,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="drainQueued">Captured drain-queued flag.</param>
             /// <param name="finishActive">Captured finish-active flag.</param>
             /// <param name="connections">Existing broker service. Null creates and owns one.</param>
-            public static Task<ShutdownContext> StartAsync(
+            internal static Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 IArticleWorkResponsePublisher publisher,
                 bool drainQueued,
@@ -945,7 +945,7 @@ namespace VectorNNTP.BackFiller.Tests.ArticleWork
             /// <param name="prefetch">Session prefetch.</param>
             /// <param name="connections">Existing broker service. Null creates and owns one.</param>
             /// <returns>A started context.</returns>
-            public static async Task<ShutdownContext> StartAsync(
+            internal static async Task<ShutdownContext> StartAsync(
                 IArticleWorkHandler handler,
                 IArticleWorkResponsePublisher publisher,
                 BackFillerShutdownRuntimeOptions shutdown,

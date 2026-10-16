@@ -27,7 +27,7 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         public Exception? PublishException { get; set; }
 
         /// <summary>Captured intents in publish order (thread-safe snapshot).</summary>
-        public IReadOnlyList<ArticleWorkResponseIntent> Published
+        internal IReadOnlyList<ArticleWorkResponseIntent> Published
         {
             get
             {

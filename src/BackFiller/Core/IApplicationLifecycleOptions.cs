@@ -4,7 +4,7 @@ namespace VectorNNTP.BackFiller.Core
     /// Lifecycle and graceful-shutdown knobs shared by hosts that use
     /// <see cref="ApplicationLifecycle"/> / <see cref="VectorNNTP.BackFiller.Core.ApplicationServiceManager"/>.
     /// </summary>
-    public interface IApplicationLifecycleOptions
+    internal interface IApplicationLifecycleOptions
     {
         /// <summary>Gets the application display name used in lifecycle logs.</summary>
         string ApplicationName { get; }

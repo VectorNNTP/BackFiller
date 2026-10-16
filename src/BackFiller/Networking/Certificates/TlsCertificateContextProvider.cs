@@ -11,7 +11,7 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
     /// Rotation and provider disposal do not invalidate already-acquired leases. A lease does not guarantee
     /// that the X.509 certificate remains within its <c>NotAfter</c> validity window.
     /// </remarks>
-    public interface ITlsCertificateContextProvider
+    internal interface ITlsCertificateContextProvider
     {
         /// <summary>Gets whether a certificate context is currently published.</summary>
         bool IsAvailable { get; }
@@ -52,7 +52,7 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
     /// lifetime only; it does not keep an X.509 certificate cryptographically valid past <c>NotAfter</c>.
     /// </para>
     /// </remarks>
-    public sealed class TlsCertificateLease : IDisposable
+    internal sealed class TlsCertificateLease : IDisposable
     {
         /// <summary>Holder this lease references. Cleared on <see cref="Dispose"/> so a second dispose is a no-op.</summary>
         private TlsCertificateHolder? _holder;
@@ -71,19 +71,19 @@ namespace VectorNNTP.BackFiller.Networking.Certificates
             (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).Context;
 
         /// <summary>Gets the holder generation (tests).</summary>
-        internal int Generation =>
+        private int Generation =>
             (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).Generation;
 
         /// <summary>Gets whether the underlying holder has been disposed (tests).</summary>
-        internal bool HolderIsDisposed =>
+        private bool HolderIsDisposed =>
             (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).IsDisposed;
 
         /// <summary>Gets how many times the holder committed disposal (tests).</summary>
-        internal int HolderDisposeCount =>
+        private int HolderDisposeCount =>
             (_holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease))).DisposeCount;
 
         /// <summary>Gets the leased holder for lifetime tests.</summary>
-        internal TlsCertificateHolder Holder =>
+        private TlsCertificateHolder Holder =>
             _holder ?? throw new ObjectDisposedException(nameof(TlsCertificateLease));
 
         /// <summary>

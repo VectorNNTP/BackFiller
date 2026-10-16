@@ -35,7 +35,7 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>Maximum concurrent connect-to-Ready establishments allowed process-wide.</summary>
-        internal int MaxConcurrentEstablishments { get; }
+        private int MaxConcurrentEstablishments { get; }
 
         /// <summary>
         /// Waits for an establishment permit. Cancellation does not consume a permit.

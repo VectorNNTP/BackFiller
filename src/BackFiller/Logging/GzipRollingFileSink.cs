@@ -16,7 +16,7 @@ namespace VectorNNTP.BackFiller.Logging
     /// When the interval rolls, this sink closes the active file, compresses that path, then opens the next file.
     /// The active path is never compressed or deleted. One lock covers roll, compression, and retention.
     /// </remarks>
-    public sealed class GzipRollingFileSink : ILogEventSink, IFlushableFileSink, IDisposable, ISetLoggingFailureListener
+    internal sealed class GzipRollingFileSink : ILogEventSink, IFlushableFileSink, IDisposable, ISetLoggingFailureListener
     {
         /// <summary>Serializes roll, compression, retention, emit, and dispose. Callers outside this lock are not synchronized.</summary>
         private readonly object _sync = new();
@@ -102,7 +102,7 @@ namespace VectorNNTP.BackFiller.Logging
         /// Exceptions are logged and do not skip compression.
         /// </param>
         /// <param name="timeProvider">Clock for roll checkpoints. Defaults to <see cref="TimeProvider.System"/>.</param>
-        public GzipRollingFileSink(
+        internal GzipRollingFileSink(
             string path,
             ITextFormatter textFormatter,
             long? fileSizeLimitBytes,
@@ -515,13 +515,13 @@ namespace VectorNNTP.BackFiller.Logging
         private sealed class Slot(string period, int sequence)
         {
             /// <summary>Period token used to rank newer files first.</summary>
-            public string Period { get; } = period;
+            internal string Period { get; } = period;
 
             /// <summary>Sequence used to rank files inside one period. <c>-1</c> is the unsequenced file.</summary>
-            public int Sequence { get; } = sequence;
+            internal int Sequence { get; } = sequence;
 
             /// <summary>Paths in this slot. A log and its gzip archive share one slot.</summary>
-            public List<string> Paths { get; } = [];
+            internal List<string> Paths { get; } = [];
         }
     }
 }

@@ -818,7 +818,7 @@ namespace VectorNNTP.BackFiller.Tests.Logging
             private readonly List<LogEvent> _events = [];
 
             /// <summary>Events captured in emission order.</summary>
-            public IReadOnlyList<LogEvent> Events => _events;
+            internal IReadOnlyList<LogEvent> Events => _events;
 
             /// <inheritdoc />
             public void Emit(LogEvent logEvent)

@@ -10,7 +10,7 @@ namespace VectorNNTP.BackFiller.Dns
     internal static class DnsNameCodec
     {
         /// <summary>Maximum compression-pointer hops before treating a name as malformed.</summary>
-        public const int MaxPointerHops = 128;
+        private const int MaxPointerHops = 128;
 
         /// <summary>Maximum expanded wire name length in bytes per RFC 1035.</summary>
         private const int MaxExpandedNameLengthBytes = 255;

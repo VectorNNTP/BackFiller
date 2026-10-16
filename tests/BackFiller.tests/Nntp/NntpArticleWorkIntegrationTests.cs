@@ -342,7 +342,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// Creates ArticleRetentionAuthority with the requested byte capacity for integration tests.
         /// </summary>
 
-        internal static ArticleRetentionAuthority CreateRetention(int maxBytes) =>
+        private static ArticleRetentionAuthority CreateRetention(int maxBytes) =>
             new(
                 new BackFiller.Configuration.BackFillerArticleRetentionRuntimeOptions(
                     maxBytes,
