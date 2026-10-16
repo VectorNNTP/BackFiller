@@ -1,20 +1,54 @@
 #!/usr/bin/env python3
 """Live Article Work RPC test against a running BackFiller.
 
-Connects to the existing TLS NNTP listener, publishes one Article Work v1
-request, and issues ``ARTICLE <message-id>`` on that same NNTP connection.
-It does not start, stop, or reconfigure the server, and it does not declare,
-purge, or delete the ``backfiller.{backbone}`` topology.
+Publishes one Article Work v1 request to a BackFiller process that is already
+running, then reads that article back with ``ARTICLE <message-id>`` on the
+same TLS NNTP connection. The tool checks that the listener greeting, the
+Success RPC body, the ``220`` article response, the destuffed article, the
+Message-ID, and the RPC listener metadata agree with this process's inputs.
 
-The reply queue is armed before the NNTP greeting so the one-second response
-TTL cannot expire before this process is listening. The request itself is
-published only after the greeting has been validated, and it is published
-once.
+It does not start, stop, or reconfigure BackFiller, and it does not post an
+article. It does not declare, bind, purge, or delete ``backfiller.{backbone}``.
+The running consumer is expected to retrieve the article from the upstream
+provider, retain it, and publish the RPC response. ``ARTICLE`` is served from
+that retention. There is no cleartext NNTP path in this script.
 
-Usage and environment variables are in ``tools/live_article_work_rpc.md``.
-Run ``python tools/live_article_work_rpc.py --help`` for the flags.
-``--self-test`` checks this script's framing and schema helpers locally and
-does not open a socket.
+Sequence:
+
+1. Open AMQP, enable publisher confirms, and declare an exclusive auto-delete
+   reply queue. This broker setup finishes before the NNTP session exists, so
+   it is not inside the listener's idle command-read window.
+2. Connect with TLS 1.2 or newer and require the exact greeting.
+3. After the greeting, register the reply consumer and then publish once.
+   The one-second AMQP expiration starts at publish, so the consumer is
+   subscribed first. The publish is mandatory: a missing binding fails the
+   publish instead of waiting out ``--rpc-timeout``.
+4. Wait for the response whose AMQP correlation id matches. Mismatched
+   correlation ids are counted and ignored.
+5. Send ``ARTICLE`` on that NNTP connection, destuff the multiline body, and
+   check framing, the Message-ID header, ``articleId``, and listener metadata.
+6. Send ``QUIT`` only when the greeting was valid and ``ARTICLE`` either never
+   started or ran through the terminator. Both connections are always closed.
+
+Python 3.11 or newer and the ``pika`` package are required. ``blake3`` is
+optional and is used only to recompute ``articleId`` from the Message-ID
+octets. Flags, environment variables, and sample commands are in
+``tools/live_article_work_rpc.md``. ``python tools/live_article_work_rpc.py
+--help`` lists the flags. ``--self-test`` checks framing, schema, redaction,
+and configuration precedence in-process and does not open a socket.
+
+Exit ``0`` is a passing live run or self-test. Exit ``1`` is a failed live
+assertion, an unexpected client error, or a failed self-test. Exit ``2`` is
+invalid configuration or a missing ``pika`` install. Progress and the final
+``Result:`` line go to stdout. Passwords, usernames, and AMQP URLs are not
+printed; unexpected error text is redacted.
+
+One request is published and ``ARTICLE`` is not retried. ProviderFailure,
+Cancelled, UnexpectedFailure, and RetentionRejected are not published by
+BackFiller, so those cases surface here as an RPC timeout. The 1024-byte
+request cap is this script's copy of the repository default
+``WorkRequestMaxPayloadBytes``; the running server's configured cap is not
+read.
 """
 
 from __future__ import annotations
@@ -36,12 +70,20 @@ from dataclasses import dataclass
 # Article Work v1. Property names match ArticleWorkRequestParser and
 # ArticleWorkResponseWireProtocol. AMQP CorrelationId and ReplyTo are properties,
 # not JSON fields. The RequestId header is required to match JSON requestId when
-# the header is present.
+# the header is present. CorrelationId is a second UUID, distinct from requestId,
+# and is the only value used to match the RPC response.
 PROTOCOL_VERSION = 1
 JSON_CONTENT_TYPE = "application/json"
+# AMQP expiration is a string millisecond count. Both the request and the
+# accepted response use this value. It is not the RPC wait.
 REQUEST_EXPIRATION_MILLISECONDS = "1000"
+# Local reject threshold. Matches the repository default of
+# RabbitMQ:WorkRequestMaxPayloadBytes. Oversized bodies are not published.
 WORK_REQUEST_MAX_PAYLOAD_BYTES = 1024
 TOPOLOGY_PREFIX = "backfiller"
+# Operator labels documented for backfiller.{backbone}. build_config does not
+# consult this tuple; any 1–64 character token from the backbone alphabet is
+# accepted and lower-cased only in the exchange name.
 PROVIDER_BACKBONES = (
     "Abavia",
     "Altopia",
@@ -57,37 +99,61 @@ PROVIDER_BACKBONES = (
     "UsenetNode1",
 )
 
+# Exact listener greeting, including CRLF. Any other first line fails the run.
 GREETING = b"201 NNTP Service Ready, posting prohibited\r\n"
+# Suffix of the success status ``220 0 <message-id> article follows``.
 ARTICLE_FOLLOWS_SUFFIX = b" article follows\r\n"
+# Multiline end marker: one dot and CRLF. A content dot is two dots plus CRLF on the wire.
 TERMINATOR = b".\r\n"
 QUIT_COMMAND = b"QUIT\r\n"
+# Listener command limit. Status reads allow 510 octets before CRLF so the
+# stored line, including CRLF, is at most this many octets.
 MAX_STATUS_LINE_OCTETS = 512
 # Retained lines are at most 1024 octets. The listener adds at most one header
 # stuffing dot, and body lines are already stuffed once, so a wire line can be
 # one octet longer than the retained line.
 MAX_WIRE_LINE_CONTENT = 1025
+# Cap on wire bytes of the multiline ARTICLE body, including every content line and the terminator.
 DEFAULT_MAX_ARTICLE_BYTES = 64 * 1024 * 1024
+# Wait for the matching RPC response after publish. Aligned with RabbitMQ:RpcTimeoutSeconds.
 DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
+# TCP connect and TLS handshake budget. Also the discrete AMQP socket and blocked-connection budget.
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 30.0
+# Per-read and per-write socket timeout after the NNTP TLS handshake.
+# Aligned with BackFiller:Listener:IoProgressTimeoutSeconds.
 DEFAULT_NNTP_TIMEOUT_SECONDS = 60.0
 DEFAULT_RABBITMQ_PORT = 5672
 DEFAULT_RABBITMQ_VHOST = "/"
+# AMQP client property. Not a queue or exchange name.
 CONNECTION_NAME = "backfiller-live-article-work-rpc"
 
+# RFC 5536 atext. Used only to accept or reject the Message-ID local-part and domain.
 ATEXT = frozenset(
     b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~"
 )
+# Matches the userinfo of an amqp or amqps URL so redact() can drop it.
 _SECRET_URL = re.compile(r"(?i)(amqps?://)[^/\s]+@")
+# Backbone alphabet enforced by build_config. Not the PROVIDER_BACKBONES membership test.
 _BACKBONE_TOKEN = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+# Success articleId shape: 64 lowercase hex digits. The BLAKE3 comparison is separate.
 _ARTICLE_ID_HEX = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class ConfigError(Exception):
-    """Raised when arguments or environment variables are unusable."""
+    """Raised when arguments or environment variables are unusable.
+
+    ``main`` prints the message and exits 2. Self-test expects these messages
+    and does not treat them as a live failure.
+    """
 
 
 class TestFailure(Exception):
-    """One failed live assertion. ``category`` is the operator-facing class."""
+    """One failed live assertion. ``category`` is the operator-facing class.
+
+    Categories are stable text printed after ``Failure:``. Measurements already
+    collected stay on the exception so a later failure still reports them.
+    ``detail`` is safe to print: callers redact secrets before constructing it.
+    """
 
     def __init__(
         self,
@@ -108,7 +174,13 @@ class TestFailure(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    """Resolved settings. String fields that hold secrets are never formatted."""
+    """Resolved settings. String fields that hold secrets are never formatted.
+
+    ``amqp_url`` and the discrete RabbitMQ fields are mutually exclusive.
+    When ``amqp_url`` is set, host, port, vhost, user, password, TLS, and CA
+    keep their placeholders and are not read from the environment. ``message_id``
+    is the RFC 5536 value including the angle brackets.
+    """
 
     nntp_host: str
     nntp_port: int
@@ -132,6 +204,11 @@ class Config:
     max_article_bytes: int
 
     def secrets(self) -> list[str]:
+        """Return credential strings that ``redact`` must strip from error text.
+
+        Empty values are omitted. The AMQP URL is included whole because it
+        embeds the username and password.
+        """
         values: list[str] = []
         for secret in (self.rabbit_password, self.rabbit_user, self.amqp_url):
             if secret:
@@ -140,12 +217,22 @@ class Config:
 
     @property
     def exchange(self) -> str:
+        """Return ``backfiller.{backbone}`` with the backbone lower-cased.
+
+        The same string is the fanout exchange name and the publish routing key.
+        The script does not declare that exchange.
+        """
         return f"{TOPOLOGY_PREFIX}.{self.backbone.lower()}"
 
 
 @dataclass(frozen=True)
 class RpcSuccess:
-    """Schema-valid Article Work success body."""
+    """Schema-valid Article Work success body.
+
+    ``message_id`` and ``backbone`` are the response spellings. ``article_id``
+    has already matched 64 lowercase hex digits. ``fqdn`` has already matched
+    the canonical listener-name rules.
+    """
 
     request_id: uuid.UUID
     message_id: str
@@ -156,7 +243,11 @@ class RpcSuccess:
 
 
 class NntpIoError(Exception):
-    """Socket failure while reading an NNTP line. ``kind`` is timeout, disconnect, or framing."""
+    """Socket failure while reading or writing NNTP. ``kind`` selects the failure class.
+
+    ``timeout`` and ``disconnect`` become an ARTICLE or greeting failure.
+    ``framing`` becomes incomplete article framing once ``ARTICLE`` has started.
+    """
 
     def __init__(self, kind: str, detail: str) -> None:
         super().__init__(detail)
@@ -165,7 +256,16 @@ class NntpIoError(Exception):
 
 
 class NntpSession:
-    """One TLS NNTP session. Buffered reads accept partial and coalesced TCP segments."""
+    """One TLS NNTP session. Buffered reads accept partial and coalesced TCP segments.
+
+    ``greeting_ok`` gates ``QUIT``. ``article_started`` is set before the ARTICLE
+    write and ``article_complete`` only after the terminator is consumed. A
+    session that died mid-article is closed without ``QUIT`` so this process
+    does not write another command into a multiline response.
+
+    ``_max_line_content`` is the maximum number of octets before CRLF. Callers
+    lower it for status lines and raise it for article lines.
+    """
 
     def __init__(self, sock: socket.socket, max_line_content: int) -> None:
         self._sock = sock
@@ -176,7 +276,13 @@ class NntpSession:
         self.article_complete = False
 
     def read_line(self) -> bytes:
-        """Return one CRLF-terminated line, including the CRLF."""
+        """Return one CRLF-terminated line, including the CRLF.
+
+        Raises ``NntpIoError`` with kind ``framing`` when the octets before
+        CRLF exceed ``_max_line_content``, and ``timeout`` or ``disconnect``
+        when the socket does. A trailing CR is not itself an overlong line:
+        one extra buffered octet is allowed while the LF is still missing.
+        """
         limit = self._max_line_content
         while True:
             crlf = self._buffer.find(b"\r\n")
@@ -187,6 +293,7 @@ class NntpSession:
                 line = bytes(self._buffer[:end])
                 del self._buffer[:end]
                 return line
+            # A CR that has not yet been followed by LF occupies one octet past the content limit.
             if len(self._buffer) > limit + 1:
                 raise NntpIoError("framing", "NNTP line exceeded the maximum length.")
             self._fill()
@@ -194,9 +301,14 @@ class NntpSession:
     def read_multiline(self, max_wire_bytes: int) -> bytes:
         """Read a multiline block, undo one stuffing dot per content line, and drop the terminator.
 
-        A wire line of ``.\\r\\n`` is content that destuffs to ``.\\r\\n``. Only a line whose
-        first octet is ``.`` and whose remaining octets are exactly ``\\r\\n`` ends the block.
-        Line endings are preserved. The returned bytes do not include the terminator.
+        Every content line that begins with a dot loses that one octet. The
+        terminator is the line that is exactly one dot followed by CRLF; it is
+        not destuffed and is not part of the returned bytes. Content-line
+        endings are preserved. ``max_wire_bytes`` counts octets as read from
+        the socket, including the terminator.
+
+        Raises ``NntpIoError`` with kind ``framing`` when the running wire
+        size exceeds ``max_wire_bytes``.
         """
         article = bytearray()
         wire = 0
@@ -215,6 +327,11 @@ class NntpSession:
             article.extend(line)
 
     def send(self, payload: bytes) -> None:
+        """Write ``payload`` until the socket accepts all of it.
+
+        A short ``send`` is retried. ``TimeoutError`` and ``OSError`` become
+        ``NntpIoError``; a non-positive write count is treated as a disconnect.
+        """
         view = memoryview(payload)
         sent = 0
         while sent < len(view):
@@ -229,11 +346,21 @@ class NntpSession:
             sent += wrote
 
     def close(self) -> None:
+        """Close the socket. An already-closed socket is ignored.
+
+        Other exceptions propagate. The self-test relies on that split.
+        """
         # Closing an already-closed socket raises OSError. That must not fail the test.
         with contextlib.suppress(OSError):
             self._sock.close()
 
     def _fill(self) -> None:
+        """Append one socket read to the line buffer.
+
+        An empty read with buffered octets is a disconnect before CRLF. An
+        empty read with an empty buffer is a clean disconnect. The 65536-octet
+        read size is only a socket chunk; lines are still delimited by CRLF.
+        """
         try:
             chunk = self._sock.recv(65536)
         except TimeoutError as exc:
@@ -248,6 +375,12 @@ class NntpSession:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and run either the self-test or the live sequence.
+
+    ``argv`` defaults to the process arguments. Returns the process exit status
+    described on the module: 0 pass, 1 live or unexpected failure, 2 configuration
+    or a missing ``pika`` install. The self-test does not build a live config.
+    """
     args = parse_args(argv)
     if args.self_test:
         return run_self_test()
@@ -286,6 +419,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Parse CLI flags. Environment defaults are applied later by ``build_config``.
+
+    Most string flags store the environment value as their argparse default.
+    Broker identity flags default to ``None`` so an omitted flag can still be
+    distinguished from an explicit empty string. Boolean flags use
+    ``BooleanOptionalAction`` with default ``None``: ``None`` means omitted,
+    and ``build_config`` then reads the environment variable.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Live test: TLS NNTP greeting, one Article Work v1 RabbitMQ RPC, "
@@ -361,13 +502,18 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _blank_to_none(value: object) -> str | None:
+    """Return a stripped non-empty string, or ``None`` for any other value."""
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
 def _flag_or_env_bool(flag: object, env_name: str, default: bool) -> bool:
-    """Use an explicit CLI bool. None means the flag was omitted, so the env var or default applies."""
+    """Use an explicit CLI bool. None means the flag was omitted, so the env var or default applies.
+
+    An explicit ``--flag`` or ``--no-flag`` wins over the environment. An empty
+    environment variable is treated as unset and yields ``default``.
+    """
     if isinstance(flag, bool):
         return flag
     raw = os.environ.get(env_name)
@@ -377,6 +523,7 @@ def _flag_or_env_bool(flag: object, env_name: str, default: bool) -> bool:
 
 
 def _first_text(flag: object, env_name: str) -> str | None:
+    """Return the stripped CLI string, otherwise the stripped environment string."""
     text = _blank_to_none(flag)
     if text is not None:
         return text
@@ -384,6 +531,16 @@ def _first_text(flag: object, env_name: str) -> str | None:
 
 
 def build_config(args: argparse.Namespace) -> Config:
+    """Resolve CLI and environment into one ``Config``.
+
+    Raises ``ConfigError`` for a missing required value, a bad port or timeout,
+    a missing CA file, an illegal backbone or Message-ID, or both ``--amqp-url``
+    and ``--rabbitmq-host``. An explicit host flag discards ``BACKFILLER_AMQP_URL``.
+    In URL mode the discrete broker fields are not validated, including a CA
+    path that does not exist.
+
+    The RabbitMQ password is not stripped: only ``None`` and ``""`` are rejected.
+    """
     nntp_host = _required_text(args.nntp_host, "NNTP host (--nntp-host or NNTP_HOST)")
     nntp_port = _port(args.nntp_port, "NNTP port")
     backbone = _required_text(args.backbone, "backbone (--backbone or BACKFILLER_BACKBONE)")
@@ -460,7 +617,14 @@ def build_config(args: argparse.Namespace) -> Config:
 
 
 def run_live(config: Config) -> None:
-    """Execute the live sequence. Raises ``TestFailure`` for an assertion miss."""
+    """Execute the live sequence. Raises ``TestFailure`` for an assertion miss.
+
+    RabbitMQ is connected first. The NNTP greeting is required before publish.
+    On the way out, ``QUIT`` is sent only after a valid greeting when the
+    article command never started or completed. Unexpected exceptions are
+    redacted and re-raised as ``TestFailure`` with category
+    ``unexpected client error``, preserving any elapsed measurements already taken.
+    """
     rabbit: RabbitSession | None = None
     nntp: NntpSession | None = None
     rpc_elapsed: float | None = None
@@ -519,6 +683,19 @@ def run_live(config: Config) -> None:
 
 
 def connect_nntp(config: Config) -> NntpSession:
+    """Open one TLS client connection and wrap it in ``NntpSession``.
+
+    The handshake allows TLS 1.2 and newer and sends no client certificate.
+    Certificate and hostname checks run unless ``insecure_tls`` is set. A CA
+    file replaces the default trust store; without one, the platform store is
+    used. SNI is ``tls_server_name`` or the NNTP host, except an IP server name
+    combined with insecure TLS, which passes no hostname.
+
+    TCP ``NODELAY`` is set before the handshake. After the handshake the socket
+    timeout becomes ``nntp_timeout``. A failed handshake closes the TCP socket.
+    Connection and TLS failures are ``TestFailure`` with category
+    ``NNTP connection/greeting failure``.
+    """
     server_name = config.tls_server_name or config.nntp_host
     try:
         raw = socket.create_connection((config.nntp_host, config.nntp_port), timeout=config.connect_timeout)
@@ -553,6 +730,11 @@ def connect_nntp(config: Config) -> NntpSession:
 
 
 def read_greeting(session: NntpSession) -> None:
+    """Require the first line to be exactly ``GREETING``.
+
+    The status-line limit is installed only for this read and restored to the
+    article wire-line limit afterwards, including when the read fails.
+    """
     session._max_line_content = MAX_STATUS_LINE_OCTETS - 2
     try:
         line = session.read_line()
@@ -568,6 +750,17 @@ def read_greeting(session: NntpSession) -> None:
 
 
 def retrieve_article(session: NntpSession, config: Config) -> tuple[bytes, float]:
+    """Send ``ARTICLE`` and return the destuffed body plus elapsed seconds.
+
+    The clock starts immediately before the write and stops after the
+    terminator has been read. Validation of the body is separate. The status
+    line must be exactly ``220 0``, the requested Message-ID, and
+    ``article follows``. A framing error on the status line is incomplete
+    framing; a timeout or disconnect there is an ARTICLE failure. Only that
+    status-line failure appends the idle-session hint, and only when
+    ``rpc_timeout`` exceeds the default NNTP read budget. A framing error in
+    the multiline body does not get that hint.
+    """
     command = b"ARTICLE " + config.message_id + b"\r\n"
     if len(command) > MAX_STATUS_LINE_OCTETS:
         raise TestFailure(
@@ -609,6 +802,13 @@ def retrieve_article(session: NntpSession, config: Config) -> tuple[bytes, float
 
 
 def validate_article(article: bytes, config: Config, success: RpcSuccess) -> None:
+    """Reject an empty, NUL-bearing, or non-CRLF article, then require one Message-ID.
+
+    The body must contain a CRLF CRLF header separator and exactly one
+    single-line ``Message-ID`` header whose value equals both the requested
+    Message-ID and the RPC ``messageId``. Folded Message-ID headers fail.
+    The RPC ``articleId`` is not checked here.
+    """
     if not article:
         raise TestFailure("Incomplete or malformed article framing", "ARTICLE body was empty.")
     if b"\x00" in article:
@@ -635,6 +835,13 @@ def validate_article(article: bytes, config: Config, success: RpcSuccess) -> Non
 
 
 def _report_article_id(config: Config, success: RpcSuccess) -> None:
+    """Print the articleId check. Recompute BLAKE3 when that package imports.
+
+    Without ``blake3``, a 64-digit hex id still passes and a note says the
+    digest was not recomputed. A mismatched digest is ``Message-ID mismatch``.
+    The digest input is the Message-ID octets, including the angle brackets,
+    not the article body.
+    """
     digest = _blake3_hex(config.message_id)
     if digest is None:
         print("[PASS] articleId is 64 lowercase hexadecimal characters")
@@ -649,6 +856,14 @@ def _report_article_id(config: Config, success: RpcSuccess) -> None:
 
 
 def _report_endpoint(config: Config, success: RpcSuccess) -> None:
+    """Require ``listenerPort`` to equal the connected NNTP port.
+
+    The name compared with ``fqdn`` is ``tls_server_name`` or ``nntp_host`` after
+    stripping trailing dots and lower-casing. The RPC name is already required
+    to be lowercase. An IP address or ``localhost`` skips that name check and
+    still requires a canonical ``fqdn`` from the parser. A mismatch is
+    ``RPC listener metadata does not match the NNTP connection``.
+    """
     if success.listener_port != config.nntp_port:
         raise TestFailure(
             "RPC listener metadata does not match the NNTP connection",
@@ -668,6 +883,10 @@ def _report_endpoint(config: Config, success: RpcSuccess) -> None:
 
 
 def _require_crlf_lines(article: bytes) -> None:
+    """Reject a bare CR or a bare LF anywhere in the destuffed article.
+
+    CRLF pairs are skipped. The header/body separator is not checked here.
+    """
     index = 0
     length = len(article)
     while index < length:
@@ -682,6 +901,14 @@ def _require_crlf_lines(article: bytes) -> None:
 
 
 def _message_id_header(article: bytes) -> bytes | None:
+    """Return the single unfolded Message-ID value, or ``None`` when the header block is unusable.
+
+    The search stops at the first CRLF CRLF. A folded Message-ID, a second
+    Message-ID, a header line without a colon, or a continuation line before
+    any header returns ``None``. Other headers may be folded. The returned
+    value is the field body with leading and trailing space and tab removed;
+    the angle brackets are not added or stripped.
+    """
     separator = article.find(b"\r\n\r\n")
     header_block = article[:separator]
     found: bytes | None = None
@@ -734,7 +961,12 @@ def _best_effort_close(connection: object) -> None:
 
 
 class RabbitSession:
-    """One AMQP connection and the exclusive reply queue for this test."""
+    """One AMQP connection and the exclusive reply queue for this test.
+
+    ``reply_to`` is the broker-generated queue name from an empty queue
+    argument. The queue is exclusive, auto-delete, and not durable. Closing
+    the session closes the connection and therefore the queue.
+    """
 
     def __init__(self, connection: object, channel: object, reply_to: str) -> None:
         self.connection = connection
@@ -742,10 +974,22 @@ class RabbitSession:
         self.reply_to = reply_to
 
     def close(self) -> None:
+        """Close the connection if it still reports open.
+
+        ``OSError`` and pika ``AMQPError`` are ignored. Any other exception
+        propagates. An object whose ``is_open`` is false is left alone, which
+        keeps an idle double from being closed during the self-test.
+        """
         _best_effort_close(self.connection)
 
 
 def connect_rabbit(config: Config) -> RabbitSession:
+    """Open a blocking AMQP connection, confirm mode, and the exclusive reply queue.
+
+    Publisher confirms are enabled before the queue is declared. No exchange
+    or backbone queue is declared. A failure closes the connection when one
+    exists and becomes ``RabbitMQ RPC failure or timeout``.
+    """
     pika = import_pika()
     connection = None
     try:
@@ -766,6 +1010,21 @@ def connect_rabbit(config: Config) -> RabbitSession:
 
 
 def publish_and_wait(rabbit: RabbitSession, config: Config) -> tuple[RpcSuccess, float]:
+    """Publish one request and return the parsed success body with elapsed seconds.
+
+    ``requestId`` and the ``RequestId`` header share one UUID. ``CorrelationId``
+    is a different UUID and is the response match key. The JSON object is
+    compact ASCII with ``version``, ``requestId``, ``messageId``, and
+    ``backbone``. Delivery mode is non-persistent. The body is rejected locally
+    when it exceeds ``WORK_REQUEST_MAX_PAYLOAD_BYTES``.
+
+    The return callback and the exclusive-queue consumer are registered before
+    ``basic_publish``. The wait loop pumps client data events until the matching
+    delivery, a basic return, or ``rpc_timeout``. Unroutable publishes fail
+    immediately when pika raises, and also fail if a return is recorded with no
+    matching delivery. No matching delivery is reported as a timeout, including
+    the BackFiller outcomes that are not published.
+    """
     pika = import_pika()
     request_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
@@ -787,11 +1046,17 @@ def publish_and_wait(rabbit: RabbitSession, config: Config) -> tuple[RpcSuccess,
     state: dict[str, object] = {"delivery": None, "ignored": 0, "returned": None}
 
     def on_return(channel: object, method: object, properties: object, unused_body: bytes) -> None:
+        """Record the broker return text. The body is unused and may contain no secrets worth keeping."""
         del channel, properties, unused_body
         text = getattr(method, "reply_text", None) or "unroutable"
         state["returned"] = str(text)
 
     def on_message(channel: object, method: object, properties: object, payload: bytes) -> None:
+        """Store the latest payload whose correlation id equals this publish.
+
+        Other deliveries are acknowledged and counted as ignored. The consumer
+        uses automatic acknowledgement, so an ignored response is not requeued.
+        """
         del channel, method
         correlation = getattr(properties, "correlation_id", None)
         if correlation != correlation_id:
@@ -801,6 +1066,7 @@ def publish_and_wait(rabbit: RabbitSession, config: Config) -> tuple[RpcSuccess,
 
     channel = rabbit.channel
     channel.add_on_return_callback(on_return)
+    # auto_ack is safe on an exclusive queue this process alone consumes.
     channel.basic_consume(queue=rabbit.reply_to, on_message_callback=on_message, auto_ack=True)
     properties = pika.BasicProperties(
         content_type=JSON_CONTENT_TYPE,
@@ -834,6 +1100,8 @@ def publish_and_wait(rabbit: RabbitSession, config: Config) -> tuple[RpcSuccess,
         if remaining <= 0:
             break
         try:
+            # Cap each pump at one second so the deadline is rechecked even when
+            # the broker stays silent. Callbacks run inside this call.
             connection.process_data_events(time_limit=min(1.0, remaining))
         except Exception as exc:
             elapsed = time.perf_counter() - started
@@ -885,6 +1153,21 @@ def parse_success_response(
     expected_message_id: str,
     expected_backbone: str,
 ) -> RpcSuccess:
+    """Validate one RPC response and return its success fields.
+
+    Content type and expiration may be absent; when present they must be
+    ``application/json`` and ``1000``. A present ``RequestId`` header must be
+    the request UUID. The JSON root must be an object whose ``outcome`` is
+    ``Success``. Success must not carry a non-null ``error``. ``requestId``
+    must be a non-nil UUID equal to the request. ``messageId`` and ``backbone``
+    must equal the request spellings, including case. ``fqdn`` must be a
+    canonical listener name, ``listenerPort`` must be 1–65535, and
+    ``articleId`` must be 64 lowercase hex digits.
+
+    Any other outcome, including ArticleNotFound, is ``TestFailure`` with
+    category ``RabbitMQ RPC failure or timeout``. Unknown JSON fields are not
+    rejected.
+    """
     content_type = getattr(properties, "content_type", None)
     if content_type not in (None, "", JSON_CONTENT_TYPE):
         raise TestFailure(
@@ -959,6 +1242,11 @@ def parse_success_response(
 
 
 def import_pika() -> object:
+    """Import pika or raise ``ConfigError`` with the install command.
+
+    The return type stays ``object`` so this module can be syntax-checked and
+    self-tested when pika is not installed. Callers use the attributes they need.
+    """
     try:
         import pika
     except ImportError:
@@ -969,6 +1257,16 @@ def import_pika() -> object:
 
 
 def _rabbit_parameters(pika: object, config: Config) -> object:
+    """Build pika connection parameters for URL mode or discrete settings.
+
+    URL mode delegates host, port, vhost, credentials, and TLS to
+    ``URLParameters``. Discrete mode uses plaintext unless ``rabbit_tls`` is
+    set, in which case the optional CA file is the trust source and the server
+    hostname is ``rabbit_host``. Both modes force one connection attempt, no
+    retry delay, and the ``connection_name`` client property. Discrete mode
+    also sets a 60-second heartbeat and uses ``connect_timeout`` for the
+    socket and blocked-connection timeouts.
+    """
     if config.amqp_url:
         # URL host, port, vhost, credentials, and TLS are authoritative.
         # connection_attempts, retry_delay, and connection_name are this script's
@@ -1002,7 +1300,12 @@ def _rabbit_parameters(pika: object, config: Config) -> object:
 
 
 def validate_message_id(value: str) -> bytes:
-    """Return RFC 5536 msg-id octets, including the angle brackets."""
+    """Return RFC 5536 msg-id octets, including the angle brackets.
+
+    The value must be ASCII, 3–250 octets, wrapped in ``<`` and ``>``, with
+    exactly one ``@``. The local part must be a dot-atom. The domain must be
+    a dot-atom or a no-fold-literal. Raises ``ConfigError`` otherwise.
+    """
     try:
         raw = value.encode("ascii")
     except UnicodeEncodeError:
@@ -1019,7 +1322,13 @@ def validate_message_id(value: str) -> bytes:
 
 
 def is_canonical_fqdn(fqdn: str) -> bool:
-    """Match ListenerEndpointFields: lowercase dotted DNS, labels 1–63, at least two labels."""
+    """Match ListenerEndpointFields: lowercase dotted DNS, labels 1–63, at least two labels.
+
+    The whole name is at most 253 characters. Each label starts and ends with
+    a lowercase letter or digit and otherwise contains only those characters
+    and ``-``. A trailing dot, uppercase, or a single label such as
+    ``localhost`` is rejected.
+    """
     if not fqdn or len(fqdn) > 253:
         return False
     labels = fqdn.split(".")
@@ -1039,12 +1348,22 @@ def is_canonical_fqdn(fqdn: str) -> bool:
 
 
 def _is_dot_atom(token: bytes) -> bool:
+    """Return whether ``token`` is RFC 5536 dot-atom text using ``ATEXT``.
+
+    Empty tokens, a leading or trailing dot, and ``..`` are rejected.
+    """
     if not token or token.startswith(b".") or token.endswith(b".") or b".." in token:
         return False
     return all(part and all(byte in ATEXT for byte in part) for part in token.split(b"."))
 
 
 def _is_no_fold_literal(token: bytes) -> bool:
+    """Return whether ``token`` is a bracketed domain literal for Message-ID checks.
+
+    The brackets are required. Each interior octet must be in 33–61, 63–90,
+    or 94–126. This is a shape check, not a DNS lookup, and it does not
+    accept quoted-pairs.
+    """
     if len(token) < 2 or token[0] != 0x5B or token[-1] != 0x5D:
         return False
     for byte in token[1:-1]:
@@ -1054,6 +1373,7 @@ def _is_no_fold_literal(token: bytes) -> bool:
 
 
 def _blake3_hex(message_id: bytes) -> str | None:
+    """Return the BLAKE3 hex digest of ``message_id``, or ``None`` if blake3 is not installed."""
     try:
         import blake3
     except ImportError:
@@ -1062,6 +1382,11 @@ def _blake3_hex(message_id: bytes) -> str | None:
 
 
 def _request_id_header(properties: object) -> str | None:
+    """Return the ``RequestId`` header as text, or ``None`` when the header is absent.
+
+    Bytes are decoded as UTF-8. A non-string, non-bytes value is formatted with
+    ``str``. A present header that is not a UUID fails later in the parser.
+    """
     headers = getattr(properties, "headers", None) or {}
     if "RequestId" not in headers:
         return None
@@ -1074,6 +1399,7 @@ def _request_id_header(properties: object) -> str | None:
 
 
 def _require_str(document: dict[str, object], name: str) -> str:
+    """Return a non-empty JSON string field or raise ``TestFailure``."""
     value = document.get(name)
     if not isinstance(value, str) or value == "":
         raise TestFailure("RabbitMQ RPC failure or timeout", f"RPC response field {name} is missing or not a string.")
@@ -1081,6 +1407,7 @@ def _require_str(document: dict[str, object], name: str) -> str:
 
 
 def _require_int(document: dict[str, object], name: str) -> int:
+    """Return a JSON integer field. Booleans are rejected because ``bool`` is an ``int``."""
     value = document.get(name)
     if isinstance(value, bool) or not isinstance(value, int):
         raise TestFailure("RabbitMQ RPC failure or timeout", f"RPC response field {name} is missing or not an integer.")
@@ -1088,11 +1415,18 @@ def _require_int(document: dict[str, object], name: str) -> int:
 
 
 def _require_absent(document: dict[str, object], name: str) -> None:
+    """Reject a present non-null field. A missing field and an explicit null are allowed."""
     if name in document and document[name] is not None:
         raise TestFailure("RabbitMQ RPC failure or timeout", f"Success RPC response must not include {name}.")
 
 
 def _send_quit(session: NntpSession) -> None:
+    """Best-effort ``QUIT`` with a 5-second socket timeout.
+
+    The status-line limit is applied before reading the reply. ``NntpIoError``
+    and ``OSError`` are swallowed so cleanup cannot replace the test result.
+    The reply text is not checked.
+    """
     try:
         session._sock.settimeout(5)
         session.send(QUIT_COMMAND)
@@ -1103,6 +1437,12 @@ def _send_quit(session: NntpSession) -> None:
 
 
 def _idle_hint(config: Config, rpc_elapsed: float | None) -> str:
+    """Return an idle-session hint when the RPC wait exceeds the default NNTP read budget.
+
+    ``rpc_elapsed`` is unused. The comparison is against the default 60-second
+    NNTP budget, not against this run's ``nntp_timeout``. The hint is empty
+    when the RPC wait is at most that default.
+    """
     del rpc_elapsed
     if config.rpc_timeout <= DEFAULT_NNTP_TIMEOUT_SECONDS:
         return ""
@@ -1114,6 +1454,7 @@ def _print_measurements(
     article_elapsed: float | None,
     article_bytes: int | None,
 ) -> None:
+    """Print the measurements that were collected. Omitted values are not printed as zero."""
     if rpc_elapsed is not None:
         print(f"RPC elapsed: {rpc_elapsed:.3f} s")
     if article_elapsed is not None:
@@ -1123,16 +1464,25 @@ def _print_measurements(
 
 
 def _preview(data: bytes) -> str:
+    """Return at most 180 octets of ``data`` as ASCII, with non-ASCII escaped."""
     return data[:180].decode("ascii", errors="backslashreplace")
 
 
 def _as_bytes(value: object) -> bytes:
+    """Return ``value`` unchanged when it is bytes; otherwise encode ``str(value)`` as ASCII."""
     if isinstance(value, bytes):
         return value
     return str(value).encode("ascii", errors="backslashreplace")
 
 
 def redact(text: str, secrets: list[str]) -> str:
+    """Remove AMQP URL userinfo and each exact secret substring.
+
+    The URL substitution keeps the scheme and drops everything through the
+    ``@``. Secrets are replaced with ``***`` after that, so a password that
+    also appears inside a URL is removed by both passes. Matching is literal,
+    not a regular expression.
+    """
     redacted = _SECRET_URL.sub(r"\1", text)
     for secret in secrets:
         if secret:
@@ -1141,12 +1491,18 @@ def redact(text: str, secrets: list[str]) -> str:
 
 
 def _required_text(value: object, label: str) -> str:
+    """Return a stripped string or raise ``ConfigError`` naming ``label``."""
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{label} is required.")
     return value.strip()
 
 
 def _optional_path(value: object) -> str | None:
+    """Return a stripped path that names an existing file, or ``None`` when unset.
+
+    A non-empty path that is not a file raises ``ConfigError``. Directories are
+    rejected because ``isfile`` is false.
+    """
     if not isinstance(value, str) or not value.strip():
         return None
     path = value.strip()
@@ -1156,6 +1512,11 @@ def _optional_path(value: object) -> str | None:
 
 
 def _port(value: object, label: str) -> int:
+    """Parse a TCP port in 1–65535.
+
+    The value is parsed with ``int(str(value))``. A bool therefore becomes
+    ``True`` or ``False`` and is rejected as non-numeric.
+    """
     try:
         port = int(str(value))
     except (TypeError, ValueError):
@@ -1166,6 +1527,11 @@ def _port(value: object, label: str) -> int:
 
 
 def _positive_float(value: object, label: str) -> float:
+    """Parse a finite number of seconds greater than zero.
+
+    ``nan`` and infinities are ``ConfigError``. The text is parsed with
+    ``float(str(value))``.
+    """
     try:
         number = float(str(value))
     except (TypeError, ValueError):
@@ -1178,6 +1544,7 @@ def _positive_float(value: object, label: str) -> float:
 
 
 def _positive_int(value: object, label: str) -> int:
+    """Parse an integer of at least 1. There is no upper bound in this helper."""
     try:
         number = int(str(value))
     except (TypeError, ValueError):
@@ -1188,6 +1555,13 @@ def _positive_int(value: object, label: str) -> int:
 
 
 def _env_bool(name: str) -> bool:
+    """Read a required boolean environment variable.
+
+    Accepted true spellings are ``1``, ``true``, ``yes``, and ``on``. Accepted
+    false spellings are ``0``, ``false``, ``no``, and ``off``. Comparison is
+    case-insensitive. A missing or blank value is false rather than an error;
+    any other text raises ``ConfigError``.
+    """
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return False
@@ -1200,6 +1574,7 @@ def _env_bool(name: str) -> bool:
 
 
 def _is_ip(host: str) -> bool:
+    """Return whether ``host`` is an IPv4 or IPv6 address. Hostnames return false."""
     try:
         ipaddress.ip_address(host)
     except ValueError:
@@ -1208,36 +1583,55 @@ def _is_ip(host: str) -> bool:
 
 
 class _ChunkSocket:
-    """In-memory socket for the local multiline reader check."""
+    """In-memory socket for the local multiline reader check.
+
+    ``recv`` ignores the requested size and returns the next scripted chunk,
+    or ``b""`` when the script is exhausted. ``send`` reports the payload
+    length and discards the bytes. ``settimeout`` and ``close`` do nothing.
+    """
 
     def __init__(self, chunks: list[bytes]) -> None:
         self._chunks = list(chunks)
 
     def recv(self, size: int) -> bytes:
+        """Return the next scripted chunk, ignoring ``size``."""
         del size
         if not self._chunks:
             return b""
         return self._chunks.pop(0)
 
     def send(self, payload: bytes) -> int:
+        """Report ``payload`` as fully written without storing it."""
         return len(payload)
 
     def settimeout(self, timeout: float) -> None:
+        """Ignore the timeout. The fake socket never blocks."""
         del timeout
 
     def close(self) -> None:
+        """Do nothing. The self-test close path uses other doubles."""
         return None
 
 
 def _best_effort_close_failures() -> list[str]:
-    """Return failures from the local shutdown-suppression checks."""
+    """Return failures from the local shutdown-suppression checks.
+
+    An ``OSError`` from a socket or AMQP close must be ignored. A
+    ``RuntimeError`` must propagate. A connection that reports ``is_open``
+    false must not have ``close`` called. When pika is installed, an
+    ``AMQPConnectionError`` must also be ignored.
+    """
     failures: list[str] = []
 
     class _ClosedSocket:
+        """Socket double whose close raises ``OSError``."""
+
         def close(self) -> None:
             raise OSError("already closed")
 
     class _BrokenSocket:
+        """Socket double whose close raises ``RuntimeError``."""
+
         def close(self) -> None:
             raise RuntimeError("socket close bug")
 
@@ -1251,12 +1645,16 @@ def _best_effort_close_failures() -> list[str]:
         failures.append("unexpected socket close error was ignored")
 
     class _ClosedAmqp:
+        """Open AMQP double whose close raises ``OSError``."""
+
         is_open = True
 
         def close(self) -> None:
             raise OSError("amqp socket closed")
 
     class _BrokenAmqp:
+        """Open AMQP double whose close raises ``RuntimeError``."""
+
         is_open = True
 
         def close(self) -> None:
@@ -1265,6 +1663,8 @@ def _best_effort_close_failures() -> list[str]:
     RabbitSession(object(), None, "reply").close()
 
     class _IdleAmqp:
+        """AMQP double that reports closed. ``close`` must not be called."""
+
         is_open = False
 
         def close(self) -> None:
@@ -1290,6 +1690,8 @@ def _best_effort_close_failures() -> list[str]:
         return failures
 
     class _PikaClosed:
+        """Open AMQP double whose close raises pika's connection error."""
+
         is_open = True
 
         def close(self) -> None:
@@ -1300,7 +1702,15 @@ def _best_effort_close_failures() -> list[str]:
 
 
 def _configuration_failures() -> list[str]:
-    """Return configuration-precedence and timeout failures. Does not print secrets."""
+    """Return configuration-precedence and timeout failures. Does not print secrets.
+
+    The process environment is saved and restored. Each case clears the managed
+    variables, applies one fixture environment, and checks ``build_config``.
+    URL mode must ignore invalid discrete ports and missing CA files. An
+    explicit ``--rabbitmq-host`` must discard ``BACKFILLER_AMQP_URL``. When
+    pika imports, URL parameters are checked for host, port, vhost, username,
+    one connection attempt, and TLS only for ``amqps``.
+    """
     failures: list[str] = []
     managed = (
         "NNTP_HOST",
@@ -1342,16 +1752,23 @@ def _configuration_failures() -> list[str]:
     saved = {key: os.environ.get(key) for key in managed}
 
     def build(argv: list[str], env: dict[str, str]) -> Config:
+        """Parse ``base`` plus ``argv`` against a fresh copy of ``env``.
+
+        Managed variables are removed first so the ambient environment cannot
+        leak into the case.
+        """
         for key in managed:
             os.environ.pop(key, None)
         os.environ.update(env)
         return build_config(parse_args(base + argv))
 
     def note(condition: bool, detail: str) -> None:
+        """Record ``detail`` when ``condition`` is false."""
         if not condition:
             failures.append(detail)
 
     def expect_error(argv: list[str], env: dict[str, str], fragment: str, label: str) -> None:
+        """Require ``build`` to raise ``ConfigError`` whose text contains ``fragment``."""
         try:
             build(argv, env)
         except ConfigError as exc:
@@ -1461,6 +1878,7 @@ def _configuration_failures() -> list[str]:
         note(_positive_float("1.5", "RPC timeout") == 1.5, "a positive finite timeout was rejected")
 
         def expect_float(value: str, fragment: str, label: str) -> None:
+            """Require ``_positive_float`` to reject ``value`` with ``fragment`` in the message."""
             try:
                 _positive_float(value, "RPC timeout")
             except ConfigError as exc:
@@ -1519,9 +1937,19 @@ def _configuration_failures() -> list[str]:
 
 
 def run_self_test() -> int:
+    """Run in-process checks and return 0 or 1. No socket and no broker are opened.
+
+    Covers split-CRLF destuffing, a stuffed single-dot line versus the
+    terminator, a disconnect before CRLF, Message-ID grammar, close
+    suppression, configuration precedence, canonical FQDNs, one success body,
+    one ArticleNotFound body, Message-ID header extraction, and URL redaction.
+    The BLAKE3 comparison runs only when that package imports. Failure lines
+    are the individual check texts, then ``Failure: local self-test``.
+    """
     failures: list[str] = []
 
     def check(condition: bool, detail: str) -> None:
+        """Record ``detail`` when ``condition`` is false."""
         if not condition:
             failures.append(detail)
 
@@ -1559,6 +1987,8 @@ def run_self_test() -> int:
     check(not is_canonical_fqdn("localhost"), "single-label name was accepted")
 
     class _Props:
+        """Stand-in AMQP properties for the schema fixture. Not a pika type."""
+
         content_type = JSON_CONTENT_TYPE
         expiration = REQUEST_EXPIRATION_MILLISECONDS
         headers = {"RequestId": "7c1cb8a0-95f9-4c13-8e53-339773e3afaa"}

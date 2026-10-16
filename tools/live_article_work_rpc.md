@@ -12,7 +12,7 @@ BackFiller consumes Article Work, retrieves the article from the upstream provid
 
 After the greeting the listener is blocked on the next command. Each read uses `BackFiller:Listener:IoProgressTimeoutSeconds` (default 60). This script connects to RabbitMQ first, and it does not publish until the greeting is valid, so broker setup is not part of that idle window. The provider retrieval still has to finish, and `ARTICLE` still has to be written, before that read timer fires. The default `--rpc-timeout` is 30 seconds, matching `RabbitMQ:RpcTimeoutSeconds`. There is no second NNTP command that can keep the session idle: the listener answers anything other than `ARTICLE` and `QUIT` with `500`.
 
-A success response means the article is already retained. The script does not retry `ARTICLE` and it does not publish the RPC request again. ProviderFailure, Cancelled, UnexpectedFailure, and RetentionRejected are not given a response body; those cases surface as an RPC timeout. The request and the response both use an AMQP expiration of `1000` milliseconds. The reply consumer is started before the publish so the response TTL is not spent waiting for this process to subscribe.
+A success response means the article is already retained. The script does not retry `ARTICLE` and it does not publish the RPC request again. ProviderFailure, Cancelled, UnexpectedFailure, and RetentionRejected are not given a response body; those cases surface as an RPC timeout. The request and the response both use an AMQP expiration of `1000` milliseconds. The exclusive reply queue is declared while connecting to RabbitMQ, before the NNTP handshake. `basic_consume` is registered after the greeting and immediately before the single publish, so the response TTL is not spent waiting for this process to subscribe.
 
 ## Contract
 
@@ -31,7 +31,7 @@ A success response means the article is already retained. The script does not re
 | Response AMQP | Default exchange, routing key equal to the request `ReplyTo`, same `CorrelationId`, `ContentType=application/json`, expiration `1000`. |
 | Publish shape | One mandatory publish. The in-repository RPC channel publishes `mandatory: false`; this script uses `mandatory: true` so a missing binding fails instead of waiting out the timeout. The JSON body is the same. |
 
-Known backbone labels are `Abavia`, `Altopia`, `BaseIP`, `Eweka`, `Elbracht`, `Giganews`, `GTT`, `Highwinds`, `ItsHosted`, `Novia`, `UExpress`, and `UsenetNode1`. The JSON `backbone` is compared to the consuming session with ordinal ignore-case. The response echoes the spelling sent in the request. The exchange name is always lower-case.
+Known backbone labels are `Abavia`, `Altopia`, `BaseIP`, `Eweka`, `Elbracht`, `Giganews`, `GTT`, `Highwinds`, `ItsHosted`, `Novia`, `UExpress`, and `UsenetNode1`. This script does not require the label to be one of those names. It accepts any 1–64 character token from `A–Z`, `a–z`, `0–9`, `.`, `_`, and `-`. The JSON `backbone` is compared to the consuming session with ordinal ignore-case. The response echoes the spelling sent in the request. The exchange name is always lower-case.
 
 No provider username, path, or article body is part of the request. `articleId` is not a checksum of the article body.
 
