@@ -1315,7 +1315,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             TimeSpan? commandTimeout = null,
             ProviderSessionEstablishmentGate? establishment = null,
             string backbone = "Giganews",
-            ILogger? logger = null)
+            ILogger? logger = null,
+            TimeSpan? shutdownGrace = null)
         {
             return new NntpSessionPool(
                 new BackFillerProviderDefinition(
@@ -1337,7 +1338,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 factory,
                 logger ?? NullLogger.Instance,
                 establishment ?? CreateEstablishmentGate(),
-                shutdownGrace: TimeSpan.FromSeconds(2),
+                shutdownGrace: shutdownGrace ?? TimeSpan.FromSeconds(2),
                 timeProvider: time);
         }
 
@@ -2494,8 +2495,192 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// The pool drain grace expires while ARTICLE is waiting for a response.
+        /// Forced retirement aborts that read and does not write QUIT.
+        /// </summary>
+        [Fact]
+        public async Task Drain_timeout_aborts_a_blocked_article_read_without_quit()
+        {
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                ArticleStarted = articleStarted,
+                BlockArticle = blockArticle,
+            };
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var pool = CreatePool(factory, max: 1, logger: logger, shutdownGrace: TimeSpan.FromMilliseconds(100));
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            try
+            {
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                download = lease.Session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal(NntpSessionState.Closed, lease.Session.State);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Contains(server.Commands, static command => command.StartsWith("ARTICLE", StringComparison.Ordinal));
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+                Assert.DoesNotContain(server.Commands, static command => command.StartsWith("QUIT", StringComparison.Ordinal));
+            }
+            finally
+            {
+                blockArticle.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Configuration replacement cancels the drain while ARTICLE is still reading.
+        /// The session is aborted without QUIT, and the download does not stay pending.
+        /// </summary>
+        [Fact]
+        public async Task Replacement_drain_aborts_a_blocked_article_read_without_quit()
+        {
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                ArticleStarted = articleStarted,
+                BlockArticle = blockArticle,
+            };
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var pool = CreatePool(factory, max: 1, logger: logger);
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            try
+            {
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                download = lease.Session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                using var cancelled = new CancellationTokenSource();
+                cancelled.Cancel();
+
+                await pool.DrainAndDisposeAsync(cancelled.Token).WaitAsync(TimeSpan.FromSeconds(5));
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal(NntpSessionState.Closed, lease.Session.State);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+            }
+            finally
+            {
+                blockArticle.TrySetResult();
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// The pool drain grace expires while ARTICLE is blocked inside its write.
+        /// Forced shutdown unblocks that write, does not overlap it with QUIT, and closes the transport once.
+        /// </summary>
+        [Fact]
+        public async Task Drain_timeout_aborts_a_blocked_article_write_without_quit()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            AbortingWriteStream? gate = null;
+            var server = new ScriptedNntpServer
+            {
+                ClientStreamDecorator = inner =>
+                {
+                    gate = new AbortingWriteStream(inner, entered);
+                    return gate;
+                },
+            };
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var pool = CreatePool(factory, max: 1, logger: logger, shutdownGrace: TimeSpan.FromMilliseconds(100));
+            NntpSessionLease? lease = null;
+            Task<ArticleRetrievalResult>? download = null;
+            try
+            {
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                Assert.NotNull(gate);
+                gate.Arm();
+                download = lease.Session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal(nameof(IOException), result.Reason);
+                Assert.Equal(1, gate.MaxWriteDepth);
+                Assert.Equal(NntpSessionState.Closed, lease.Session.State);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+            }
+            finally
+            {
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// Cancelling acquire while a TLS DATE write is still inside <see cref="Stream.WriteAsync"/> disposes that transport once.
-        /// QUIT overlaps the held write. <see cref="SslStream"/> rejects that second write, and the original cancellation is what acquire throws.
+        /// The session is busy, so disposal aborts the transport and does not write QUIT on top of that write.
+        /// The original cancellation is what acquire throws.
         /// </summary>
         [Fact]
         public async Task Cancelled_acquire_during_tls_date_write_disposes_the_transport_once()
@@ -2545,7 +2730,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 Assert.False(session.IsReusable);
                 Assert.Equal(1, tls.DisposeAsyncCount);
                 Assert.Equal(1, server.ClientStreamDisposeCount);
-                Assert.Contains(
+                Assert.Equal(0, tls.OverlappingWriteCount);
+                Assert.DoesNotContain(
                     logger.Entries,
                     static entry => entry.EventId.Id == 5417
                         && entry.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
@@ -2996,7 +3182,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// <see cref="SslStream"/> that forwards I/O to an inner duplex stream and rejects a second write while the first is held.
-        /// This is the overlapping-write failure <see cref="SslStream"/> raises for a QUIT that starts during DATE.
+        /// Forced disposal must not produce that second write.
         /// </summary>
         private sealed class NestedWriteTlsStream : SslStream
         {
@@ -3018,6 +3204,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             /// <summary>Entries to <see cref="DisposeAsync"/>.</summary>
             private int _disposeAsyncCount;
 
+            /// <summary>Writes rejected because another write was still inside <see cref="WriteAsync"/>.</summary>
+            private int _overlappingWrites;
+
             /// <summary>Wraps <paramref name="inner"/> and closes it when this wrapper is disposed.</summary>
             /// <param name="inner">Scripted duplex stream. Ownership transfers to this wrapper.</param>
             /// <param name="entered">Signaled from inside the held write.</param>
@@ -3038,6 +3227,9 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             /// <summary>Gets how many times <see cref="DisposeAsync"/> has been entered.</summary>
             internal int DisposeAsyncCount => Volatile.Read(ref _disposeAsyncCount);
+
+            /// <summary>Gets how many writes arrived while a held write was still inside <see cref="WriteAsync"/>.</summary>
+            internal int OverlappingWriteCount => Volatile.Read(ref _overlappingWrites);
 
             /// <inheritdoc />
             public override bool CanRead => true;
@@ -3070,6 +3262,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             {
                 if (Volatile.Read(ref _writeDepth) > 0)
                 {
+                    Interlocked.Increment(ref _overlappingWrites);
                     throw new NotSupportedException("SslStream does not support simultaneous writes.");
                 }
 
