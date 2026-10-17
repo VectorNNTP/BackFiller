@@ -519,6 +519,152 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// A return that reaches zero leases completes only the generation it captured.
+        /// A newer acquire installs the next generation while that completion is paused, and dispose waits on the generation that still has a lease.
+        /// </summary>
+        [Fact]
+        public async Task Returning_lease_completes_only_the_generation_it_captured()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            var pool = CreatePool(factory, max: 2);
+            var generationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseGeneration = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drainEntered = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            NntpSessionLease? nextLease = null;
+            NntpSessionLease? joined = null;
+            Task? returning = null;
+            Task? disposing = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var warmup = await pool.AcquireAsync(CancellationToken.None);
+                var firstGeneration = pool.CurrentDrain;
+                Assert.False(firstGeneration.IsCompleted);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                await warmup.DisposeAsync();
+                Assert.True(firstGeneration.IsCompletedSuccessfully);
+                Assert.Same(firstGeneration, pool.CurrentDrain);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(2, pool.AvailablePermitCount);
+
+                var held = await pool.AcquireAsync(CancellationToken.None);
+                var generation = pool.CurrentDrain;
+                Assert.NotSame(firstGeneration, generation);
+                Assert.False(generation.IsCompleted);
+                pool.BeforeDrainGenerationCompleted = () =>
+                {
+                    generationEntered.TrySetResult();
+                    return releaseGeneration.Task;
+                };
+
+                returning = held.DisposeAsync().AsTask();
+                await generationEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+                Assert.False(generation.IsCompleted);
+
+                nextLease = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+                var next = pool.CurrentDrain;
+                Assert.NotSame(generation, next);
+                Assert.False(next.IsCompleted);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+
+                releaseGeneration.TrySetResult();
+                await returning.WaitAsync(TimeSpan.FromSeconds(2));
+                returning = null;
+                pool.BeforeDrainGenerationCompleted = null;
+                Assert.True(generation.IsCompletedSuccessfully);
+                Assert.False(next.IsCompleted);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+
+                joined = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Same(next, pool.CurrentDrain);
+                Assert.Equal(2, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+                await joined.DisposeAsync();
+                joined = null;
+                Assert.False(next.IsCompleted);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+
+                pool.BeforeLeaseDrainWait = task =>
+                {
+                    drainEntered.TrySetResult(task);
+                    return releaseDrain.Task;
+                };
+                disposing = pool.DrainAndDisposeAsync(CancellationToken.None);
+                var observed = await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Same(next, observed);
+                Assert.False(observed.IsCompleted);
+                Assert.False(disposing.IsCompleted);
+                var repeated = pool.DrainAndDisposeAsync(CancellationToken.None);
+                await repeated.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.False(next.IsCompleted);
+                Assert.False(disposing.IsCompleted);
+                await Assert.ThrowsAsync<ObjectDisposedException>(() => pool.AcquireAsync(CancellationToken.None));
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+
+                releaseDrain.TrySetResult();
+                await nextLease.DisposeAsync();
+                nextLease = null;
+                Assert.True(next.IsCompletedSuccessfully);
+                await disposing.WaitAsync(TimeSpan.FromSeconds(2));
+                disposing = null;
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                releaseGeneration.TrySetResult();
+                releaseDrain.TrySetResult();
+                pool.BeforeDrainGenerationCompleted = null;
+                pool.BeforeLeaseDrainWait = null;
+                if (joined is not null)
+                {
+                    await joined.DisposeAsync();
+                }
+
+                if (nextLease is not null)
+                {
+                    await nextLease.DisposeAsync();
+                }
+
+                if (returning is not null)
+                {
+                    try
+                    {
+                        await returning.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        // The paused return did not finish after its gate was released.
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                if (disposing is not null)
+                {
+                    try
+                    {
+                        await disposing.WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        // Dispose did not finish after the outstanding lease was returned.
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// Unreusable session after failed ARTICLE is not returned to the idle pool.
         /// </summary>
 
