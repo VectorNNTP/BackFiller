@@ -1285,6 +1285,17 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>Asserts that DATE keepalive cancellation was logged once.</summary>
+        /// <param name="logger">Logger attached to the pool under test.</param>
+        private static void AssertCancellationLoggedOnce(CollectingLogger<NntpSessionPool> logger)
+        {
+            Assert.Equal(
+                1,
+                logger.Messages.Count(static message => message.Contains(
+                    "Shutdown continued after DATE keepalive was canceled",
+                    StringComparison.Ordinal)));
+        }
+
         /// <summary>Records an exception that test teardown expects and does not rethrow.</summary>
         /// <param name="exception">Cancellation, timeout, or disposal observed while joining a test acquire.</param>
         private static void ObserveExpectedCleanup(Exception exception)
@@ -1373,11 +1384,10 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
-        /// Pool dispose logs DATE keep-alive cancellation and completes.
+        /// Pool dispose cancels a published DATE loop that has not yet reached its delay.
+        /// Publication resumes that loop asynchronously, so shutdown can win the race and the loop must still log the cancellation.
         /// </summary>
-
         [Fact]
-
         public async Task Keepalive_cancellation_is_logged_and_disposal_completes()
         {
             var logger = new CollectingLogger<NntpSessionPool>();
@@ -1393,11 +1403,52 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
             await pool.DisposeAsync();
 
-            Assert.Contains(
-                logger.Messages,
-                static message => message.Contains(
-                    "Shutdown continued after DATE keepalive was canceled",
-                    StringComparison.Ordinal));
+            AssertCancellationLoggedOnce(logger);
+            Assert.Equal(0, pool.ActiveKeepAliveCount);
+            Assert.Equal(0, pool.LiveSessionCount);
+        }
+
+        /// <summary>
+        /// Disposal while the DATE loop is awaiting its armed delay cancels that wait and logs once.
+        /// The loop has passed publication before disposal, so the cancellation arrives as an exception from the delay.
+        /// </summary>
+        [Fact]
+        public async Task Keepalive_delay_cancellation_is_logged_once_and_disposal_completes()
+        {
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 1);
+            var pool = CreatePool(
+                factory,
+                max: 1,
+                keepAliveSeconds: 30,
+                time: new KeepAliveDelaySource(),
+                logger: logger);
+            pool.BeforeFirstKeepAliveDelay = () =>
+            {
+                // The test continuation is queued, then this method returns a completed task.
+                // The loop therefore reaches its delay await before the test is allowed to dispose.
+                entered.TrySetResult();
+                return Task.CompletedTask;
+            };
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                await pool.DisposeAsync();
+
+                AssertCancellationLoggedOnce(logger);
+                Assert.Equal(0, pool.ActiveKeepAliveCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                pool.BeforeFirstKeepAliveDelay = null;
+                await pool.DisposeAsync();
+            }
         }
 
         /// <summary>

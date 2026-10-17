@@ -1798,7 +1798,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A replacement published after this loop decided to retire is left running. A dequeue that already removed the session keeps it and retires it itself when it is not reusable.
         /// <see cref="NntpProviderSession.SendDateKeepAliveAsync"/> is called with <see cref="_shutdown"/> and without waiting for the busy lock, so an in-use session skips DATE and stays leased.
         /// Cancellation of <paramref name="registration"/> ends the loop without retirement. Any other exception retires the session.
-        /// The loop waits until <see cref="TryAdmitIdle"/> has decided publication. Its first wait is the timer armed on that admission thread.
+        /// A published loop logs that cancellation when its delay throws <see cref="OperationCanceledException"/> and when the loop observes the cancelled token before or between waits. An unpublished registration stays silent.
+        /// <see cref="NntpProviderSession.SendDateKeepAliveAsync"/> catches cancellation itself. After DATE has been written that returns <see langword="false"/> and this loop retires the session instead of taking the cancellation log.
+        /// The loop waits until <see cref="TryAdmitIdle"/> has decided publication. Its first wait is the timer armed on that admission thread. Publication resumes the loop asynchronously, so shutdown can cancel the token before that continuation runs.
         /// Exit removes <paramref name="registration"/> only when the dictionary still maps the session to that instance, and then disposes its source.
         /// A replacement published after this loop was superseded stays in the dictionary.
         /// <see cref="KeepAliveLoopExitGate"/> runs before that removal and outside <see cref="_idleGate"/>. It is null in production.
@@ -1812,7 +1814,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 try
                 {
                     await registration.Publication.Task.ConfigureAwait(false);
-                    if (!registration.WasPublished || token.IsCancellationRequested)
+                    if (!registration.WasPublished)
                     {
                         return;
                     }
@@ -1832,7 +1834,7 @@ namespace VectorNNTP.BackFiller.Nntp
                         await NextKeepAliveDelay(registration, interval, token).ConfigureAwait(false);
                         if (token.IsCancellationRequested)
                         {
-                            return;
+                            break;
                         }
 
                         if (_beforeKeepAliveReusabilityCheck is { } reusability)
@@ -1853,6 +1855,13 @@ namespace VectorNNTP.BackFiller.Nntp
                                 .ConfigureAwait(false);
                             return;
                         }
+                    }
+
+                    if (token.IsCancellationRequested)
+                    {
+                        // Publication resumes asynchronously. Shutdown can cancel this token before the continuation
+                        // reaches the delay, so the loop observes the flag instead of an OperationCanceledException.
+                        ShutdownObservations.Canceled(_logger, "DATE keepalive");
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
