@@ -2030,6 +2030,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
         /// <summary>
         /// A keepalive retirement that has left the idle list, but not yet finished dispose, cannot be leased or returned to the queue.
+        /// The pause yields, so the caller that released DATE can observe that window and then let dispose finish.
         /// The replacement lease stays usable after the retired session is disposed, and its return does not requeue the retired one.
         /// </summary>
         [Fact]
@@ -2044,68 +2045,64 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
             var retirementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            pool.ActiveSessionCountChanged += () =>
+            pool.BeforeDetachedSessionDispose = () =>
             {
-                if (pool.ActiveSessionCount != 0 || pool.LiveSessionCount != 0)
-                {
-                    return;
-                }
-
-                if (!retirementEntered.TrySetResult())
-                {
-                    return;
-                }
-
-                if (!releaseRetirement.Task.Wait(TimeSpan.FromSeconds(5)))
-                {
-                    throw new TimeoutException("Retirement callback was not released.");
-                }
+                retirementEntered.TrySetResult();
+                return releaseRetirement.Task;
             };
 
-            await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
-            Assert.Equal(1, pool.IdleSessionCount);
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                Assert.Equal(1, pool.IdleSessionCount);
 
-            var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
-            releaseKeepAlive();
-            await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Equal(0, pool.IdleSessionCount);
-            Assert.Equal(0, pool.LiveSessionCount);
-            Assert.Equal(0, pool.ActiveLeaseCount);
-            Assert.Equal(0, CreatedSessionCount(pool));
-            Assert.Equal(0, ReservedConnectionCount(pool));
-            Assert.Equal(0, retiredServer.ClientStreamDisposeCount);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await retirementEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, CreatedSessionCount(pool));
+                Assert.Equal(0, ReservedConnectionCount(pool));
+                Assert.Equal(0, retiredServer.ClientStreamDisposeCount);
 
-            var lease = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-            var survivor = lease.Session;
-            Assert.Equal(NntpSessionState.Ready, survivor.State);
-            Assert.Equal(0, pool.IdleSessionCount);
-            Assert.Equal(1, pool.LiveSessionCount);
-            Assert.Equal(1, pool.ActiveLeaseCount);
-            Assert.Equal(1, CreatedSessionCount(pool));
-            Assert.Equal(1, ReservedConnectionCount(pool));
-            Assert.Equal(2, factory.ConnectAttempts.Count);
+                var lease = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+                var survivor = lease.Session;
+                Assert.Equal(NntpSessionState.Ready, survivor.State);
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.Equal(1, ReservedConnectionCount(pool));
+                Assert.Equal(2, factory.ConnectAttempts.Count);
 
-            await lease.DisposeAsync();
-            Assert.Equal(1, pool.IdleSessionCount);
-            Assert.Equal(1, pool.LiveSessionCount);
-            Assert.Equal(0, pool.ActiveLeaseCount);
-            Assert.Equal(NntpSessionState.Ready, survivor.State);
-            Assert.Equal(2, factory.ConnectAttempts.Count);
+                await lease.DisposeAsync();
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(NntpSessionState.Ready, survivor.State);
+                Assert.Equal(2, factory.ConnectAttempts.Count);
 
-            releaseRetirement.TrySetResult();
-            await WaitUntilAsync(() => retiredServer.ClientStreamDisposeCount == 1);
-            Assert.Equal(NntpSessionState.Ready, survivor.State);
-            Assert.Equal(0, survivorServer.ClientStreamDisposeCount);
-            Assert.Equal(1, pool.IdleSessionCount);
-            Assert.Equal(1, pool.LiveSessionCount);
-            Assert.Equal(1, CreatedSessionCount(pool));
-            Assert.Equal(1, ReservedConnectionCount(pool));
+                releaseRetirement.TrySetResult();
+                await WaitUntilAsync(() => retiredServer.ClientStreamDisposeCount == 1);
+                Assert.Equal(NntpSessionState.Ready, survivor.State);
+                Assert.Equal(0, survivorServer.ClientStreamDisposeCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, CreatedSessionCount(pool));
+                Assert.Equal(1, ReservedConnectionCount(pool));
 
-            var reused = await pool.AcquireAsync(CancellationToken.None);
-            Assert.Same(survivor, reused.Session);
-            Assert.Equal(NntpSessionState.Ready, reused.Session.State);
-            Assert.Equal(2, factory.ConnectAttempts.Count);
-            await reused.DisposeAsync();
+                var reused = await pool.AcquireAsync(CancellationToken.None);
+                Assert.Same(survivor, reused.Session);
+                Assert.Equal(NntpSessionState.Ready, reused.Session.State);
+                Assert.Equal(2, factory.ConnectAttempts.Count);
+                await reused.DisposeAsync();
+            }
+            finally
+            {
+                releaseRetirement.TrySetResult();
+                pool.BeforeDetachedSessionDispose = null;
+            }
         }
 
         /// <summary>
