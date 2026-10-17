@@ -136,6 +136,54 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Raising MaxSessions after repeated shrinks keeps the pool and serves the new bound.
+        /// </summary>
+        [Fact]
+        public async Task MaxSessions_growth_after_shrink_keeps_the_pool_and_restores_permits()
+        {
+            var catalog = new ProviderConfigurationCatalog();
+            var transport = new ScriptedNntpTransportFactory();
+            NntpSessionPoolTests.EnqueueReadyServers(transport, count: 4);
+            await using var registry = CreateRegistry(catalog, transport);
+            var original = CreateDefinition() with { MaxSessions = 4 };
+            await registry.ApplySnapshotAsync([original], CancellationToken.None);
+            Assert.True(registry.TryGetPool("Giganews", out var pool));
+
+            await registry.ApplySnapshotAsync([original with { MaxSessions = 2 }], CancellationToken.None);
+            await registry.ApplySnapshotAsync([original with { MaxSessions = 1 }], CancellationToken.None);
+            Assert.True(registry.TryGetPool("Giganews", out var shrunk));
+            Assert.Same(pool, shrunk);
+            Assert.Equal(1, shrunk.AvailablePermitCount);
+
+            NntpSessionPoolTests.EnqueueReadyServers(transport, count: 2);
+            await registry.ApplySnapshotAsync([original with { MaxSessions = 3 }], CancellationToken.None);
+            Assert.True(registry.TryGetPool("Giganews", out var grown));
+            Assert.Same(pool, grown);
+            Assert.Equal(3, grown.Provider.MaxSessions);
+            Assert.Equal(3, grown.AvailablePermitCount);
+            Assert.Equal(3, grown.LiveSessionCount);
+
+            var leases = new List<NntpSessionLease>();
+            try
+            {
+                for (var i = 0; i < 3; i++)
+                {
+                    leases.Add(await grown.AcquireAsync(CancellationToken.None));
+                }
+
+                Assert.Equal(3, grown.ActiveLeaseCount);
+                Assert.Equal(0, grown.AvailablePermitCount);
+            }
+            finally
+            {
+                foreach (var lease in leases)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
         /// Min/Max session bound changes replace only the affected provider pool.
         /// </summary>
 

@@ -75,6 +75,245 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Shrinking 4 to 2 and then to 1 leaves one acquire permit for a healthy idle session.
+        /// </summary>
+        [Fact]
+        public async Task Successive_shrink_to_one_still_acquires_the_idle_session()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 4);
+            var pool = CreatePool(factory, max: 4);
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                BindMax(pool, 2);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                BindMax(pool, 1);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+                var lease = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+                Assert.True(lease.Session.IsReusable);
+                await lease.DisposeAsync();
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+            }
+            finally
+            {
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Leases held across 4 to 2 to 1 still return the pool to one usable permit and do not leave a second permit behind.
+        /// </summary>
+        [Fact]
+        public async Task Successive_shrink_with_active_leases_is_not_starved_after_return()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 4);
+            var pool = CreatePool(factory, max: 4);
+            var leases = new List<NntpSessionLease>();
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                for (var i = 0; i < 3; i++)
+                {
+                    leases.Add(await pool.AcquireAsync(CancellationToken.None));
+                }
+
+                BindMax(pool, 2);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                BindMax(pool, 1);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                Assert.Equal(3, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+
+                foreach (var lease in leases)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                leases.Clear();
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+
+                var again = await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+                await again.DisposeAsync();
+                Assert.Equal(1, pool.AvailablePermitCount);
+            }
+            finally
+            {
+                foreach (var lease in leases)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// A shrink that overlaps two reserved acquires issues only the final bound and still wakes the loser after return.
+        /// </summary>
+        [Fact]
+        public async Task Shrink_during_reserved_acquire_issues_only_the_final_bound()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 2);
+            var pool = CreatePool(factory, max: 2);
+            using var acquireCancellation = new CancellationTokenSource();
+            var entered = 0;
+            var bothEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pool.BeforePermitIssuance = () =>
+            {
+                if (Interlocked.Increment(ref entered) == 2)
+                {
+                    bothEntered.TrySetResult();
+                }
+
+                return release.Task;
+            };
+            Task<NntpSessionLease>? first = null;
+            Task<NntpSessionLease>? second = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                first = pool.AcquireAsync(acquireCancellation.Token);
+                second = pool.AcquireAsync(acquireCancellation.Token);
+                await bothEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                BindMax(pool, 1);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                release.TrySetResult();
+
+                await WaitUntilAsync(() =>
+                    (first.IsCompletedSuccessfully && !second.IsCompleted && pool.ActiveLeaseCount == 1 && pool.AvailablePermitCount == 0)
+                    || (second.IsCompletedSuccessfully && !first.IsCompleted && pool.ActiveLeaseCount == 1 && pool.AvailablePermitCount == 0));
+                var winner = first.IsCompletedSuccessfully ? first : second;
+                var loser = ReferenceEquals(winner, first) ? second : first;
+                var lease = await winner;
+                Assert.False(loser.IsCompleted);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+
+                await lease.DisposeAsync();
+                var followed = await loser.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                await followed.DisposeAsync();
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.AvailablePermitCount);
+            }
+            finally
+            {
+                release.TrySetResult();
+                pool.BeforePermitIssuance = null;
+                acquireCancellation.Cancel();
+                await SettleAcquireAsync(first);
+                await SettleAcquireAsync(second);
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Growing after 4 to 2 to 1 restores three permits and serves three acquires.
+        /// </summary>
+        [Fact]
+        public async Task Growth_after_successive_shrinks_restores_the_new_bound()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 4);
+            var pool = CreatePool(factory, max: 4);
+            var leases = new List<NntpSessionLease>();
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                BindMax(pool, 2);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                BindMax(pool, 1);
+                await pool.ShrinkToBoundAsync(CancellationToken.None);
+                EnqueueReadyServers(factory, count: 2);
+                BindMax(pool, 3);
+                pool.GrowToBound();
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+
+                Assert.Equal(3, pool.AvailablePermitCount);
+                Assert.Equal(3, pool.LiveSessionCount);
+                for (var i = 0; i < 3; i++)
+                {
+                    leases.Add(await pool.AcquireAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)));
+                }
+
+                Assert.Equal(3, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+            }
+            finally
+            {
+                foreach (var lease in leases)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Cancelling a permit wait does not consume the held lease's permit, and dispose rejects a later acquire.
+        /// </summary>
+        [Fact]
+        public async Task Cancelled_permit_wait_and_dispose_do_not_strand_or_leak_permits()
+        {
+            var factory = new ScriptedNntpTransportFactory();
+            EnqueueReadyServers(factory, count: 1);
+            var pool = CreatePool(factory, max: 1);
+            NntpSessionLease? lease = null;
+            var pending = Task.CompletedTask;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                var cts = new CancellationTokenSource();
+                pending = pool.AcquireAsync(cts.Token);
+                cts.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(0, pool.AvailablePermitCount);
+
+                var dispose = pool.DisposeAsync().AsTask();
+                await lease.DisposeAsync();
+                lease = null;
+                await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+                await Assert.ThrowsAsync<ObjectDisposedException>(() => pool.AcquireAsync(CancellationToken.None));
+            }
+            finally
+            {
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+
+                try
+                {
+                    await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// Released healthy lease reuses the same connection when max is one.
         /// </summary>
 
@@ -851,6 +1090,45 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <param name="establishment">Optional establishment gate; defaults to a high concurrency gate.</param>
         /// <param name="backbone">Provider backbone name used in logs.</param>
         /// <param name="logger">Logger instance; defaults to null logger.</param>
+        /// <summary>Binds the same scripted provider with a new <paramref name="max"/>.</summary>
+        /// <param name="pool">Pool created by <see cref="CreatePool"/> for Giganews on 127.0.0.1:119.</param>
+        /// <param name="max">New session bound. Must be at least 1.</param>
+        private static void BindMax(NntpSessionPool pool, int max) =>
+            pool.BindProvider(new BackFillerProviderDefinition(
+                "Giganews",
+                "127.0.0.1",
+                119,
+                false,
+                null,
+                null,
+                0,
+                max));
+
+        /// <summary>Disposes a finished acquire and ignores cancellation or disposal of one that did not issue.</summary>
+        /// <param name="acquire">Acquire started by the test, or null when it was never started.</param>
+        private static async Task SettleAcquireAsync(Task<NntpSessionLease>? acquire)
+        {
+            if (acquire is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var lease = await acquire.WaitAsync(TimeSpan.FromSeconds(2));
+                await lease.DisposeAsync();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (TimeoutException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
         internal static NntpSessionPool CreatePool(
             ScriptedNntpTransportFactory factory,
             int max,

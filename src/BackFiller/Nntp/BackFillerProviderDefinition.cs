@@ -57,6 +57,24 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
+        /// Returns whether <paramref name="previous"/> differs only by a higher <see cref="MaxSessions"/>.
+        /// A different <see cref="MinSessions"/> still replaces the pool.
+        /// </summary>
+        /// <param name="previous">Earlier definition to compare.</param>
+        /// <returns>
+        /// <see langword="true"/> when this <see cref="MaxSessions"/> is greater than <paramref name="previous"/>'s,
+        /// <see cref="MinSessions"/> is unchanged, and <see cref="HasSameConnectionIdentity"/> is true.
+        /// </returns>
+        /// <exception cref="ArgumentNullException"><paramref name="previous"/> is null.</exception>
+        internal bool IsMaxSessionsGrowthOf(BackFillerProviderDefinition previous)
+        {
+            ArgumentNullException.ThrowIfNull(previous);
+            return MaxSessions > previous.MaxSessions
+                && MinSessions == previous.MinSessions
+                && HasSameConnectionIdentity(previous);
+        }
+
+        /// <summary>
         /// Returns whether upstream connection identity matches <paramref name="other"/>.
         /// <see cref="MinSessions"/> and <see cref="MaxSessions"/> are ignored.
         /// </summary>
