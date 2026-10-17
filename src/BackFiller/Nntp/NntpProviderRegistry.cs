@@ -233,6 +233,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>
         /// Publishes <paramref name="providers"/> and reconciles pools. Unchanged providers keep their pool.
         /// A MaxSessions-only shrink keeps the pool and retires consumers above the new limit first.
+        /// A MaxSessions-only increase keeps the pool, restores acquire permits, and connects the added slots.
         /// Consumers for removed or replaced providers are retired before NNTP teardown.
         /// </summary>
         /// <param name="providers">
@@ -244,7 +245,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Cancellation after a replacement pool has been inserted leaves that pool in the map.
         /// </param>
         /// <remarks>
-        /// A disposed registry returns without changing pools. After shrinks and removals are drained, new and replacement pools are connected, capacity is published, and a running consumer reconciler is asked to reconcile.
+        /// A disposed registry returns without changing pools. After shrinks, in-place growth, and removals, new and replacement pools are connected, capacity is published, and a running consumer reconciler is asked to reconcile.
         /// Consumer retirement is skipped when <see cref="Consumers"/> is missing or not running.
         /// </remarks>
         internal async Task ApplySnapshotAsync(
@@ -254,6 +255,7 @@ namespace VectorNNTP.BackFiller.Nntp
             ArgumentNullException.ThrowIfNull(providers);
             var retiring = new List<NntpSessionPool>();
             var shrinking = new List<NntpSessionPool>();
+            var growing = new List<NntpSessionPool>();
             var warming = new List<NntpSessionPool>();
             lock (_gate)
             {
@@ -295,6 +297,13 @@ namespace VectorNNTP.BackFiller.Nntp
                     {
                         pair.Value.BindProvider(next);
                         shrinking.Add(pair.Value);
+                        continue;
+                    }
+
+                    if (next.IsMaxSessionsGrowthOf(pair.Value.Provider))
+                    {
+                        pair.Value.BindProvider(next);
+                        growing.Add(pair.Value);
                         continue;
                     }
 
@@ -342,6 +351,12 @@ namespace VectorNNTP.BackFiller.Nntp
             foreach (var pool in shrinking)
             {
                 await pool.ShrinkToBoundAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var pool in growing)
+            {
+                pool.GrowToBound();
+                await pool.EnsureDesiredSessionsAsync(cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var pool in retiring)
