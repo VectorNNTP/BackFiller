@@ -274,11 +274,11 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var pool = CreatePool(factory, max: 1);
             NntpSessionLease? lease = null;
             var pending = Task.CompletedTask;
+            using var cts = new CancellationTokenSource();
             try
             {
                 await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
                 lease = await pool.AcquireAsync(CancellationToken.None);
-                var cts = new CancellationTokenSource();
                 pending = pool.AcquireAsync(cts.Token);
                 cts.Cancel();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
@@ -302,11 +302,15 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 {
                     await pending.WaitAsync(TimeSpan.FromSeconds(2));
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException ex)
                 {
+                    // The pending acquire was cancelled and has finished. cts is still alive until this method returns.
+                    ObserveExpectedCleanup(ex);
                 }
-                catch (ObjectDisposedException)
+                catch (ObjectDisposedException ex)
                 {
+                    // Pool disposal won the race with the pending acquire.
+                    ObserveExpectedCleanup(ex);
                 }
 
                 await pool.DisposeAsync();
@@ -1118,15 +1122,31 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 var lease = await acquire.WaitAsync(TimeSpan.FromSeconds(2));
                 await lease.DisposeAsync();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                // Cleanup cancelled the acquire before it issued a lease.
+                ObserveExpectedCleanup(ex);
             }
-            catch (TimeoutException)
+            catch (TimeoutException ex)
             {
+                // The acquire did not finish within the cleanup bound.
+                ObserveExpectedCleanup(ex);
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException ex)
             {
+                // The pool was disposed while this acquire was still settling.
+                ObserveExpectedCleanup(ex);
             }
+        }
+
+        /// <summary>Records an exception that test teardown expects and does not rethrow.</summary>
+        /// <param name="exception">Cancellation, timeout, or disposal observed while joining a test acquire.</param>
+        private static void ObserveExpectedCleanup(Exception exception)
+        {
+            System.Diagnostics.Trace.TraceInformation(
+                "Test cleanup ignored {0}: {1}",
+                exception.GetType().Name,
+                exception.Message);
         }
 
         internal static NntpSessionPool CreatePool(
