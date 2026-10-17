@@ -275,5 +275,18 @@ namespace VectorNNTP.BackFiller.Nntp
             Level = LogLevel.Debug,
             Message = "{Session}: handshake cancellation callback failed error={ErrorType}")]
         internal static partial void WireHandshakeCancellationFailed(ILogger logger, string Session, string ErrorType);
+
+        /// <summary>
+        /// Written at Debug when disposing the captured transport throws after QUIT was attempted or skipped.
+        /// The session still transitions to <see cref="NntpSessionState.Closed"/>.
+        /// </summary>
+        /// <param name="logger">Logger that receives the debug event.</param>
+        /// <param name="Session"><see cref="NntpProviderSession.WireLogIdentity"/> for the session.</param>
+        /// <param name="ErrorType">Runtime exception type from the transport dispose.</param>
+        [LoggerMessage(
+            EventId = 5420,
+            Level = LogLevel.Debug,
+            Message = "{Session}: transport dispose failed error={ErrorType}")]
+        internal static partial void WireTransportDisposeFailed(ILogger logger, string Session, string ErrorType);
     }
 }

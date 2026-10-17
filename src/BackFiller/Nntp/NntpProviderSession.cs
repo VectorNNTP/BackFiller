@@ -33,8 +33,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>
         /// Serializes <see cref="DownloadArticleAsync"/> and <see cref="SendDateKeepAliveAsync"/>.
         /// Held from the start of the command until its response has been consumed or the attempt has failed.
-        /// Not held during connect or dispose. <see cref="WaitForCurrentCommandAsync"/> waits for the current holder and does not keep the gate.
+        /// Not held during connect. <see cref="WaitForCurrentCommandAsync"/> waits for the current holder and does not keep the gate.
         /// </summary>
+        /// <remarks>
+        /// <see cref="DisposeAsync"/> does not dispose this semaphore. A command may still call <see cref="ReleaseCommandGate"/> after disposal has returned, and disposing the gate first throws from that release.
+        /// The async wait path does not allocate the semaphore's kernel handle. The gate is abandoned with the session once every holder has released it.
+        /// </remarks>
         private readonly SemaphoreSlim _busy = new(1, 1);
 
         /// <summary>Owned transport. Null until connect assigns it, and null again if a TLS upgrade fails after closing it.</summary>
@@ -325,8 +329,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A DATE failure that marked the session unhealthy while this call waited returns that same non-reusable provider failure and does not write ARTICLE.
         /// A status-line timeout becomes <see cref="TimeoutException"/> inside <see cref="ReadStatusAsync"/> and is then classified as provider failure whose reason is that exception's type name.
         /// A payload timeout is classified as provider failure with the reason <c>ARTICLE timed out.</c>
-        /// Disposal during the command clears the session fields and disposes <see cref="_busy"/>. The in-flight call keeps the reader and stream it already captured.
-        /// <see cref="ObjectDisposedException"/> from releasing that disposed gate is ignored so the classified result is what the caller observes.
+        /// Disposal during the command clears the session fields and aborts the transport. It does not dispose <see cref="_busy"/>. The in-flight call keeps the reader it already captured and releases the gate after the attempt ends.
         /// </remarks>
         internal async Task<ArticleRetrievalResult> DownloadArticleAsync(
             string messageId,
@@ -562,15 +565,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     AssignState(previous);
                 }
 
-                try
-                {
-                    _ = _busy.Release();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // DisposeAsync disposes this gate while ARTICLE is still inside it.
-                    // The try block already classified the failed read or write. Releasing a disposed gate must not replace that result.
-                }
+                ReleaseCommandGate();
             }
 
             if (consumerError is not null)
@@ -593,19 +588,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A caller that only observed <see cref="NntpSessionState.Busy"/> uses this wait instead of polling that state.
         /// The wait takes the gate and drops it immediately, so the caller does not own the command and a later ARTICLE can acquire the gate.
         /// Completing some other keepalive task does not release this gate. After the wait, the caller must read <see cref="IsReusable"/> again.
-        /// Disposal of the gate while this method drops it is ignored because the session is already shutting down.
+        /// <see cref="DisposeAsync"/> does not dispose the gate, so this release still belongs to the waiter that observed the current command finish.
         /// </remarks>
         internal async Task WaitForCurrentCommandAsync(CancellationToken cancellationToken)
         {
             await _busy.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                _busy.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // DisposeAsync disposes the gate after this wait observed the current command release it.
-            }
+            ReleaseCommandGate();
         }
 
         /// <summary>
@@ -710,34 +698,40 @@ namespace VectorNNTP.BackFiller.Nntp
                     AssignState(previous);
                 }
 
-                _ = _busy.Release();
+                ReleaseCommandGate();
             }
         }
 
         /// <summary>
-        /// Retires the session, best-effort writes <c>QUIT</c>, and disposes the transport.
+        /// Retires the session. An idle ready session sends <c>QUIT</c> before the transport is closed. An active command is aborted instead.
         /// A second call returns immediately.
         /// </summary>
         /// <remarks>
-        /// <c>QUIT</c> uses a two-second timeout and is not followed by a response read.
-        /// Write and flush failures, including <see cref="SocketException"/> and <see cref="NotSupportedException"/> from an overlapping <see cref="SslStream"/> write, are logged and do not escape.
-        /// The transport is still disposed once after that best-effort write.
+        /// <c>QUIT</c> is written only when <see cref="State"/> is <see cref="NntpSessionState.Ready"/>, the session is healthy, and <see cref="_busy"/> is free.
+        /// That is the idle case: no ARTICLE or DATE call holds the command gate, and connect is not using the stream.
+        /// The write uses a two-second timeout and is not followed by a response read. The gate stays held until that write finishes, so QUIT cannot overlap another command.
+        /// Write and flush failures, including <see cref="SocketException"/> and <see cref="NotSupportedException"/>, are logged and do not escape.
+        /// When the gate is already held, QUIT is skipped. Closing the captured transport unblocks that command's pending read or write. This method does not wait for the command and does not take the gate.
+        /// The transport is still disposed once. A failure from that dispose is logged and does not skip <see cref="NntpSessionState.Closed"/>.
+        /// <see cref="_busy"/> is not disposed. The command that holds it releases the gate after it unwinds, including when this method has already returned.
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
         /// The transport reference is captured under <see cref="_transportGate"/> before any await, and the fields are cleared there.
         /// A STARTTLS upgrade that already owns the plaintext transport disposes the TLS wrapper itself. This method does not dispose that transport again.
         /// The first call cancels the session handshake token, so a handshake still inside <see cref="NntpTlsClient.AuthenticateAsClientAsync"/> ends even when the caller's token is not cancelled.
-        /// <see cref="AggregateException"/> or <see cref="ObjectDisposedException"/> from that cancellation is logged and does not skip transport disposal, <see cref="_busy"/> disposal, or the transition to <see cref="NntpSessionState.Closed"/>.
+        /// <see cref="AggregateException"/> or <see cref="ObjectDisposedException"/> from that cancellation is logged and does not skip transport disposal or the transition to <see cref="NntpSessionState.Closed"/>.
         /// An upgrade that publishes before this capture is the stream that is closed here, so the wrapper is not left on a closed session.
         /// After the transport dispose is attempted, <see cref="_stream"/> and <see cref="_reader"/> stay clear.
         /// That drops the receive buffer and the article scratch buffer owned by the reader.
         /// Bytes already copied into a <see cref="RetrievedArticle"/> stay with that article.
         /// An in-flight read holds the reader on its own stack until it returns; clearing the fields does not mutate that reader.
-        /// <see cref="_busy"/> is disposed. <see cref="State"/> ends as <see cref="NntpSessionState.Closed"/>.
+        /// <see cref="State"/> ends as <see cref="NntpSessionState.Closed"/>.
         /// Command paths assign <see cref="State"/> through <see cref="AssignState"/>, which returns once <see cref="_disposed"/> is set, so they do not replace that terminal value.
+        /// This method does not hold <see cref="_transportGate"/> across an await.
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
             Stream? stream;
+            var idleQuit = false;
             lock (_transportGate)
             {
                 if (Interlocked.Exchange(ref _disposed, 1) == 1)
@@ -745,42 +739,104 @@ namespace VectorNNTP.BackFiller.Nntp
                     return;
                 }
 
+                idleQuit = State == NntpSessionState.Ready && !_unhealthy && _stream is not null;
                 stream = _upgradeOwnsTransport == 1 ? null : _stream;
-
                 _stream = null;
                 _reader = null;
             }
 
+            var holdsGate = false;
             try
-            {
-                await _handshakeCancellation.CancelAsync().ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
-            {
-                NntpLogMessages.WireHandshakeCancellationFailed(_logger, _wireIdentity, ex.GetType().Name);
-            }
-
-            State = NntpSessionState.Retiring;
-            NntpLogMessages.WireRetiring(_logger, _wireIdentity);
-            if (stream is not null)
             {
                 try
                 {
-                    NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
-                    await stream.FlushAsync(cts.Token).ConfigureAwait(false);
+                    await _handshakeCancellation.CancelAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
+                {
+                    NntpLogMessages.WireHandshakeCancellationFailed(_logger, _wireIdentity, ex.GetType().Name);
+                }
+
+                State = NntpSessionState.Retiring;
+                NntpLogMessages.WireRetiring(_logger, _wireIdentity);
+                if (stream is null)
+                {
+                    return;
+                }
+
+                if (idleQuit)
+                {
+                    try
+                    {
+                        holdsGate = await _busy.WaitAsync(TimeSpan.Zero).ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        holdsGate = false;
+                    }
+                }
+
+                if (holdsGate)
+                {
+                    await WriteQuitAsync(stream).ConfigureAwait(false);
+                }
+
+                try
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException or NotSupportedException)
                 {
-                    NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
+                    NntpLogMessages.WireTransportDisposeFailed(_logger, _wireIdentity, ex.GetType().Name);
+                }
+            }
+            finally
+            {
+                if (holdsGate)
+                {
+                    ReleaseCommandGate();
                 }
 
-                await stream.DisposeAsync().ConfigureAwait(false);
+                State = NntpSessionState.Closed;
             }
+        }
 
-            _busy.Dispose();
-            State = NntpSessionState.Closed;
+        /// <summary>Writes one best-effort <c>QUIT</c> on <paramref name="stream"/> while the caller holds <see cref="_busy"/>.</summary>
+        /// <param name="stream">Transport captured before the session fields were cleared. Not the field, which is already null.</param>
+        /// <remarks>
+        /// The two-second budget cancels only this write. A failure is logged and does not escape, so the caller still closes <paramref name="stream"/>.
+        /// </remarks>
+        private async Task WriteQuitAsync(Stream stream)
+        {
+            try
+            {
+                NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
+                await stream.FlushAsync(cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException or NotSupportedException)
+            {
+                NntpLogMessages.WireQuitFailed(_logger, _wireIdentity, ex.GetType().Name);
+            }
+        }
+
+        /// <summary>Releases <see cref="_busy"/> after the command that acquired it has finished with the transport.</summary>
+        /// <remarks>
+        /// Called from the command <c>finally</c> and from a graceful dispose that acquired the gate to send <c>QUIT</c>.
+        /// <see cref="ObjectDisposedException"/> is ignored so a classified command result is not replaced when the gate is already gone.
+        /// This method does not dispose the gate. A later release from a command that was already inside it must still succeed.
+        /// </remarks>
+        private void ReleaseCommandGate()
+        {
+            try
+            {
+                _busy.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A disposed gate must not replace the command result already classified in the try block.
+            }
         }
 
         /// <summary>

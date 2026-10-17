@@ -1362,6 +1362,226 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             }
         }
 
+        /// <summary>
+        /// An idle ready session writes one QUIT, closes the transport once, and ends Closed.
+        /// </summary>
+        [Fact]
+        public async Task Idle_dispose_writes_quit_and_closes_once()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+
+            await session.DisposeAsync();
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Contains(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+            Assert.DoesNotContain(logger.Messages, static message => message.Contains("QUIT failed during dispose", StringComparison.Ordinal));
+            Assert.False(session.IsReusable);
+        }
+
+        /// <summary>
+        /// QUIT and transport-dispose failures are logged, and the session still closes without a second transport dispose.
+        /// </summary>
+        [Fact]
+        public async Task Quit_and_transport_dispose_failures_still_close_the_session()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer
+            {
+                FaultClientQuitWrite = true,
+                FaultClientDispose = true,
+            };
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+
+            await session.DisposeAsync();
+            await session.DisposeAsync();
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Contains(
+                logger.Entries,
+                static entry => entry.EventId.Id == 5417 && entry.Message.Contains(nameof(SocketException), StringComparison.Ordinal));
+            Assert.Contains(
+                logger.Entries,
+                static entry => entry.EventId.Id == 5420 && entry.Message.Contains(nameof(IOException), StringComparison.Ordinal));
+            Assert.False(session.IsReusable);
+        }
+
+        /// <summary>
+        /// Two overlapping dispose calls send QUIT once and close the transport once.
+        /// </summary>
+        [Fact]
+        public async Task Concurrent_dispose_of_an_idle_session_quits_once()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+
+            await Task.WhenAll(session.DisposeAsync().AsTask(), session.DisposeAsync().AsTask());
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(1, logger.Messages.Count(static message => message.Contains("TX: QUIT", StringComparison.Ordinal)));
+        }
+
+        /// <summary>
+        /// A command waiting to enter the gate does not write after disposal has already closed the idle session.
+        /// </summary>
+        [Fact]
+        public async Task Article_waiting_to_enter_does_not_write_after_dispose()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            session.BeforeArticleBusyWait = () =>
+            {
+                entered.TrySetResult();
+                return release.Task;
+            };
+            var download = session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Contains(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+
+                release.TrySetResult();
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.DoesNotContain(server.Commands, static command => command.StartsWith("ARTICLE", StringComparison.Ordinal));
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: ARTICLE", StringComparison.Ordinal));
+            }
+            finally
+            {
+                release.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Disposal while ARTICLE is blocked in its write aborts that write and does not send QUIT.
+        /// The command releases the gate after the abort, so unwind does not depend on a disposed semaphore.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_blocked_article_write_skips_quit_and_unwinds()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            AbortingWriteStream? gate = null;
+            var server = new ScriptedNntpServer
+            {
+                ClientStreamDecorator = inner =>
+                {
+                    gate = new AbortingWriteStream(inner, entered);
+                    return gate;
+                },
+            };
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            Assert.NotNull(gate);
+            gate.Arm();
+            var download = session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Equal(1, gate.MaxWriteDepth);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+                Assert.Null(SessionField(session, "_stream"));
+            }
+            finally
+            {
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Disposal while ARTICLE is waiting for a response closes the transport and does not write QUIT.
+        /// The pending read ends, and the command still releases its gate.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_during_blocked_article_read_skips_quit_and_unwinds()
+        {
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockArticle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer
+            {
+                ArticleStarted = articleStarted,
+                BlockArticle = blockArticle,
+            };
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            var download = session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+            try
+            {
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await session.DisposeAsync();
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.False(result.SessionReusable);
+                Assert.Equal(NntpSessionState.Closed, session.State);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Contains(server.Commands, static command => command.StartsWith("ARTICLE", StringComparison.Ordinal));
+                Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+                Assert.DoesNotContain(server.Commands, static command => command.StartsWith("QUIT", StringComparison.Ordinal));
+            }
+            finally
+            {
+                blockArticle.TrySetResult();
+                try
+                {
+                    using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                {
+                    _ = ex.GetType();
+                }
+            }
+        }
+
         /// <summary>Reads a private instance field from <paramref name="session"/> after the operation under test has quiesced.</summary>
         /// <param name="session">Session whose field is observed.</param>
         /// <param name="name">Field name, including its underscore prefix.</param>
@@ -1668,6 +1888,134 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
 
                 base.Dispose(disposing);
             }
+        }
+    }
+
+    /// <summary>
+    /// Forwards a duplex stream and, once <see cref="Arm"/> is called, holds every later write until this stream is disposed.
+    /// Disposal completes the hold so the blocked command can unwind.
+    /// </summary>
+    internal sealed class AbortingWriteStream : Stream
+    {
+        /// <summary>Inner duplex stream. Owned by this wrapper.</summary>
+        private readonly Stream _inner;
+
+        /// <summary>Completed when the first armed write enters.</summary>
+        private readonly TaskCompletionSource _entered;
+
+        /// <summary>Completed by <see cref="DisposeAsync"/> so the armed write can throw.</summary>
+        private readonly TaskCompletionSource _aborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>One after <see cref="Arm"/>.</summary>
+        private int _armed;
+
+        /// <summary>Armed writes currently inside <see cref="WriteAsync"/>.</summary>
+        private int _depth;
+
+        /// <summary>Highest value observed in <see cref="_depth"/>.</summary>
+        private int _maxDepth;
+
+        /// <summary>Wraps <paramref name="inner"/> and signals <paramref name="entered"/> from the first armed write.</summary>
+        /// <param name="inner">Scripted client stream.</param>
+        /// <param name="entered">Completed when an armed write is blocked.</param>
+        internal AbortingWriteStream(Stream inner, TaskCompletionSource entered)
+        {
+            _inner = inner;
+            _entered = entered;
+        }
+
+        /// <summary>The next writes wait until this stream is disposed.</summary>
+        internal void Arm() => Volatile.Write(ref _armed, 1);
+
+        /// <summary>Gets the most armed writes that were inside <see cref="WriteAsync"/> at once.</summary>
+        internal int MaxWriteDepth => Volatile.Read(ref _maxDepth);
+
+        /// <inheritdoc />
+        public override bool CanRead => _inner.CanRead;
+
+        /// <inheritdoc />
+        public override bool CanSeek => false;
+
+        /// <inheritdoc />
+        public override bool CanWrite => _inner.CanWrite;
+
+        /// <inheritdoc />
+        public override long Length => _inner.Length;
+
+        /// <inheritdoc />
+        public override long Position
+        {
+            get => _inner.Position;
+            set => throw new NotSupportedException();
+        }
+
+        /// <inheritdoc />
+        public override void Flush() => _inner.Flush();
+
+        /// <inheritdoc />
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            _inner.ReadAsync(buffer, cancellationToken);
+
+        /// <summary>Forwards a write, or holds it after <see cref="Arm"/> until disposal.</summary>
+        /// <param name="buffer">Command bytes.</param>
+        /// <param name="cancellationToken">Cancels the hold and the inner write.</param>
+        /// <returns>The inner write, or a fault after the hold is released by disposal.</returns>
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Volatile.Read(ref _armed) == 0)
+            {
+                await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var depth = Interlocked.Increment(ref _depth);
+            UpdateMax(depth);
+            try
+            {
+                _entered.TrySetResult();
+                await _aborted.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                throw new IOException("forced abort");
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _depth);
+            }
+        }
+
+        /// <summary>Releases a held write, then disposes the inner stream.</summary>
+        /// <returns>The inner dispose task.</returns>
+        public override ValueTask DisposeAsync()
+        {
+            _aborted.TrySetResult();
+            return _inner.DisposeAsync();
+        }
+
+        /// <summary>Records <paramref name="depth"/> when it exceeds the current maximum.</summary>
+        /// <param name="depth">Armed writes inside <see cref="WriteAsync"/>.</param>
+        private void UpdateMax(int depth)
+        {
+            int current;
+            do
+            {
+                current = Volatile.Read(ref _maxDepth);
+                if (depth <= current)
+                {
+                    return;
+                }
+            }
+            while (Interlocked.CompareExchange(ref _maxDepth, depth, current) != current);
         }
     }
 }
