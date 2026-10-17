@@ -1285,6 +1285,161 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Idle membership and its DATE registration are published together, so acquisition cannot see an idle session without that registration.
+        /// Taking the session clears both, and the next return installs a new pair. The transport stays open.
+        /// </summary>
+        [Fact]
+        public async Task Idle_publication_installs_keepalive_before_acquisition_can_observe_it()
+        {
+            var server = CreateDateAwareServer();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var clock = new KeepAliveDelaySource();
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            int? idleAtPublish = null;
+            int? keepalivesAtPublish = null;
+            pool.IdleKeepAliveLinearized = (idleCount, keepaliveCount) =>
+            {
+                idleAtPublish = idleCount;
+                keepalivesAtPublish = keepaliveCount;
+            };
+            NntpSessionLease? lease = null;
+            NntpSessionLease? taken = null;
+            try
+            {
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                await lease.DisposeAsync();
+                lease = null;
+                Assert.Equal(1, idleAtPublish);
+                Assert.Equal(1, keepalivesAtPublish);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+
+                taken = await pool.AcquireAsync(CancellationToken.None);
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.True(taken.Session.IsReusable);
+                await taken.DisposeAsync();
+                taken = null;
+                Assert.Equal(1, idleAtPublish);
+                Assert.Equal(1, keepalivesAtPublish);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(0, server.ClientStreamDisposeCount);
+                Assert.Equal(0, server.ClientStreamDisposeAsyncCount);
+            }
+            finally
+            {
+                pool.IdleKeepAliveLinearized = null;
+                if (taken is not null)
+                {
+                    await taken.DisposeAsync();
+                }
+
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pool disposal waits for a superseded DATE loop that is no longer the published registration.
+        /// The transport is closed once, after that loop is released, and the late exit does not close it again.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_waits_for_superseded_keepalive_and_closes_the_transport_once()
+        {
+            var server = CreateDateAwareServer();
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(server);
+            var clock = new KeepAliveDelaySource();
+            var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            var releaseOld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var oldExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task? oldLoop = null;
+            IReadOnlyList<Task>? drained = null;
+            var exits = 0;
+            pool.KeepAliveLoopExitGate = loop =>
+            {
+                if (Interlocked.Increment(ref exits) == 1)
+                {
+                    oldLoop = loop;
+                    oldExited.TrySetResult();
+                    return releaseOld.Task;
+                }
+
+                return Task.CompletedTask;
+            };
+            pool.KeepAliveDrainSnapshot = tasks =>
+            {
+                drained = tasks;
+                drainEntered.TrySetResult();
+                return releaseDrain.Task;
+            };
+            try
+            {
+                var lease = await pool.AcquireAsync(CancellationToken.None);
+                await lease.DisposeAsync();
+                _ = await clock.WaitForKeepAliveAsync();
+                lease = await pool.AcquireAsync(CancellationToken.None);
+                var session = lease.Session;
+                await oldExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await lease.DisposeAsync();
+                _ = await clock.WaitForKeepAliveAsync();
+                Assert.Equal(1, pool.ActiveKeepAliveCount);
+                Assert.Equal(1, pool.IdleSessionCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.True(session.IsReusable);
+
+                var dispose = pool.DisposeAsync().AsTask();
+                await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(dispose.IsCompleted);
+                Assert.NotNull(oldLoop);
+                Assert.NotNull(drained);
+                Assert.False(oldLoop.IsCompleted);
+                Assert.Contains(oldLoop, drained);
+                Assert.Equal(0, server.ClientStreamDisposeCount);
+                Assert.Equal(0, server.ClientStreamDisposeAsyncCount);
+                Assert.Equal(1, pool.LiveSessionCount);
+
+                releaseOld.TrySetResult();
+                await oldLoop.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(dispose.IsCompleted);
+                releaseDrain.TrySetResult();
+                await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, pool.IdleSessionCount);
+                Assert.Equal(0, pool.ActiveKeepAliveCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, server.ClientStreamDisposeAsyncCount);
+            }
+            finally
+            {
+                releaseOld.TrySetResult();
+                releaseDrain.TrySetResult();
+                pool.KeepAliveLoopExitGate = null;
+                pool.KeepAliveDrainSnapshot = null;
+                if (oldLoop is not null)
+                {
+                    await oldLoop.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// A keepalive that already passed cancellation still sends DATE on the shutdown token after its registration is detached.
         /// ARTICLE that passed its first check and waited for that DATE must not write after DATE marks the session unhealthy.
         /// </summary>
