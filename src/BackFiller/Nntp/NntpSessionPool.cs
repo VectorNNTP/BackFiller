@@ -135,6 +135,12 @@ namespace VectorNNTP.BackFiller.Nntp
         private Func<Task>? _beforePermitIssuance;
 
         /// <summary>
+        /// Test gate invoked after a retired session has left the live set and before that session is disposed.
+        /// Null in production. The delegate runs outside <see cref="_idleGate"/> and must not be required for accounting to stay committed.
+        /// </summary>
+        private Func<Task>? _beforeDetachedSessionDispose;
+
+        /// <summary>
         /// Test gate invoked after a DATE loop passes its cancellation check and before it reads <see cref="NntpProviderSession.IsReusable"/>.
         /// Null in production. The delegate runs outside <see cref="_idleGate"/>.
         /// </summary>
@@ -491,6 +497,17 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             get => _beforeKeepAliveReusabilityCheck;
             set => _beforeKeepAliveReusabilityCheck = value;
+        }
+
+        /// <summary>
+        /// Pauses retirement after the session has left <see cref="_live"/> and before <see cref="DisposeDetachedSessionAsync"/>.
+        /// Null unless a test is holding that window. The delegate runs outside <see cref="_idleGate"/>.
+        /// Accounting for the retired session is already committed. Replacement fill runs after the pause and the dispose.
+        /// </summary>
+        internal Func<Task>? BeforeDetachedSessionDispose
+        {
+            get => _beforeDetachedSessionDispose;
+            set => _beforeDetachedSessionDispose = value;
         }
 
         /// <summary>
@@ -2022,13 +2039,23 @@ namespace VectorNNTP.BackFiller.Nntp
             SignalSessionRetired(session, reason);
             try
             {
-                await DisposeDetachedSessionAsync(session, session.ConnectionNumber).ConfigureAwait(false);
+                if (_beforeDetachedSessionDispose is { } beforeDispose)
+                {
+                    await beforeDispose().ConfigureAwait(false);
+                }
             }
             finally
             {
-                if (replenish)
+                try
                 {
-                    RequestReplenish();
+                    await DisposeDetachedSessionAsync(session, session.ConnectionNumber).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (replenish)
+                    {
+                        RequestReplenish();
+                    }
                 }
             }
         }
@@ -2041,6 +2068,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>
         /// Both calls are observers. Ordinary failures are contained so <see cref="RetireSessionAsync"/> still disposes
         /// the session once and does not enter retirement again. Process-integrity failures propagate.
+        /// <see cref="BeforeDetachedSessionDispose"/> runs after this notification and before that dispose. A fault from the gate still disposes the session.
         /// A logger that fails is not asked to record its own failure. A subscriber failure is recorded when the logger still works.
         /// </remarks>
         private void SignalSessionRetired(NntpProviderSession session, string reason)
