@@ -42,13 +42,18 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         private readonly TimeProvider _time;
 
-        /// <summary>How long <see cref="DisposeAsync"/> and <see cref="AwaitKeepAlivesAsync"/> wait. Defaults to two seconds.</summary>
+        /// <summary>
+        /// Absolute budget for one <see cref="DisposeAsync"/> call. Defaults to two seconds.
+        /// It starts when that call creates its <see cref="NntpShutdownDeadline"/> and covers the keepalive wait, the lease wait, and every graceful QUIT.
+        /// It is not granted again for each of those phases or for each session.
+        /// </summary>
         private readonly TimeSpan _shutdownGrace;
 
         /// <summary>
         /// Wakeup signal for <see cref="AcquirePermitAsync"/> waiters. The count is not the pool capacity.
         /// <see cref="ReleasePermit"/> releases one count only when <see cref="_permitWaiters"/> is positive.
         /// </summary>
+        // codeql[cs/missed-using-statement] Owned for the pool lifetime. A using at this declaration would release it when the constructor returns. Shutdown disposes it once, after retirement, and a second dispose returns before that finally.
         private readonly SemaphoreSlim _leases = new(0);
 
         /// <summary>
@@ -203,9 +208,11 @@ namespace VectorNNTP.BackFiller.Nntp
         private readonly Lock _slotGate = new();
 
         /// <summary>Cancelled at the start of dispose. Linked into acquire waits and DATE loops.</summary>
+        // codeql[cs/missed-using-statement] Owned for the pool lifetime and linked into acquire and DATE. A using at this declaration would cancel those waits when the constructor returns. Shutdown disposes it once, after retirement.
         private readonly CancellationTokenSource _shutdown = new();
 
         /// <summary>Serializes session creation and <see cref="ShrinkToBoundAsync"/>.</summary>
+        // codeql[cs/missed-using-statement] Owned for the pool lifetime and held across session creation. A using at this declaration would release it when the constructor returns. Shutdown disposes it once, after retirement.
         private readonly SemaphoreSlim _fillGate = new(1, 1);
 
         /// <summary>
@@ -284,7 +291,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Application-wide gate shared by every pool. Held only around
         /// <see cref="NntpProviderSession.ConnectAsync"/>.
         /// </param>
-        /// <param name="shutdownGrace">How long <see cref="DisposeAsync"/> waits for leases. Two seconds when null.</param>
+        /// <param name="shutdownGrace">
+        /// Absolute budget for <see cref="DisposeAsync"/>, from the start of that call through session retirement.
+        /// Two seconds when null. A replacement drain captures the same length once, after its lease wait, for every remaining session.
+        /// A registry shutdown passes its own deadline into <see cref="DrainAndDisposeAsync(CancellationToken, NntpShutdownDeadline)"/>
+        /// and does not add this value again.
+        /// </param>
         /// <param name="timeProvider">Clock for DATE delays and replenish waits. <see cref="TimeProvider.System"/> when null.</param>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="provider"/>, <paramref name="options"/>, <paramref name="transport"/>,
@@ -887,29 +899,68 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <param name="cancellationToken">
         /// Bounds the wait for outstanding leases. When it is cancelled, the wait ends and remaining sessions are still retired.
+        /// It does not replace the retirement deadline, and it is not a registry shutdown deadline.
         /// </param>
-        /// <returns>The dispose task. This path does not apply <see cref="_shutdownGrace"/> itself.</returns>
+        /// <returns>The dispose task.</returns>
+        /// <remarks>
+        /// The lease wait uses only <paramref name="cancellationToken"/>. It does not apply <see cref="_shutdownGrace"/>,
+        /// so a caller that has not cancelled can wait for leased work to return.
+        /// After that wait, every remaining session shares one retirement deadline of <see cref="_shutdownGrace"/>.
+        /// That deadline is not the deadline captured by an unrelated registry <see cref="NntpProviderRegistry.StopAsync"/> or <see cref="NntpProviderRegistry.DisposeAsync"/>.
+        /// </remarks>
         internal Task DrainAndDisposeAsync(CancellationToken cancellationToken) =>
-            DisposeCoreAsync(forceAfterGrace: false, cancellationToken);
+            DrainAndDisposeAsync(cancellationToken, NntpShutdownDeadline.None);
 
         /// <summary>
-        /// Stops new leases, waits up to <see cref="_shutdownGrace"/> for outstanding leases, then retires every remaining session.
+        /// Stops new leases, waits for outstanding leases, then retires remaining sessions under <paramref name="deadline"/>.
         /// </summary>
-        /// <returns>A task that completes after remaining sessions have been retired.</returns>
+        /// <param name="cancellationToken">
+        /// Ends the lease wait when cancelled, including when <paramref name="deadline"/> still has time left.
+        /// The same token cancels a QUIT write that has already started. It is not applied to ARTICLE or DATE commands.
+        /// </param>
+        /// <param name="deadline">
+        /// Absolute instant shared with every session retired by this call.
+        /// <see cref="NntpShutdownDeadline.None"/> means this call is a replacement drain: the lease wait stays on
+        /// <paramref name="cancellationToken"/>, and retirement then captures one <see cref="_shutdownGrace"/> deadline for every session.
+        /// </param>
+        /// <returns>The dispose task.</returns>
         /// <remarks>
-        /// The drain wait uses <see cref="CancellationToken.None"/> plus the grace timeout.
-        /// A grace timeout does not abandon remaining sessions. A second call returns immediately.
+        /// Registry stop and dispose create one deadline and pass it here so this pool does not start another full grace.
+        /// A cancelled wait or an expired deadline still retires the remaining sessions. An expired deadline skips graceful QUIT.
         /// </remarks>
-        public ValueTask DisposeAsync() => new(DisposeCoreAsync(forceAfterGrace: true, CancellationToken.None));
+        internal Task DrainAndDisposeAsync(CancellationToken cancellationToken, NntpShutdownDeadline deadline) =>
+            DisposeCoreAsync(forceAfterGrace: false, cancellationToken, deadline);
+
+        /// <summary>
+        /// Stops new leases, then retires every remaining session under one deadline of <see cref="_shutdownGrace"/>.
+        /// </summary>
+        /// <returns>A task that completes after remaining sessions have been retired or their cleanup fault has been observed.</returns>
+        /// <remarks>
+        /// The deadline is captured at this call. Keepalive drain, lease drain, and QUIT all use the time left on it.
+        /// A grace timeout does not abandon remaining sessions. Sessions that cannot start QUIT before the deadline abort the transport.
+        /// A second call returns immediately. An unexpected retirement fault is thrown after the other sessions have been attempted
+        /// and after the pool semaphores are disposed.
+        /// </remarks>
+        public ValueTask DisposeAsync() => new(DisposeCoreAsync(
+            forceAfterGrace: true,
+            CancellationToken.None,
+            NntpShutdownDeadline.FromBudget(_shutdownGrace)));
 
         /// <summary>
         /// Cancels shutdown, stops replenish and keepalive, waits for leases, then retires every session still tracked.
         /// </summary>
         /// <param name="forceAfterGrace">
-        /// <see langword="true"/> waits on <see cref="_drained"/> for <see cref="_shutdownGrace"/>.
-        /// <see langword="false"/> waits on <paramref name="cancellationToken"/> instead.
+        /// <see langword="true"/> when the caller is <see cref="DisposeAsync"/> and <paramref name="deadline"/> was created from <see cref="_shutdownGrace"/>.
+        /// <see langword="false"/> when the caller supplied <paramref name="cancellationToken"/> and, for registry shutdown, <paramref name="deadline"/>.
         /// </param>
-        /// <param name="cancellationToken">Drain budget when <paramref name="forceAfterGrace"/> is false. Ignored for the lease wait when it is true.</param>
+        /// <param name="cancellationToken">
+        /// Ends the lease wait and an in-flight QUIT when cancelled. Ignored for the lease wait only when
+        /// <paramref name="forceAfterGrace"/> is true, because that path has no caller token.
+        /// </param>
+        /// <param name="deadline">
+        /// Absolute shutdown instant. <see cref="NntpShutdownDeadline.None"/> is a replacement drain.
+        /// Retirement then captures one <see cref="_shutdownGrace"/> deadline instead of giving each session its own QUIT allowance.
+        /// </param>
         /// <remarks>
         /// The disposed flag is published under <see cref="_idleGate"/> before <see cref="_drained"/> is snapshotted under <see cref="_permitGate"/>.
         /// <see cref="TryReserveIssueSlot"/> cannot open a later generation after that snapshot, and the wait uses the captured generation.
@@ -917,10 +968,20 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
         /// <see cref="SuperviseReplenishAsync"/> logs an unexpected fill failure and keeps the replenish task alive until shutdown.
         /// A failure of that supervisor task itself is logged here and does not skip retirement.
-        /// Every DATE loop that has started, including one already removed from <see cref="_keepAlives"/>, is given
-        /// <see cref="_shutdownGrace"/> and then abandoned if it is still running. That wait does not hold <see cref="_idleGate"/>.
+        /// The replenish await is cancelled by the pool shutdown token before it is awaited.
+        /// <see cref="RunReplenishAsync"/> observes that token on its delay and on the fill-gate wait, so the await ends when those calls observe the cancel.
+        /// The task is not abandoned, and it is not given a second copy of <see cref="_shutdownGrace"/>.
+        /// Every DATE loop that has started, including one already removed from <see cref="_keepAlives"/>, is waited only for the time left
+        /// on <paramref name="deadline"/>, or for <see cref="_shutdownGrace"/> when that deadline is unbounded, and then abandoned if it is still running.
+        /// That wait does not hold <see cref="_idleGate"/>.
+        /// Retirement uses <see cref="NntpShutdownWork"/> so one stalled QUIT does not keep every other session from starting.
+        /// When <paramref name="deadline"/> is bounded, every session receives it. When it is unbounded, retirement captures one
+        /// <see cref="_shutdownGrace"/> instant and every session receives that instant. The pool semaphores are disposed after that attempt, including when a session throws.
         /// </remarks>
-        private async Task DisposeCoreAsync(bool forceAfterGrace, CancellationToken cancellationToken)
+        private async Task DisposeCoreAsync(
+            bool forceAfterGrace,
+            CancellationToken cancellationToken,
+            NntpShutdownDeadline deadline)
         {
             TaskCompletionSource drained;
             lock (_idleGate)
@@ -955,7 +1016,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 }
             }
 
-            await AwaitKeepAlivesAsync().ConfigureAwait(false);
+            await AwaitKeepAlivesAsync(deadline, cancellationToken).ConfigureAwait(false);
             if (_beforeLeaseDrainWait is { } beforeDrain)
             {
                 await beforeDrain(drained.Task).ConfigureAwait(false);
@@ -963,13 +1024,14 @@ namespace VectorNNTP.BackFiller.Nntp
 
             try
             {
-                if (forceAfterGrace)
+                if (!deadline.IsBounded && !forceAfterGrace)
                 {
-                    await drained.Task.WaitAsync(_shutdownGrace, CancellationToken.None).ConfigureAwait(false);
+                    await drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    await drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    var budget = deadline.IsBounded ? deadline.Remaining : _shutdownGrace;
+                    await drained.Task.WaitAsync(budget, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (TimeoutException)
@@ -986,20 +1048,47 @@ namespace VectorNNTP.BackFiller.Nntp
                 await afterDrain().ConfigureAwait(false);
             }
 
-            while (TryTakeIdleSession(out var keepalive) is { } idle)
+            try
             {
-                CancelKeepAliveRegistration(keepalive);
-                await RetireSessionAsync(idle, "pool dispose").ConfigureAwait(false);
+                var retirementDeadline = deadline.IsBounded
+                    ? deadline
+                    : NntpShutdownDeadline.FromBudget(_shutdownGrace);
+                await RetireRemainingSessionsAsync(retirementDeadline, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _leases.Dispose();
+                _fillGate.Dispose();
+                _shutdown.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Retires every session still in <see cref="_live"/> under one <paramref name="deadline"/>.
+        /// </summary>
+        /// <param name="deadline">Passed to each session dispose. Not recreated per session.</param>
+        /// <param name="cancellationToken">Passed to each QUIT write. Already-cancelled callers skip graceful QUIT.</param>
+        /// <remarks>
+        /// The snapshot is taken after the lease wait, so a session issued before disposal is included.
+        /// <see cref="RetireSessionAsync"/> removes idle membership. This method does not request replenishment.
+        /// One session's cleanup fault does not skip the others. <see cref="NntpShutdownWork.RunBoundedAsync"/> throws after the set is attempted.
+        /// </remarks>
+        private Task RetireRemainingSessionsAsync(NntpShutdownDeadline deadline, CancellationToken cancellationToken)
+        {
+            var sessions = new List<NntpProviderSession>(_live.Count);
+            foreach (var session in _live.Keys)
+            {
+                sessions.Add(session);
             }
 
-            foreach (var live in _live.Keys)
-            {
-                await RetireSessionAsync(live, "pool dispose").ConfigureAwait(false);
-            }
-
-            _leases.Dispose();
-            _fillGate.Dispose();
-            _shutdown.Dispose();
+            return NntpShutdownWork.RunBoundedAsync(
+                sessions,
+                session => RetireSessionAsync(
+                    session,
+                    "pool dispose",
+                    replenish: false,
+                    deadline: deadline,
+                    cancellationToken: cancellationToken));
         }
 
         /// <summary>Returns a lease for a slot already reserved by <see cref="TryReserveIssueSlot"/>.</summary>
@@ -1472,7 +1561,11 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             ReleaseUnregisteredReservation(connectionNumber);
-            await DisposeDetachedSessionAsync(session, connectionNumber).ConfigureAwait(false);
+            await DisposeDetachedSessionAsync(
+                session,
+                connectionNumber,
+                NntpShutdownDeadline.None,
+                CancellationToken.None).ConfigureAwait(false);
         }
 
         /// <summary>Chooses the retirement text for a creation attempt that threw.</summary>
@@ -1923,14 +2016,18 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
-        /// Waits for DATE loops that have started and not yet exited, including registrations no longer in <see cref="_keepAlives"/>,
-        /// up to <see cref="_shutdownGrace"/>.
+        /// Waits for DATE loops that have started and not yet exited, including registrations no longer in <see cref="_keepAlives"/>.
         /// </summary>
+        /// <param name="deadline">
+        /// When bounded, the wait uses <see cref="NntpShutdownDeadline.Remaining"/> rather than a fresh <see cref="_shutdownGrace"/>.
+        /// </param>
+        /// <param name="cancellationToken">Ends the wait when the caller already cancelled shutdown. It does not cancel the DATE command token.</param>
         /// <remarks>
         /// The snapshot is taken without <see cref="_idleGate"/>. Timeout and cancellation are swallowed.
-        /// A loop still running after the grace period is abandoned so disposal can retire sessions.
+        /// A loop still running after the budget is abandoned so disposal can retire sessions.
+        /// An unbounded deadline keeps the historical <see cref="_shutdownGrace"/> cap used by replacement drain.
         /// </remarks>
-        private async Task AwaitKeepAlivesAsync()
+        private async Task AwaitKeepAlivesAsync(NntpShutdownDeadline deadline, CancellationToken cancellationToken)
         {
             var tasks = _keepAliveLifetimes.Keys.Select(static registration => registration.Task).ToArray();
             if (_keepAliveDrainSnapshot is { } snapshot)
@@ -1943,9 +2040,10 @@ namespace VectorNNTP.BackFiller.Nntp
                 return;
             }
 
+            var budget = deadline.IsBounded ? deadline.Remaining : _shutdownGrace;
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(_shutdownGrace).ConfigureAwait(false);
+                await Task.WhenAll(tasks).WaitAsync(budget, cancellationToken).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -1973,6 +2071,13 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A registration that was published and then removed, or that lost to a newer registration, returns before idle
         /// membership or that newer registration is touched. Null for callers that are not a DATE loop.
         /// </param>
+        /// <param name="deadline">
+        /// Shutdown instant forwarded to session dispose. The default is <see cref="NntpShutdownDeadline.None"/>,
+        /// which keeps the session's own QUIT allowance for retirement outside a shared shutdown.
+        /// </param>
+        /// <param name="cancellationToken">
+        /// Caller cancellation forwarded only to the session QUIT write. The default does not cancel that write early.
+        /// </param>
         /// <remarks>
         /// <c>TryRemove</c> wins the decrement and connection-number release. A second retire, dispose, or creation rollback
         /// observes the loss and does not change the counters again. Idle membership is removed under <see cref="_idleGate"/>
@@ -1989,7 +2094,9 @@ namespace VectorNNTP.BackFiller.Nntp
             string reason,
             bool replenish = true,
             bool onlyIfIdle = false,
-            KeepAliveRegistration? actingRegistration = null)
+            KeepAliveRegistration? actingRegistration = null,
+            NntpShutdownDeadline deadline = default,
+            CancellationToken cancellationToken = default)
         {
             var won = false;
             KeepAliveRegistration? keepalive = null;
@@ -2057,7 +2164,8 @@ namespace VectorNNTP.BackFiller.Nntp
             {
                 try
                 {
-                    await DisposeDetachedSessionAsync(session, session.ConnectionNumber).ConfigureAwait(false);
+                    await DisposeDetachedSessionAsync(session, session.ConnectionNumber, deadline, cancellationToken)
+                        .ConfigureAwait(false);
                 }
                 finally
                 {
@@ -2106,6 +2214,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <param name="session">Detached session.</param>
         /// <param name="connectionNumber">Connection number already returned to the free set. Used only in the cleanup diagnostic.</param>
+        /// <param name="deadline">Shared shutdown instant. Forwarded unchanged so this session does not receive a new QUIT budget.</param>
+        /// <param name="cancellationToken">Caller cancellation forwarded only to the QUIT write.</param>
         /// <remarks>
         /// <see cref="OperationCanceledException"/>, <see cref="SocketException"/>, <see cref="IOException"/>, and
         /// <see cref="ObjectDisposedException"/> are logged and do not propagate.
@@ -2113,11 +2223,15 @@ namespace VectorNNTP.BackFiller.Nntp
         /// transport, and <see cref="CancelKeepAliveRegistration"/> already treats it as shutdown. Other exceptions propagate so a
         /// programming error is not hidden. This method does not change pool accounting.
         /// </remarks>
-        private async Task DisposeDetachedSessionAsync(NntpProviderSession session, int connectionNumber)
+        private async Task DisposeDetachedSessionAsync(
+            NntpProviderSession session,
+            int connectionNumber,
+            NntpShutdownDeadline deadline,
+            CancellationToken cancellationToken)
         {
             try
             {
-                await session.DisposeAsync().ConfigureAwait(false);
+                await session.DisposeForShutdownAsync(deadline, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception cleanup) when (IsExpectedSessionCleanupFailure(cleanup))
             {

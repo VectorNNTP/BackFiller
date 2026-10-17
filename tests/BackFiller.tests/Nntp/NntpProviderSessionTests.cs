@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
@@ -1383,6 +1384,110 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             Assert.Contains(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
             Assert.DoesNotContain(logger.Messages, static message => message.Contains("QUIT failed during dispose", StringComparison.Ordinal));
             Assert.False(session.IsReusable);
+        }
+
+        /// <summary>
+        /// An already expired shutdown deadline closes the transport and does not start QUIT.
+        /// </summary>
+        [Fact]
+        public async Task Expired_deadline_skips_quit_and_still_disposes_the_transport()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer
+            {
+                HoldQuitWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            };
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+
+            var started = Stopwatch.GetTimestamp();
+            await session.DisposeForShutdownAsync(NntpShutdownDeadline.FromBudget(TimeSpan.Zero), CancellationToken.None);
+            var elapsed = Stopwatch.GetElapsedTime(started);
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(0, server.QuitWriteStarted);
+            Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+            Assert.True(elapsed < TimeSpan.FromSeconds(1), $"elapsed {elapsed.TotalMilliseconds:0} ms");
+        }
+
+        /// <summary>
+        /// A stalled QUIT is cancelled by the remaining shutdown budget rather than the standalone two-second allowance.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/> cancels the write token.
+        /// The stalled write then throws <see cref="TaskCanceledException"/>, which is an <see cref="OperationCanceledException"/>.
+        /// The dispose log records <c>GetType().Name</c>, so the observed text is <c>TaskCanceledException</c> rather than the base type name.
+        /// </remarks>
+        [Fact]
+        public async Task Short_deadline_cancels_a_stalled_quit_before_the_standalone_allowance()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = new ScriptedNntpServer { HoldQuitWrite = hold };
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            var budget = TimeSpan.FromMilliseconds(300);
+
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                await session.DisposeForShutdownAsync(NntpShutdownDeadline.FromBudget(budget), CancellationToken.None)
+                    .AsTask()
+                    .WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(1, server.QuitWriteStarted);
+            Assert.Contains(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
+            Assert.Contains(
+                logger.Messages,
+                static message => message.Contains(
+                    "QUIT failed during dispose error=TaskCanceledException",
+                    StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                logger.Messages,
+                static message => message.Contains("QUIT failed during dispose error=SocketException", StringComparison.Ordinal)
+                    || message.Contains("QUIT failed during dispose error=IOException", StringComparison.Ordinal));
+            Assert.True(
+                elapsed < TimeSpan.FromMilliseconds(1200),
+                $"budget {budget.TotalMilliseconds:0} ms elapsed {elapsed.TotalMilliseconds:0} ms");
+        }
+
+        /// <summary>
+        /// A caller token that is already cancelled skips QUIT and still closes the transport.
+        /// </summary>
+        [Fact]
+        public async Task Cancelled_caller_skips_quit_and_still_disposes_the_transport()
+        {
+            var logger = new CollectingLogger<NntpProviderSession>();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = new ScriptedNntpServer
+            {
+                HoldQuitWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            };
+            factory.Enqueue(server);
+            var session = CreateSession(logger: logger);
+            Assert.Null(await session.ConnectAsync(factory, CancellationToken.None));
+            using var cancelled = new CancellationTokenSource();
+            await cancelled.CancelAsync();
+
+            await session.DisposeForShutdownAsync(NntpShutdownDeadline.FromBudget(TimeSpan.FromSeconds(10)), cancelled.Token);
+
+            Assert.Equal(NntpSessionState.Closed, session.State);
+            Assert.Equal(1, server.ClientStreamDisposeCount);
+            Assert.Equal(0, server.QuitWriteStarted);
+            Assert.DoesNotContain(logger.Messages, static message => message.Contains("TX: QUIT", StringComparison.Ordinal));
         }
 
         /// <summary>

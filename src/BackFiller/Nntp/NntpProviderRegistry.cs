@@ -25,7 +25,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Session options passed to every pool this registry creates.</summary>
         private readonly NntpSessionOptions _options;
 
-        /// <summary>Single drain budget shared by <see cref="StopAsync"/> and <see cref="DisposeAsync"/>.</summary>
+        /// <summary>
+        /// Absolute budget for one <see cref="StopAsync"/> or <see cref="DisposeAsync"/>.
+        /// Captured once as an <see cref="NntpShutdownDeadline"/> and shared by every pool in that call.
+        /// </summary>
         private readonly TimeSpan _shutdownGrace;
 
         /// <summary>
@@ -92,7 +95,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="catalog">Current provider snapshot.</param>
         /// <param name="transport">NNTP transport factory.</param>
         /// <param name="options">Per-session NNTP options.</param>
-        /// <param name="shutdownGrace">Shared drain budget for replaced or stopped pools.</param>
+        /// <param name="shutdownGrace">
+        /// Absolute budget for one <see cref="StopAsync"/> or <see cref="DisposeAsync"/>.
+        /// Captured once and shared by every pool's lease wait and QUIT. Replacement drain does not use it as a second deadline.
+        /// </param>
         /// <param name="establishment">
         /// Establishment gate shared by every pool this registry creates. When null, this
         /// constructor allocates a private gate at
@@ -140,7 +146,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="catalog">Current provider snapshot.</param>
         /// <param name="transport">NNTP transport factory.</param>
         /// <param name="options">Per-session NNTP options.</param>
-        /// <param name="shutdownGrace">Shared drain budget for replaced or stopped pools.</param>
+        /// <param name="shutdownGrace">
+        /// Absolute budget for one <see cref="StopAsync"/> or <see cref="DisposeAsync"/>.
+        /// Captured once and shared by every pool's lease wait and QUIT. Replacement drain does not use it as a second deadline.
+        /// </param>
         /// <param name="establishment">Application-wide establishment gate shared by every pool.</param>
         /// <param name="logger">Registry logger.</param>
         /// <param name="capacity">Usable-capacity publisher. Created when omitted.</param>
@@ -247,6 +256,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <remarks>
         /// A disposed registry returns without changing pools. After shrinks, in-place growth, and removals, new and replacement pools are connected, capacity is published, and a running consumer reconciler is asked to reconcile.
         /// Consumer retirement is skipped when <see cref="Consumers"/> is missing or not running.
+        /// Each replaced pool waits for its own leases on <paramref name="cancellationToken"/> and then uses one retirement grace for its sessions.
+        /// That grace is not the deadline captured by <see cref="StopAsync"/> or <see cref="DisposeAsync"/>, and pools replaced by the same snapshot do not share it, because one pool's lease wait must not expire another pool's QUIT budget.
         /// </remarks>
         internal async Task ApplySnapshotAsync(
             IReadOnlyList<BackFillerProviderDefinition> providers,
@@ -409,28 +420,32 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>Drains and disposes every pool under one shared grace budget.</summary>
-        /// <param name="cancellationToken">Linked with <see cref="_shutdownGrace"/>. Either source ends the drain wait.</param>
+        /// <param name="cancellationToken">Linked with <see cref="_shutdownGrace"/>. Either source ends the drain wait and an in-flight QUIT.</param>
         /// <remarks>
-        /// One shared grace token covers every pool. Pools are not given a fresh
-        /// <see cref="BackFillerShutdownRuntimeOptions.GracePeriod"/> budget each.
-        /// When the wait ends, <see cref="DisposeCoreAsync"/> still retires remaining sessions.
+        /// One <see cref="NntpShutdownDeadline"/> is captured here and passed to every pool.
+        /// Pools are not given a fresh <see cref="BackFillerShutdownRuntimeOptions.GracePeriod"/> or a fresh per-session QUIT allowance.
+        /// When the deadline expires, a session that has not started QUIT aborts its transport.
+        /// Pools run with <see cref="NntpShutdownWork.Parallelism"/> so one slow pool does not keep the others from starting.
         /// </remarks>
         public async Task StopAsync(CancellationToken cancellationToken)
         {
+            var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
             using var grace = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             grace.CancelAfter(_shutdownGrace);
-            await DisposeCoreAsync(grace.Token).ConfigureAwait(false);
+            await DisposeCoreAsync(grace.Token, deadline).ConfigureAwait(false);
         }
 
-        /// <summary>Drains and disposes every pool, using only <see cref="_shutdownGrace"/> as the wait limit.</summary>
+        /// <summary>Drains and disposes every pool, using only <see cref="_shutdownGrace"/> as the shutdown budget.</summary>
         /// <remarks>
         /// The host cancellation token is not observed; <see cref="StopAsync"/> is the path that links caller cancellation.
+        /// The deadline is captured once and covers every pool's lease wait and QUIT.
         /// A second call returns immediately from <see cref="DisposeCoreAsync"/>.
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
+            var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
             using var grace = new CancellationTokenSource(_shutdownGrace);
-            await DisposeCoreAsync(grace.Token).ConfigureAwait(false);
+            await DisposeCoreAsync(grace.Token, deadline).ConfigureAwait(false);
         }
 
         /// <summary>Creates a pool for <paramref name="provider"/> and subscribes to its active-session changes.</summary>
@@ -545,11 +560,19 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
-        /// Marks the registry disposed, drains each pool with <paramref name="cancellationToken"/>, and publishes an empty capacity snapshot.
+        /// Marks the registry disposed, drains each pool under <paramref name="deadline"/>, and publishes an empty capacity snapshot.
         /// </summary>
-        /// <param name="cancellationToken">Passed to each <see cref="NntpSessionPool.DrainAndDisposeAsync"/>. A cancelled wait still retires that pool's remaining sessions.</param>
-        /// <remarks>The first caller clears <see cref="_pools"/>. A concurrent or later call returns without draining again.</remarks>
-        private async Task DisposeCoreAsync(CancellationToken cancellationToken)
+        /// <param name="cancellationToken">
+        /// Passed to each <see cref="NntpSessionPool.DrainAndDisposeAsync(CancellationToken, NntpShutdownDeadline)"/>.
+        /// A cancelled wait still retires that pool's remaining sessions.
+        /// </param>
+        /// <param name="deadline">The instant captured by <see cref="StopAsync"/> or <see cref="DisposeAsync"/>. Not recreated per pool.</param>
+        /// <remarks>
+        /// The first caller clears <see cref="_pools"/>. A concurrent or later call returns without draining again.
+        /// Pools are unhooked before any drain so active-session notifications cannot re-enter the registry during teardown.
+        /// A pool fault does not skip the other pools. After every pool has been attempted, those faults are thrown and the empty capacity snapshot is still published.
+        /// </remarks>
+        private async Task DisposeCoreAsync(CancellationToken cancellationToken, NntpShutdownDeadline deadline)
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1)
             {
@@ -566,10 +589,18 @@ namespace VectorNNTP.BackFiller.Nntp
             foreach (var pool in pools)
             {
                 Unhook(pool);
-                await pool.DrainAndDisposeAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            _capacity.PublishSnapshot(new Dictionary<string, int>());
+            try
+            {
+                await NntpShutdownWork.RunBoundedAsync(
+                    pools,
+                    pool => pool.DrainAndDisposeAsync(cancellationToken, deadline)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _capacity.PublishSnapshot(new Dictionary<string, int>());
+            }
         }
     }
 }

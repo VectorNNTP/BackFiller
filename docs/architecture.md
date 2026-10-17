@@ -57,6 +57,8 @@ Publisher confirms (`BasicAcksAsync` / `BasicNacksAsync` on an async-confirm pub
 
 Per-provider steady-state session count comes from MySQL `maxconnections` (`BackFillerProviderDefinition.MaxSessions`). `BackFillerNntpOptions.MaxConcurrentSessionEstablishments` bounds how many sessions may be connecting at once. The pool throws if it would exceed `MaxSessions`.
 
+Pool `DisposeAsync` and registry `StopAsync` / `DisposeAsync` each capture one monotonic deadline from that call's configured grace. The same deadline bounds the keepalive wait, the lease-drain wait, and every graceful `QUIT`. `QUIT` uses the shorter of its two-second allowance and the time still left. A session that cannot start `QUIT` before the deadline aborts the transport instead. Sessions in one pool, and pools in one registry shutdown, are retired with a fixed degree of parallelism and every retirement is still awaited. A configuration replacement drain waits for outstanding leases on the caller token, then captures its own grace as one retirement deadline for every remaining session. That deadline is not the registry shutdown deadline, and it is not reset per session. A direct session dispose keeps the two-second `QUIT` allowance. It does not consume another shutdown's deadline.
+
 Relevant local RFC text is under `docs/standards/rfcs/`. For this client, start with RFC 3977 (`ARTICLE`, `DATE`, `CAPABILITIES`, multiline and dot-stuffing), RFC 4643 (`AUTHINFO`), and RFC 4642 / RFC 8143 (TLS). RFC 5536 is the article-format reference used by the parser and by the listener's Message-ID check. The other files in that directory are retained standards text. They are not evidence that this process implements those extensions.
 
 ## NNTP listener

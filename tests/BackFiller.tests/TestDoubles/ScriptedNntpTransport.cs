@@ -233,6 +233,24 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// </summary>
         public bool FaultClientQuitWrite { get; set; }
 
+        /// <summary>
+        /// When set, a QUIT write waits on this gate and observes the write's cancellation token.
+        /// The token is the session's remaining shutdown budget. Completing the gate lets the write continue.
+        /// </summary>
+        public TaskCompletionSource? HoldQuitWrite { get; set; }
+
+        /// <summary>QUIT writes that entered <see cref="HoldQuitWrite"/>.</summary>
+        private int _quitWriteStarted;
+
+        /// <summary>
+        /// When set, the first client-stream dispose throws <see cref="InvalidOperationException"/> after the pipes complete.
+        /// Expected I/O failures stay on <see cref="FaultClientDispose"/>.
+        /// </summary>
+        public bool FaultClientDisposeUnexpected { get; set; }
+
+        /// <summary>Zero until <see cref="TryConsumeUnexpectedDisposeFault"/> accepts the first unexpected dispose fault.</summary>
+        private int _unexpectedDisposeFaultUsed;
+
         /// <summary>Pipe-cleanup entries. Incremented only when <see cref="DuplexPipeStream"/> completes the pipes.</summary>
         private int _clientStreamDisposals;
 
@@ -250,6 +268,9 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         /// This counts every session disposal call, including ones the stream's own cleanup guard ignores.
         /// </summary>
         internal int ClientStreamDisposeAsyncCount => Volatile.Read(ref _clientStreamDisposeAsyncInvocations);
+
+        /// <summary>How many QUIT writes entered <see cref="HoldQuitWrite"/>.</summary>
+        internal int QuitWriteStarted => Volatile.Read(ref _quitWriteStarted);
 
         /// <summary>Records one pipe cleanup of the client stream returned by <see cref="AcceptClientAsync"/>.</summary>
         internal void RecordClientStreamDisposed()
@@ -298,6 +319,32 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
         internal bool TryBeginCommandWriteHold()
         {
             return HoldAfterCommandWrite is not null && Interlocked.Exchange(ref _commandWriteHoldStarted, 1) == 0;
+        }
+
+        /// <summary>
+        /// Counts a QUIT write and reports whether it must wait on <see cref="HoldQuitWrite"/>.
+        /// </summary>
+        /// <returns><see langword="true"/> when the write must wait. The wait observes the caller's cancellation token.</returns>
+        /// <remarks>Every QUIT is counted. A null gate returns false and does not increment <see cref="QuitWriteStarted"/>.</remarks>
+        internal bool TryBeginQuitWriteHold()
+        {
+            if (HoldQuitWrite is null)
+            {
+                return false;
+            }
+
+            Interlocked.Increment(ref _quitWriteStarted);
+            return true;
+        }
+
+        /// <summary>
+        /// Accepts one unexpected dispose fault while <see cref="FaultClientDisposeUnexpected"/> is set.
+        /// The pipes are already completed by the caller.
+        /// </summary>
+        /// <returns><see langword="true"/> when this dispose must throw <see cref="InvalidOperationException"/>.</returns>
+        internal bool TryConsumeUnexpectedDisposeFault()
+        {
+            return FaultClientDisposeUnexpected && Interlocked.Exchange(ref _unexpectedDisposeFaultUsed, 1) == 0;
         }
 
         /// <summary>When set, CAPABILITIES includes this label (default STARTTLS).</summary>
@@ -619,12 +666,20 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
 
         /// <inheritdoc />
         /// <remarks>
-        /// Honors <see cref="ScriptedNntpServer.FaultClientDateWrite"/> and
+        /// Honors <see cref="ScriptedNntpServer.HoldQuitWrite"/>, <see cref="ScriptedNntpServer.FaultClientDateWrite"/>, and
         /// <see cref="ScriptedNntpServer.FaultClientQuitWrite"/> on the optional owner.
+        /// A held QUIT waits on that gate and on <paramref name="cancellationToken"/> before any bytes are written.
         /// A QUIT fault throws <see cref="SocketException"/> before any bytes are written.
         /// </remarks>
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (owner is not null
+                && buffer.Span.IndexOf("QUIT"u8) >= 0
+                && owner.TryBeginQuitWriteHold())
+            {
+                await owner.HoldQuitWrite!.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (owner?.FaultClientQuitWrite == true
                 && buffer.Span.IndexOf("QUIT"u8) >= 0)
             {
@@ -665,6 +720,11 @@ namespace VectorNNTP.BackFiller.Tests.TestDoubles
             if (owner?.TryConsumeDisposeFault() == true)
             {
                 throw new IOException("plaintext dispose failed");
+            }
+
+            if (owner?.TryConsumeUnexpectedDisposeFault() == true)
+            {
+                throw new InvalidOperationException("teardown fault");
             }
         }
 
