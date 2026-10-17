@@ -18,6 +18,12 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Pre-encoded <c>QUIT</c> command written by <see cref="DisposeAsync"/>.</summary>
         private static readonly byte[] QuitCommand = "QUIT\r\n"u8.ToArray();
 
+        /// <summary>
+        /// Upper bound for one graceful <c>QUIT</c> when disposal is not sharing a shorter <see cref="NntpShutdownDeadline"/>.
+        /// A shared deadline can only shorten this allowance.
+        /// </summary>
+        private static readonly TimeSpan QuitAllowance = TimeSpan.FromSeconds(2);
+
         /// <summary>Provider identity, TLS mode, credentials, and keepalive interval captured at construction.</summary>
         private readonly BackFillerProviderDefinition _provider;
 
@@ -703,15 +709,39 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
+        /// Retires the session with the standalone <see cref="QuitAllowance"/>.
+        /// This call does not share a pool or registry shutdown deadline.
+        /// </summary>
+        /// <returns>A task that completes after the transport close has been attempted.</returns>
+        /// <remarks>
+        /// Pool and registry shutdown call <see cref="DisposeForShutdownAsync"/> so every session in that operation sees the same deadline.
+        /// The close protocol is that overload. This entry only supplies <see cref="NntpShutdownDeadline.None"/> and <see cref="CancellationToken.None"/>.
+        /// </remarks>
+        public ValueTask DisposeAsync() => DisposeForShutdownAsync(NntpShutdownDeadline.None, CancellationToken.None);
+
+        /// <summary>
         /// Retires the session. An idle ready session sends <c>QUIT</c> before the transport is closed. An active command is aborted instead.
         /// A second call returns immediately.
         /// </summary>
+        /// <param name="deadline">
+        /// Shared shutdown instant. <see cref="NntpShutdownDeadline.None"/> keeps <see cref="QuitAllowance"/>.
+        /// An expired deadline, or a deadline whose shared token is already cancelled, skips QUIT.
+        /// A shorter remainder replaces the two-second allowance for this write only.
+        /// When that remainder is the shared deadline, the write waits on the deadline token rather than a new timer.
+        /// </param>
+        /// <param name="cancellationToken">
+        /// Caller cancellation for the QUIT write. It is not applied to an in-flight ARTICLE or DATE command.
+        /// Those commands unwind because the transport is closed, and they release <see cref="_busy"/> themselves.
+        /// </param>
         /// <remarks>
-        /// <c>QUIT</c> is written only when <see cref="State"/> is <see cref="NntpSessionState.Ready"/>, the session is healthy, and <see cref="_busy"/> is free.
+        /// <c>QUIT</c> is written only when <see cref="State"/> is <see cref="NntpSessionState.Ready"/>, the session is healthy, <see cref="_busy"/> is free,
+        /// <paramref name="deadline"/> has not expired, its shared token is not cancelled, and <paramref name="cancellationToken"/> is not cancelled.
         /// That is the idle case: no ARTICLE or DATE call holds the command gate, and connect is not using the stream.
-        /// The write uses a two-second timeout and is not followed by a response read. The gate stays held until that write finishes, so QUIT cannot overlap another command.
+        /// The write budget is the lesser of <see cref="QuitAllowance"/> and the time left on <paramref name="deadline"/>. It is not followed by a response read.
+        /// The gate stays held until that write finishes, so QUIT cannot overlap another command.
         /// Write and flush failures, including <see cref="SocketException"/> and <see cref="NotSupportedException"/>, are logged and do not escape.
-        /// When the gate is already held, QUIT is skipped. Closing the captured transport unblocks that command's pending read or write. This method does not wait for the command and does not take the gate.
+        /// When the gate is already held, or the deadline or caller token has already expired, QUIT is skipped.
+        /// Closing the captured transport unblocks that command's pending read or write. This method does not wait for the command and does not take the gate.
         /// The transport is still disposed once. A failure from that dispose is logged and does not skip <see cref="NntpSessionState.Closed"/>.
         /// <see cref="_busy"/> is not disposed. The command that holds it releases the gate after it unwinds, including when this method has already returned.
         /// A second call returns before touching the transport, so pool rollback can dispose a session that shutdown already disposed.
@@ -728,7 +758,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Command paths assign <see cref="State"/> through <see cref="AssignState"/>, which returns once <see cref="_disposed"/> is set, so they do not replace that terminal value.
         /// This method does not hold <see cref="_transportGate"/> across an await.
         /// </remarks>
-        public async ValueTask DisposeAsync()
+        internal async ValueTask DisposeForShutdownAsync(NntpShutdownDeadline deadline, CancellationToken cancellationToken)
         {
             Stream? stream;
             var idleQuit = false;
@@ -764,7 +794,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     return;
                 }
 
-                if (idleQuit)
+                if (idleQuit && !deadline.IsExpired && !deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
                     try
                     {
@@ -776,9 +806,9 @@ namespace VectorNNTP.BackFiller.Nntp
                     }
                 }
 
-                if (holdsGate)
+                if (holdsGate && !deadline.IsExpired && !deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
-                    await WriteQuitAsync(stream).ConfigureAwait(false);
+                    await WriteQuitAsync(stream, deadline, cancellationToken).ConfigureAwait(false);
                 }
 
                 try
@@ -803,15 +833,32 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>Writes one best-effort <c>QUIT</c> on <paramref name="stream"/> while the caller holds <see cref="_busy"/>.</summary>
         /// <param name="stream">Transport captured before the session fields were cleared. Not the field, which is already null.</param>
+        /// <param name="deadline">Shared shutdown instant. <see cref="NntpShutdownDeadline.Cap"/> limits the write to the time still left.</param>
+        /// <param name="cancellationToken">Caller cancellation linked into the write. It does not cancel an ARTICLE or DATE token.</param>
         /// <remarks>
-        /// The two-second budget cancels only this write. A failure is logged and does not escape, so the caller still closes <paramref name="stream"/>.
+        /// The budget is the lesser of <see cref="QuitAllowance"/> and the time left on <paramref name="deadline"/>.
+        /// Zero remaining, a cancelled deadline token, or an already cancelled <paramref name="cancellationToken"/> returns without writing.
+        /// When the shared deadline is shorter than <see cref="QuitAllowance"/>, the write waits on that deadline's token.
+        /// A new timer is used only for the two-second allowance, and only when the deadline still has more time than that.
+        /// A failure is logged and does not escape, so the caller still closes <paramref name="stream"/>.
         /// </remarks>
-        private async Task WriteQuitAsync(Stream stream)
+        private async Task WriteQuitAsync(Stream stream, NntpShutdownDeadline deadline, CancellationToken cancellationToken)
         {
+            var budget = deadline.Cap(QuitAllowance);
+            if (budget <= TimeSpan.Zero || deadline.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
             try
             {
                 NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Cancellation);
+                if (!deadline.IsBounded || deadline.Remaining > QuitAllowance)
+                {
+                    cts.CancelAfter(QuitAllowance);
+                }
+
                 await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
                 await stream.FlushAsync(cts.Token).ConfigureAwait(false);
             }
