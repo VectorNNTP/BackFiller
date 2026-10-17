@@ -725,7 +725,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <param name="deadline">
         /// Shared shutdown instant. <see cref="NntpShutdownDeadline.None"/> keeps <see cref="QuitAllowance"/>.
-        /// An expired deadline skips QUIT. A shorter remainder replaces the two-second allowance for this write only.
+        /// An expired deadline, or a deadline whose shared token is already cancelled, skips QUIT.
+        /// A shorter remainder replaces the two-second allowance for this write only.
+        /// When that remainder is the shared deadline, the write waits on the deadline token rather than a new timer.
         /// </param>
         /// <param name="cancellationToken">
         /// Caller cancellation for the QUIT write. It is not applied to an in-flight ARTICLE or DATE command.
@@ -733,7 +735,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </param>
         /// <remarks>
         /// <c>QUIT</c> is written only when <see cref="State"/> is <see cref="NntpSessionState.Ready"/>, the session is healthy, <see cref="_busy"/> is free,
-        /// <paramref name="deadline"/> has not expired, and <paramref name="cancellationToken"/> is not cancelled.
+        /// <paramref name="deadline"/> has not expired, its shared token is not cancelled, and <paramref name="cancellationToken"/> is not cancelled.
         /// That is the idle case: no ARTICLE or DATE call holds the command gate, and connect is not using the stream.
         /// The write budget is the lesser of <see cref="QuitAllowance"/> and the time left on <paramref name="deadline"/>. It is not followed by a response read.
         /// The gate stays held until that write finishes, so QUIT cannot overlap another command.
@@ -792,7 +794,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     return;
                 }
 
-                if (idleQuit && !deadline.IsExpired && !cancellationToken.IsCancellationRequested)
+                if (idleQuit && !deadline.IsExpired && !deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
                     try
                     {
@@ -804,7 +806,7 @@ namespace VectorNNTP.BackFiller.Nntp
                     }
                 }
 
-                if (holdsGate && !deadline.IsExpired && !cancellationToken.IsCancellationRequested)
+                if (holdsGate && !deadline.IsExpired && !deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
                     await WriteQuitAsync(stream, deadline, cancellationToken).ConfigureAwait(false);
                 }
@@ -835,13 +837,15 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <param name="cancellationToken">Caller cancellation linked into the write. It does not cancel an ARTICLE or DATE token.</param>
         /// <remarks>
         /// The budget is the lesser of <see cref="QuitAllowance"/> and the time left on <paramref name="deadline"/>.
-        /// Zero remaining or an already cancelled <paramref name="cancellationToken"/> returns without writing.
+        /// Zero remaining, a cancelled deadline token, or an already cancelled <paramref name="cancellationToken"/> returns without writing.
+        /// When the shared deadline is shorter than <see cref="QuitAllowance"/>, the write waits on that deadline's token.
+        /// A new timer is used only for the two-second allowance, and only when the deadline still has more time than that.
         /// A failure is logged and does not escape, so the caller still closes <paramref name="stream"/>.
         /// </remarks>
         private async Task WriteQuitAsync(Stream stream, NntpShutdownDeadline deadline, CancellationToken cancellationToken)
         {
             var budget = deadline.Cap(QuitAllowance);
-            if (budget <= TimeSpan.Zero || cancellationToken.IsCancellationRequested)
+            if (budget <= TimeSpan.Zero || deadline.IsCancellationRequested || cancellationToken.IsCancellationRequested)
             {
                 return;
             }
@@ -849,8 +853,12 @@ namespace VectorNNTP.BackFiller.Nntp
             try
             {
                 NntpLogMessages.WireTx(_logger, _wireIdentity, "QUIT");
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(budget);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Cancellation);
+                if (!deadline.IsBounded || deadline.Remaining > QuitAllowance)
+                {
+                    cts.CancelAfter(QuitAllowance);
+                }
+
                 await stream.WriteAsync(QuitCommand, cts.Token).ConfigureAwait(false);
                 await stream.FlushAsync(cts.Token).ConfigureAwait(false);
             }

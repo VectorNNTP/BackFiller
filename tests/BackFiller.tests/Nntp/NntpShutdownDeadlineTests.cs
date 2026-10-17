@@ -62,7 +62,8 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         /// <remarks>
         /// The budget is 500 milliseconds and the accepted ceiling is 1200 milliseconds.
         /// Eight independent two-second QUIT attempts would exceed that ceiling.
-        /// At most <see cref="NntpShutdownWork.Parallelism"/> writes can be in progress, so a later session starts only after the shared deadline cancels an earlier one.
+        /// At most <see cref="NntpShutdownWork.Parallelism"/> writes can be in progress.
+        /// The shared deadline token cancels that wave, and a later session observes the same token before it can start QUIT.
         /// A cancelled write logs <c>TaskCanceledException</c>, the runtime type thrown for the QUIT token, not the <see cref="OperationCanceledException"/> filter name.
         /// </remarks>
         [Fact]
@@ -170,6 +171,137 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                     }
                 }
 
+                if (busy is not null)
+                {
+                    await busy.DisposeAsync();
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Cancelling the shared deadline token stops the next retirement wave while the Stopwatch instant is still in the future.
+        /// </summary>
+        /// <remarks>
+        /// The first wave is held inside QUIT. Cancellation is the signal those writes already observe.
+        /// A later session must see that token before it writes, including when <see cref="NntpShutdownDeadline.IsExpired"/> is still false.
+        /// </remarks>
+        [Fact]
+        public async Task Shared_deadline_cancellation_does_not_start_the_next_quit_wave()
+        {
+            const int sessions = 8;
+            var factory = new ScriptedNntpTransportFactory();
+            var servers = EnqueueStalledQuitServers(factory, sessions);
+            var pool = NntpSessionPoolTests.CreatePool(factory, max: sessions, shutdownGrace: TimeSpan.FromMinutes(1));
+            using var deadline = NntpShutdownDeadline.FromBudget(TimeSpan.FromMinutes(1));
+            var drain = Task.CompletedTask;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                drain = pool.DrainAndDisposeAsync(CancellationToken.None, deadline);
+                await WaitUntilAsync(() => QuitStarts(servers) == NntpShutdownWork.Parallelism);
+
+                Assert.False(deadline.IsExpired);
+                Assert.False(deadline.IsCancellationRequested);
+                deadline.Cancel();
+                await drain.WaitAsync(TimeSpan.FromSeconds(2));
+
+                Assert.Equal(NntpShutdownWork.Parallelism, QuitStarts(servers));
+                Assert.False(deadline.IsExpired);
+                Assert.True(deadline.IsCancellationRequested);
+                Assert.All(servers, static server => Assert.Equal(1, server.ClientStreamDisposeCount));
+                Assert.Equal(0, pool.LiveSessionCount);
+            }
+            finally
+            {
+                deadline.Cancel();
+                Release(servers);
+                await drain.WaitAsync(TimeSpan.FromSeconds(5));
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Cancelling the deadline while the lease drain is still waiting does not let idle sessions start QUIT.
+        /// The active command still unwinds through transport disposal, without a QUIT on that stream.
+        /// </summary>
+        [Fact]
+        public async Task Cancelling_the_deadline_during_lease_drain_skips_idle_quit()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            AbortingWriteStream? gate = null;
+            var articleServer = new ScriptedNntpServer
+            {
+                ClientStreamDecorator = inner =>
+                {
+                    gate = new AbortingWriteStream(inner, entered);
+                    return gate;
+                },
+            };
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(articleServer);
+            var idleServers = EnqueueStalledQuitServers(factory, 2);
+            var logger = new CollectingLogger<NntpSessionPool>();
+            var pool = NntpSessionPoolTests.CreatePool(factory, max: 3, logger: logger, shutdownGrace: TimeSpan.FromMinutes(1));
+            using var deadline = NntpShutdownDeadline.FromBudget(TimeSpan.FromMinutes(1));
+            NntpSessionLease? busy = null;
+            Task<ArticleRetrievalResult>? download = null;
+            var drain = Task.CompletedTask;
+            try
+            {
+                busy = await pool.AcquireAsync(CancellationToken.None);
+                var firstIdle = await pool.AcquireAsync(CancellationToken.None);
+                var secondIdle = await pool.AcquireAsync(CancellationToken.None);
+                await firstIdle.DisposeAsync();
+                await secondIdle.DisposeAsync();
+                Assert.NotNull(gate);
+                gate.Arm();
+                download = busy.Session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                pool.BeforeLeaseDrainWait = _ =>
+                {
+                    drainEntered.TrySetResult();
+                    return releaseDrain.Task;
+                };
+
+                drain = pool.DrainAndDisposeAsync(CancellationToken.None, deadline);
+                await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(0, QuitStarts(idleServers));
+                Assert.False(deadline.IsExpired);
+                deadline.Cancel();
+                releaseDrain.TrySetResult();
+                await drain.WaitAsync(TimeSpan.FromSeconds(2));
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(2));
+
+                Assert.False(deadline.IsExpired);
+                Assert.Equal(ArticleRetrievalKind.ProviderFailure, result.Kind);
+                Assert.Equal(1, gate.MaxWriteDepth);
+                Assert.Equal(0, QuitStarts(idleServers));
+                Assert.Equal(0, CountQuit(logger));
+                Assert.Equal(1, articleServer.ClientStreamDisposeCount);
+                Assert.All(idleServers, static server => Assert.Equal(1, server.ClientStreamDisposeCount));
+            }
+            finally
+            {
+                deadline.Cancel();
+                releaseDrain.TrySetResult();
+                Release(idleServers);
+                if (download is not null)
+                {
+                    try
+                    {
+                        using var leftover = await download.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    catch (Exception ex) when (ex is not (ArgumentNullException or NullReferenceException))
+                    {
+                        _ = ex;
+                    }
+                }
+
+                await drain.WaitAsync(TimeSpan.FromSeconds(5));
                 if (busy is not null)
                 {
                     await busy.DisposeAsync();

@@ -420,7 +420,7 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>Drains and disposes every pool under one shared grace budget.</summary>
-        /// <param name="cancellationToken">Linked with <see cref="_shutdownGrace"/>. Either source ends the drain wait and an in-flight QUIT.</param>
+        /// <param name="cancellationToken">Ends the drain wait and an in-flight QUIT. The grace timer is the deadline captured below, not a second clock.</param>
         /// <remarks>
         /// One <see cref="NntpShutdownDeadline"/> is captured here and passed to every pool.
         /// Pools are not given a fresh <see cref="BackFillerShutdownRuntimeOptions.GracePeriod"/> or a fresh per-session QUIT allowance.
@@ -429,10 +429,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         public async Task StopAsync(CancellationToken cancellationToken)
         {
-            var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
-            using var grace = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            grace.CancelAfter(_shutdownGrace);
-            await DisposeCoreAsync(grace.Token, deadline).ConfigureAwait(false);
+            using var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
+            await DisposeCoreAsync(cancellationToken, deadline).ConfigureAwait(false);
         }
 
         /// <summary>Drains and disposes every pool, using only <see cref="_shutdownGrace"/> as the shutdown budget.</summary>
@@ -443,9 +441,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
-            var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
-            using var grace = new CancellationTokenSource(_shutdownGrace);
-            await DisposeCoreAsync(grace.Token, deadline).ConfigureAwait(false);
+            using var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
+            await DisposeCoreAsync(CancellationToken.None, deadline).ConfigureAwait(false);
         }
 
         /// <summary>Creates a pool for <paramref name="provider"/> and subscribes to its active-session changes.</summary>

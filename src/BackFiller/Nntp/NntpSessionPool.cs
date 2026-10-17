@@ -936,15 +936,16 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         /// <returns>A task that completes after remaining sessions have been retired or their cleanup fault has been observed.</returns>
         /// <remarks>
-        /// The deadline is captured at this call. Keepalive drain, lease drain, and QUIT all use the time left on it.
-        /// A grace timeout does not abandon remaining sessions. Sessions that cannot start QUIT before the deadline abort the transport.
+        /// The deadline is captured at this call and released when the method returns. Keepalive drain, lease drain, and QUIT all use its shared token.
+        /// A grace timeout does not abandon remaining sessions. Sessions that cannot start QUIT before the deadline aborts the transport.
         /// A second call returns immediately. An unexpected retirement fault is thrown after the other sessions have been attempted
         /// and after the pool semaphores are disposed.
         /// </remarks>
-        public ValueTask DisposeAsync() => new(DisposeCoreAsync(
-            forceAfterGrace: true,
-            CancellationToken.None,
-            NntpShutdownDeadline.FromBudget(_shutdownGrace)));
+        public async ValueTask DisposeAsync()
+        {
+            using var deadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
+            await DisposeCoreAsync(forceAfterGrace: true, CancellationToken.None, deadline).ConfigureAwait(false);
+        }
 
         /// <summary>
         /// Cancels shutdown, stops replenish and keepalive, waits for leases, then retires every session still tracked.
@@ -954,8 +955,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <see langword="false"/> when the caller supplied <paramref name="cancellationToken"/> and, for registry shutdown, <paramref name="deadline"/>.
         /// </param>
         /// <param name="cancellationToken">
-        /// Ends the lease wait and an in-flight QUIT when cancelled. Ignored for the lease wait only when
-        /// <paramref name="forceAfterGrace"/> is true, because that path has no caller token.
+        /// Ends the lease wait and an in-flight QUIT when cancelled.
+        /// <see cref="DisposeAsync"/> passes <see cref="CancellationToken.None"/> because its deadline token is the grace signal.
+        /// A bounded deadline ends the lease wait on that shared token as well. Replacement with an unbounded deadline waits only on this token.
         /// </param>
         /// <param name="deadline">
         /// Absolute shutdown instant. <see cref="NntpShutdownDeadline.None"/> is a replacement drain.
@@ -966,6 +968,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <see cref="TryReserveIssueSlot"/> cannot open a later generation after that snapshot, and the wait uses the captured generation.
         /// <see cref="BeforeLeaseDrainWait"/> observes that captured task and runs outside the lock. A second dispose returns before the first wait finishes.
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
+        /// A bounded wait uses <see cref="NntpShutdownDeadline.Cancellation"/>. Retirement then sees that same token and does not start another QUIT.
         /// <see cref="SuperviseReplenishAsync"/> logs an unexpected fill failure and keeps the replenish task alive until shutdown.
         /// A failure of that supervisor task itself is logged here and does not skip retirement.
         /// The replenish await is cancelled by the pool shutdown token before it is awaited.
@@ -1024,17 +1027,20 @@ namespace VectorNNTP.BackFiller.Nntp
 
             try
             {
-                if (!deadline.IsBounded && !forceAfterGrace)
+                if (deadline.IsBounded || !forceAfterGrace)
                 {
-                    await drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    await deadline.WaitAsync(drained.Task, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    var budget = deadline.IsBounded ? deadline.Remaining : _shutdownGrace;
-                    await drained.Task.WaitAsync(budget, cancellationToken).ConfigureAwait(false);
+                    await drained.Task.WaitAsync(_shutdownGrace, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (TimeoutException)
+            {
+                ShutdownObservations.TimedOut(_logger, "pool dispose grace");
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 ShutdownObservations.TimedOut(_logger, "pool dispose grace");
             }
@@ -1050,10 +1056,15 @@ namespace VectorNNTP.BackFiller.Nntp
 
             try
             {
-                var retirementDeadline = deadline.IsBounded
-                    ? deadline
-                    : NntpShutdownDeadline.FromBudget(_shutdownGrace);
-                await RetireRemainingSessionsAsync(retirementDeadline, cancellationToken).ConfigureAwait(false);
+                if (!deadline.IsBounded)
+                {
+                    using var retirementDeadline = NntpShutdownDeadline.FromBudget(_shutdownGrace);
+                    await RetireRemainingSessionsAsync(retirementDeadline, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RetireRemainingSessionsAsync(deadline, cancellationToken).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -2019,7 +2030,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// Waits for DATE loops that have started and not yet exited, including registrations no longer in <see cref="_keepAlives"/>.
         /// </summary>
         /// <param name="deadline">
-        /// When bounded, the wait uses <see cref="NntpShutdownDeadline.Remaining"/> rather than a fresh <see cref="_shutdownGrace"/>.
+        /// When bounded, the wait uses <see cref="NntpShutdownDeadline.Cancellation"/> rather than a fresh timer.
         /// </param>
         /// <param name="cancellationToken">Ends the wait when the caller already cancelled shutdown. It does not cancel the DATE command token.</param>
         /// <remarks>
@@ -2040,12 +2051,22 @@ namespace VectorNNTP.BackFiller.Nntp
                 return;
             }
 
-            var budget = deadline.IsBounded ? deadline.Remaining : _shutdownGrace;
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(budget, cancellationToken).ConfigureAwait(false);
+                if (deadline.IsBounded)
+                {
+                    await deadline.WaitAsync(Task.WhenAll(tasks), cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Task.WhenAll(tasks).WaitAsync(_shutdownGrace, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (TimeoutException)
+            {
+                ShutdownObservations.TimedOut(_logger, "DATE keepalive drain");
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 ShutdownObservations.TimedOut(_logger, "DATE keepalive drain");
             }
