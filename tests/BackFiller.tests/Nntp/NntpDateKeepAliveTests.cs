@@ -59,6 +59,58 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
         }
 
         /// <summary>
+        /// Idle admission registers the DATE timer before the keepalive loop resumes.
+        /// A clock advance after admission therefore cannot miss a timer that does not exist yet.
+        /// </summary>
+        [Fact]
+        public async Task Idle_admission_arms_the_date_timer_before_the_loop_resumes()
+        {
+            var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 26, 12, 0, 0, TimeSpan.Zero));
+            var clock = new KeepAliveTimerCounter(time, TimeSpan.FromSeconds(2));
+            var dateStarted = NewSource();
+            var resumed = NewSource();
+            var release = NewSource();
+            var factory = new ScriptedNntpTransportFactory();
+            var server = NntpSessionPoolTests.CreateDateAwareServer(dateStarted: dateStarted);
+            factory.Enqueue(server);
+            var pool = NntpSessionPoolTests.CreatePool(
+                factory,
+                max: 1,
+                min: 1,
+                keepAliveSeconds: 2,
+                time: clock);
+            var timersAtResume = -1;
+            pool.BeforeFirstKeepAliveDelay = () =>
+            {
+                timersAtResume = clock.KeepAliveTimerCount;
+                resumed.TrySetResult();
+                return release.Task;
+            };
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                await resumed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, timersAtResume);
+                Assert.False(dateStarted.Task.IsCompleted);
+
+                release.TrySetResult();
+                time.Advance(TimeSpan.FromSeconds(1));
+                Assert.False(dateStarted.Task.IsCompleted);
+                Assert.DoesNotContain(server.Commands, static command => command.Equals("DATE", StringComparison.OrdinalIgnoreCase));
+
+                time.Advance(TimeSpan.FromSeconds(1));
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Contains(server.Commands, static command => command.Equals("DATE", StringComparison.OrdinalIgnoreCase));
+            }
+            finally
+            {
+                release.TrySetResult();
+                pool.BeforeFirstKeepAliveDelay = null;
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
         /// Successful DATE leaves the session reusable for ARTICLE without extra connects.
         /// </summary>
 
@@ -405,6 +457,31 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             {
                 cts.Token.ThrowIfCancellationRequested();
                 await Task.Yield();
+            }
+        }
+
+        /// <summary>
+        /// Counts keepalive timers and forwards every timer to a manual clock the test advances.
+        /// </summary>
+        /// <param name="clock">Clock whose <see cref="ManualTimeProvider.Advance"/> fires the forwarded timers.</param>
+        /// <param name="keepAliveInterval">Due time that counts as the DATE idle interval.</param>
+        private sealed class KeepAliveTimerCounter(ManualTimeProvider clock, TimeSpan keepAliveInterval) : TimeProvider
+        {
+            /// <summary>Timers created with the DATE idle interval.</summary>
+            private int _keepAliveTimers;
+
+            /// <summary>Timers created with the DATE idle interval.</summary>
+            internal int KeepAliveTimerCount => Volatile.Read(ref _keepAliveTimers);
+
+            /// <inheritdoc />
+            public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            {
+                if (dueTime == keepAliveInterval)
+                {
+                    Interlocked.Increment(ref _keepAliveTimers);
+                }
+
+                return clock.CreateTimer(callback, state, dueTime, period);
             }
         }
     }
