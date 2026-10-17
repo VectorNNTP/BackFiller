@@ -1,0 +1,26 @@
+using VectorNNTPD.BackFillerService.ArticleWork;
+
+namespace VectorNNTPD.BackFillerService.Tests.TestDoubles
+{
+    /// <summary>
+    /// Test handler that never invents Success. Returns <see cref="ArticleWorkOutcome.ProviderFailure"/>
+    /// so the delivery is NACK-requeued without a terminal RPC response.
+    /// </summary>
+    internal sealed class DeferredArticleWorkHandler : IArticleWorkHandler
+    {
+        /// <summary>Stable provider-failure reason returned for every non-cancelled item.</summary>
+        private const string DeferredReason = "Upstream provider retrieval is not implemented.";
+
+        /// <inheritdoc />
+        public ValueTask<ArticleWorkHandlerResult> HandleAsync(ArticleWorkItem item, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(item);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return ValueTask.FromResult(new ArticleWorkHandlerResult(ArticleWorkOutcome.Cancelled, null));
+            }
+
+            return ValueTask.FromResult(new ArticleWorkHandlerResult(ArticleWorkOutcome.ProviderFailure, DeferredReason));
+        }
+    }
+}

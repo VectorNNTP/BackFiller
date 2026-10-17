@@ -31,10 +31,11 @@ Protect real production contracts with deterministic, failure-sensitive tests.
 
 ## Project constraints
 
-- Test project: `tests/BackFiller.tests/BackFiller.Tests.csproj` (`VectorNNTP.BackFiller.Tests`). Shared helpers live in `tests/BackFiller.tests/Fixtures/` and `tests/BackFiller.tests/TestDoubles/`
+- Service tests: `tests/VectorNNTPD.BackFillerService.Tests/VectorNNTPD.BackFillerService.Tests.csproj` (`VectorNNTPD.BackFillerService.Tests`). Shared helpers live in `tests/VectorNNTPD.BackFillerService.Tests/Fixtures/` and `tests/VectorNNTPD.BackFillerService.Tests/TestDoubles/`
+- Common tests: `tests/VectorNNTPD.Common.Tests/VectorNNTPD.Common.Tests.csproj` (`VectorNNTPD.Common.Tests`)
 - Established patterns: fakes in `TestDoubles/`, harnesses in `Fixtures/`, injectable `ILocalIpAddressAssignee`, host builders without live sockets
 - Do not require internet, live Cloudflare, DNS mutation, or bound listeners unless the task explicitly demands it
-- Analyzer and nullable rules apply to test code. The test project already sets `GenerateDocumentationFile` false and suppresses `CS1591`. Do not add further `NoWarn` entries to hide failures
+- Analyzer and nullable rules apply to test code. `VectorNNTPD.BackFillerService.Tests` sets `GenerateDocumentationFile` false and suppresses `CS1591`. `VectorNNTPD.Common.Tests` does not. Do not add further `NoWarn` entries to hide failures
 
 ## Cover when relevant
 

@@ -7,19 +7,19 @@ alwaysApply: true
 
 ## Before changing anything
 
-1. This repository is standalone **VectorNNTP.BackFiller**, extracted from VectorNNTP.NNTPD. Do not assume NNTPD server, transit, or benchmark layout still exists here. Do not assume every component shares architecture or invariants.
+1. This repository is standalone **VectorNNTPD.BackFillerService**, extracted from VectorNNTP.NNTPD. Do not assume NNTPD server, transit, or benchmark layout still exists here. Do not assume every component shares architecture or invariants.
 2. Inspect existing implementation, callers, consumers, ownership, lifecycle, and tests before editing.
 3. Prefer the **smallest correct change**. Avoid speculative abstractions and unnecessary dependencies.
 4. Preserve unrelated user changes and out-of-scope files.
 
 ## Project facts (inspect rather than invent)
 
-- Solution: `BackFiller.slnx`
-- Target framework: `net10.0`; nullable + implicit usings enabled; x64-only; production docs XML enabled; tests suppress CS1591
+- Solution: `VectorNNTPD.slnx`
+- Target framework: `net10.0`; nullable + implicit usings enabled; x64-only; production docs XML enabled. `VectorNNTPD.BackFillerService.Tests` suppresses CS1591. `VectorNNTPD.Common.Tests` generates documentation and does not suppress CS1591.
 - Host: .NET Generic Host worker service; startup is ordered and validated before hosted services run; Serilog is the logging stack
-- Primary project: `src/BackFiller/BackFiller.csproj`; test project: `tests/BackFiller.tests/BackFiller.Tests.csproj`
-- Namespace/layout: production code lives under `VectorNNTP.BackFiller.*` in `src/BackFiller/`; tests live under `VectorNNTP.BackFiller.Tests.*` in `tests/BackFiller.tests/`
-- Source layout: functional directories only. Do not recreate `Common` or `Shared` source trees, namespaces, or project boundaries.
+- Projects: `src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj`, `src/VectorNNTPD.Common/VectorNNTPD.Common.csproj`, `tests/VectorNNTPD.BackFillerService.Tests/VectorNNTPD.BackFillerService.Tests.csproj`, and `tests/VectorNNTPD.Common.Tests/VectorNNTPD.Common.Tests.csproj`
+- Namespace/layout: service code lives under `VectorNNTPD.BackFillerService.*` in `src/VectorNNTPD.BackFillerService/`; shared library code lives under `VectorNNTPD.Common.*` in `src/VectorNNTPD.Common/`. Tests use `VectorNNTPD.BackFillerService.Tests.*` and `VectorNNTPD.Common.Tests.*`.
+- Source layout: functional directories only. Do not add another shared project boundary beside `VectorNNTPD.Common`.
 - Lifecycle: `ApplicationServiceManager` + `IApplicationService`, hosted by `BackFillerApplicationHostedService`. systemd ready is Generic Host `ApplicationStarted` via `SystemdLifecycleNotifier`.
 - Config contract: `docs/configuration.md` (authoritative over memory)
 - Protocol data plane: **bytes throughout** — see `docs/architecture.md` § Byte-Oriented Protocol Data Plane
@@ -30,7 +30,7 @@ alwaysApply: true
 
 All C# namespaces must be block-scoped; file-scoped namespaces are not permitted.
 
-This applies to `src/BackFiller/` and `tests/BackFiller.tests/`. Both projects set `csharp_style_namespace_declarations = block_scoped` in their `.editorconfig`.
+This applies to `src/VectorNNTPD.BackFillerService/`, `src/VectorNNTPD.Common/`, `tests/VectorNNTPD.BackFillerService.Tests/`, and `tests/VectorNNTPD.Common.Tests/`. Those projects set `csharp_style_namespace_declarations = block_scoped` in their `.editorconfig`.
 
 The namespace must match the folder under the project directory. Files directly under the project directory use that project's root namespace. `GlobalUsings.cs` has no namespace.
 

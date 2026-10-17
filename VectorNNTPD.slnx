@@ -1,0 +1,21 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/VectorNNTPD.Common/VectorNNTPD.Common.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VectorNNTPD.BackFillerService.Tests/VectorNNTPD.BackFillerService.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/VectorNNTPD.Common.Tests/VectorNNTPD.Common.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+</Solution>

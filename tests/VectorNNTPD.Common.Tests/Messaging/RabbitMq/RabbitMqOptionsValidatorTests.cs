@@ -1,0 +1,173 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using VectorNNTPD.Common.Hosting;
+using VectorNNTPD.Common.Messaging.RabbitMq;
+
+namespace VectorNNTPD.Common.Tests.Messaging.RabbitMq
+{
+    /// <summary>
+    /// Locks <see cref="RabbitMqOptions"/> defaults, connectivity-only validation, and the runtime snapshot projection.
+    /// </summary>
+    public sealed class RabbitMqOptionsValidatorTests
+    {
+        /// <summary>
+        /// Asserts the default payload limit, lease and RPC timeouts, empty host list, root virtual host, enabled SSL, port 5672, and a management section with no base URL.
+        /// </summary>
+        [Fact]
+        public void Defaults_MatchSharedContract()
+        {
+            var options = new RabbitMqOptions();
+
+            Assert.Equal(1024, options.WorkRequestMaxPayloadBytes);
+            Assert.Equal(60, options.ChannelLeaseTimeoutSeconds);
+            Assert.Equal(30, options.RpcTimeoutSeconds);
+            Assert.Empty(options.Hosts!);
+            Assert.Equal("/", options.VirtualHost);
+            Assert.True(options.EnableSsl);
+            Assert.Equal(5672, options.Port);
+            Assert.NotNull(options.Management);
+            Assert.Null(options.Management.BaseUrl);
+        }
+
+        /// <summary>
+        /// Asserts that connectivity-only options with a host and SSL disabled pass validation when management is unset.
+        /// </summary>
+        [Fact]
+        public void Validate_Succeeds_WithoutManagement()
+        {
+            var result = new RabbitMqOptionsValidator().Validate(null, CreateValidConnectivityOnly());
+            Assert.True(result.Succeeded);
+        }
+
+        /// <summary>
+        /// Asserts that default options fail validation with a failure that mentions <c>Hosts</c>.
+        /// </summary>
+        [Fact]
+        public void Validate_Fails_WhenHostsMissing()
+        {
+            var result = new RabbitMqOptionsValidator().Validate(null, new RabbitMqOptions());
+            Assert.True(result.Failed);
+            Assert.Contains(result.Failures, static failure => failure.Contains("Hosts", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Asserts that port 0 fails validation.
+        /// </summary>
+        [Fact]
+        public void Validate_Fails_WhenPortOutOfRange()
+        {
+            var options = CreateValidConnectivityOnly();
+            options.Port = 0;
+            var result = new RabbitMqOptionsValidator().Validate(null, options);
+            Assert.True(result.Failed);
+        }
+
+        /// <summary>
+        /// Asserts that a management base URL with a path fails and that the failure says the URL must not include a path.
+        /// </summary>
+        [Fact]
+        public void Validate_Fails_WhenManagementBaseUrlHasPath()
+        {
+            var options = CreateValidConnectivityOnly();
+            options.Management = new RabbitMqManagementOptions
+            {
+                BaseUrl = "http://127.0.0.1:15672/api",
+                RequestTimeoutSeconds = 5,
+            };
+            var result = new RabbitMqOptionsValidator().Validate(null, options);
+            Assert.True(result.Failed);
+            Assert.Contains(result.Failures, static failure => failure.Contains("must not include a path", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Asserts that the runtime snapshot copies the host, port, virtual host, and disabled SSL from connectivity-only options.
+        /// </summary>
+        [Fact]
+        public void ToRuntimeOptions_ProjectsValidatedSnapshot()
+        {
+            var runtime = CreateValidConnectivityOnly().ToRuntimeOptions();
+            Assert.Equal(["127.0.0.1"], runtime.Hosts);
+            Assert.Equal(5672, runtime.Port);
+            Assert.Equal("/", runtime.VirtualHost);
+            Assert.False(runtime.EnableSsl);
+        }
+
+        /// <summary>
+        /// Asserts that the default connection name is the application prefix, a colon, and the FQDN.
+        /// </summary>
+        [Fact]
+        public void GetDefaultConnectionName_UsesApplicationPrefix()
+        {
+            Assert.Equal(
+                "VectorNNTP.StorageServer:cache01.usenet.ninja",
+                RabbitMqRuntimeOptions.GetDefaultConnectionName("VectorNNTP.StorageServer", "cache01.usenet.ninja"));
+        }
+
+        /// <summary>
+        /// Returns options with host <c>127.0.0.1</c> and SSL disabled, and with every other field left at the type default.
+        /// </summary>
+        /// <returns>Options that pass connectivity validation without a management URL.</returns>
+        internal static RabbitMqOptions CreateValidConnectivityOnly() =>
+            new()
+            {
+                Hosts = ["127.0.0.1"],
+                EnableSsl = false,
+            };
+    }
+
+    /// <summary>
+    /// Locks RabbitMQ infrastructure registration so the singletons exist before any connection is opened.
+    /// </summary>
+    public sealed class RabbitMqInfrastructureRegistrationTests
+    {
+        /// <summary>
+        /// Asserts that <see cref="RabbitMqServiceCollectionExtensions.AddRabbitMqInfrastructure"/> registers one <see cref="IRabbitMqService"/> implemented by <see cref="RabbitMqService"/> and does not call the connection factory.
+        /// </summary>
+        /// <returns>A task that completes when the singleton and connect-count assertions finish.</returns>
+        [Fact]
+        public async Task AddRabbitMqInfrastructure_RegistersSingletons_WithoutConnecting()
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton(Options.Create(RabbitMqOptionsValidatorTests.CreateValidConnectivityOnly()));
+            services.AddSingleton<IRabbitMqConnectionNameProvider>(
+                new DelegateRabbitMqConnectionNameProvider(() => "VectorNNTPD.Common.Tests:unit"));
+            var factory = new CountingFakeRabbitMqConnectionFactory();
+            services.AddSingleton<IRabbitMqConnectionFactory>(factory);
+            services.AddRabbitMqInfrastructure();
+
+            await using var provider = services.BuildServiceProvider();
+            var service = provider.GetRequiredService<IRabbitMqService>();
+            Assert.Same(provider.GetRequiredService<RabbitMqService>(), service);
+            Assert.Equal(0, factory.ConnectCount);
+        }
+
+        /// <summary>
+        /// Connection factory that counts connect attempts and then throws so registration tests cannot open a broker connection.
+        /// </summary>
+        private sealed class CountingFakeRabbitMqConnectionFactory : IRabbitMqConnectionFactory
+        {
+            /// <summary>Number of <see cref="ConnectAsync"/> calls observed.</summary>
+            public int ConnectCount { get; private set; }
+
+            /// <summary>
+            /// Increments <see cref="ConnectCount"/> and throws. No connection is returned.
+            /// </summary>
+            /// <param name="options">Requested options. Ignored.</param>
+            /// <param name="connectionName">Requested connection name. Ignored.</param>
+            /// <param name="cancellationToken">Cancellation token. Not observed.</param>
+            /// <returns>This method does not return.</returns>
+            /// <exception cref="InvalidOperationException">Thrown after the call is counted.</exception>
+            public Task<IRabbitMqConnection> ConnectAsync(
+                RabbitMqOptions options,
+                string connectionName,
+                CancellationToken cancellationToken)
+            {
+                ConnectCount++;
+                throw new InvalidOperationException("Tests must not connect during registration.");
+            }
+        }
+    }
+}

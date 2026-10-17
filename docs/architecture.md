@@ -1,4 +1,4 @@
-# VectorNNTP.BackFiller architecture
+# VectorNNTPD.BackFillerService architecture
 
 This document describes the current standalone BackFiller process. BackFiller was extracted from VectorNNTP.NNTPD. Shared configuration that still mentions NNTPD is shared-domain context. It is not a second solution in this repository.
 

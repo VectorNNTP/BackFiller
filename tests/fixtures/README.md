@@ -1,6 +1,6 @@
 # Test fixtures
 
-`tests/fixtures/` holds byte-preserving inputs shared by `tests/BackFiller.tests`. Tests locate this directory by walking parents of `AppContext.BaseDirectory` until `BackFiller.slnx` is found, then joining `tests/fixtures`. That works from the test runner output directory and from CI. Paths are not absolute developer-machine paths.
+`tests/fixtures/` holds byte-preserving inputs shared by `tests/VectorNNTPD.BackFillerService.Tests`. Tests locate this directory by walking parents of `AppContext.BaseDirectory` until `VectorNNTPD.slnx` is found, then joining `tests/fixtures`. That works from the test runner output directory and from CI. Paths are not absolute developer-machine paths.
 
 ## Layout
 
@@ -68,7 +68,7 @@ Copy the upstream bytes without transcoding. `.gitattributes` marks `tests/fixtu
 ## Running the fixture tests
 
 ```powershell
-dotnet test tests/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --filter "FullyQualifiedName~InnArticleFixtureTests|FullyQualifiedName~SabctoolsYEncArticleValidationTests"
+dotnet test tests/VectorNNTPD.BackFillerService.Tests/VectorNNTPD.BackFillerService.Tests.csproj --configuration Release -p:Platform=x64 --filter "FullyQualifiedName~InnArticleFixtureTests|FullyQualifiedName~SabctoolsYEncArticleValidationTests"
 ```
 
 `ArticleCorpusBench.Measure_local_article_corpus` measures `.artifacts/articles` when that directory is present and writes `.artifacts/article-corpus-bench-2026-10-15.txt`. It does not modify the corpus. When the directory is absent, the fact reports that and returns; the corpus is local evidence and is not part of the git checkout.

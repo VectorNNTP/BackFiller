@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a defect in VectorNNTP.BackFiller service behavior
+about: Report a defect in VectorNNTPD.BackFillerService service behavior
 labels: [bug]
 ---
 

@@ -1,11 +1,11 @@
 ---
 mode: agent
-description: Review VectorNNTP.BackFiller changes for correctness, architecture, concurrency, and operational safety.
+description: Review VectorNNTPD.BackFillerService changes for correctness, architecture, concurrency, and operational safety.
 ---
 
-# VectorNNTP.BackFiller Code Review
+# VectorNNTPD.BackFillerService Code Review
 
-Review the selected change as production code for standalone VectorNNTP.BackFiller, a high-throughput Usenet article-recovery worker.
+Review the selected change as production code for standalone VectorNNTPD.BackFillerService, a high-throughput Usenet article-recovery worker.
 
 The purpose of this review is to identify specific defects, correctness risks, architectural violations, concurrency failures, lifecycle problems, security issues, operational hazards, and material unintended behavior changes.
 

@@ -1,0 +1,200 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Hosting;
+using VectorNNTPD.BackFillerService.Configuration;
+using VectorNNTPD.BackFillerService.Tests.Fixtures;
+
+namespace VectorNNTPD.BackFillerService.Tests.Configuration
+{
+    /// <summary>
+    /// Verifies <see cref="ApplicationJsonConfiguration"/> replaces generic host JSON sources with entry-assembly file names.
+    /// </summary>
+    public sealed class ApplicationJsonConfigurationSourceTests
+    {
+        /// <summary>
+        /// Committed JSON file names match production assembly naming; legacy <c>appsettings</c> files are absent from the project tree.
+        /// </summary>
+        [Fact]
+        public void Production_assembly_names_the_configuration_files()
+        {
+            Assert.Equal("VectorNNTPD.BackFillerService", typeof(ApplicationJsonConfiguration).Assembly.GetName().Name);
+            Assert.Equal("VectorNNTP.RabbitMQ.json", ApplicationJsonConfiguration.SharedRabbitMqFileName);
+
+            var root = RepositoryFiles.Root();
+            Assert.True(File.Exists(RelativePath.Under(root, "src", "VectorNNTPD.BackFillerService", "VectorNNTPD.BackFillerService.json")));
+            Assert.True(File.Exists(RelativePath.Under(root, "src", "VectorNNTPD.BackFillerService", "VectorNNTP.RabbitMQ.json")));
+            Assert.False(File.Exists(RelativePath.Under(root, "src", "VectorNNTPD.BackFillerService", "appsettings.json")));
+            Assert.False(File.Exists(RelativePath.Under(root, "src", "VectorNNTPD.BackFillerService", "RabbitMq.json")));
+        }
+
+        /// <summary>
+        /// After registration, only primary, environment, and shared RabbitMQ JSON sources remain before environment variables, with expected optional/reload flags.
+        /// </summary>
+        [Fact]
+        public void Host_defaults_are_removed_and_entry_assembly_files_are_registered()
+        {
+            var builder = new ConfigurationBuilder();
+            builder.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+            builder.AddJsonFile("appsettings.Production.json", optional: true, reloadOnChange: true);
+            builder.AddJsonFile("VectorNNTPD.BackFillerService.settings.json", optional: true, reloadOnChange: true);
+            builder.AddEnvironmentVariables();
+
+            ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(builder, "Production");
+            ApplicationJsonConfiguration.AddSharedRabbitMqJsonFile(builder, "Production");
+
+            var primary = ApplicationJsonConfiguration.PrimaryJsonFileName();
+            var environment = ApplicationJsonConfiguration.EnvironmentJsonFileName("Production");
+            var files = FileSources(builder).ToArray();
+            var actual = files.Select(static source => source.Path ?? string.Empty).ToArray();
+            Assert.Equal(
+                new[] { primary, environment, ApplicationJsonConfiguration.SharedRabbitMqFileName },
+                actual);
+            Assert.False(files[0].Optional);
+            Assert.False(files[0].ReloadOnChange);
+            Assert.True(files[1].Optional);
+            Assert.True(files[1].ReloadOnChange);
+            Assert.True(files[2].Optional);
+            Assert.True(files[2].ReloadOnChange);
+            Assert.IsType<EnvironmentVariablesConfigurationSource>(builder.Sources[^1]);
+        }
+
+        /// <summary>
+        /// When no JSON sources exist yet, all three entry-assembly files are added as optional with reload enabled.
+        /// </summary>
+        [Fact]
+        public void Entry_assembly_files_are_added_when_the_host_registered_no_json_sources()
+        {
+            var builder = new ConfigurationBuilder();
+            builder.AddEnvironmentVariables();
+
+            ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(builder, "Production");
+            ApplicationJsonConfiguration.AddSharedRabbitMqJsonFile(builder, "Production");
+
+            var files = FileSources(builder).ToArray();
+            Assert.Equal(3, files.Length);
+            Assert.All(files, static source => Assert.True(source.Optional));
+            Assert.All(files, static source => Assert.True(source.ReloadOnChange));
+            Assert.IsType<EnvironmentVariablesConfigurationSource>(builder.Sources[^1]);
+        }
+
+        /// <summary>
+        /// Optional environment and RabbitMQ files may be absent without failing <see cref="IConfigurationBuilder.Build"/>.
+        /// </summary>
+        [Fact]
+        public void Missing_optional_files_do_not_fail_configuration_build()
+        {
+            var directory = Directory.CreateTempSubdirectory("bf-json-missing-");
+            try
+            {
+                var builder = new ConfigurationBuilder();
+                builder.SetBasePath(directory.FullName);
+                builder.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+                builder.AddJsonFile("appsettings.Production.json", optional: true, reloadOnChange: false);
+                ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(builder, "Production");
+                ApplicationJsonConfiguration.AddSharedRabbitMqJsonFile(builder, "Production");
+
+                var configuration = builder.Build();
+                Assert.Null(configuration["BackFiller:ServerId"]);
+                Assert.Null(configuration["RabbitMQ:Hosts:0"]);
+            }
+            finally
+            {
+                directory.Delete(true);
+            }
+        }
+
+        /// <summary>
+        /// The primary BackFiller JSON file is required; build throws when it is missing from the base path.
+        /// </summary>
+        [Fact]
+        public void Missing_required_primary_file_fails_configuration_build()
+        {
+            var directory = Directory.CreateTempSubdirectory("bf-json-required-");
+            try
+            {
+                var builder = new ConfigurationBuilder();
+                builder.SetBasePath(directory.FullName);
+                builder.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+                builder.AddJsonFile("appsettings.Production.json", optional: true, reloadOnChange: false);
+                ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(builder, "Production");
+
+                Assert.Throws<FileNotFoundException>(() => builder.Build());
+            }
+            finally
+            {
+                directory.Delete(true);
+            }
+        }
+
+        /// <summary>
+        /// Malformed primary JSON surfaces as <see cref="InvalidDataException"/> with an inner format error.
+        /// </summary>
+        [Fact]
+        public void Invalid_primary_json_fails_configuration_build()
+        {
+            var directory = Directory.CreateTempSubdirectory("bf-json-invalid-");
+            try
+            {
+                File.WriteAllText(
+                    Path.Join(directory.FullName, ApplicationJsonConfiguration.PrimaryJsonFileName()),
+                    "{");
+                var builder = new ConfigurationBuilder();
+                builder.SetBasePath(directory.FullName);
+                builder.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+                builder.AddJsonFile("appsettings.Production.json", optional: true, reloadOnChange: false);
+                ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(builder, "Production");
+
+                var exception = Assert.Throws<InvalidDataException>(() => builder.Build());
+                Assert.IsType<FormatException>(exception.InnerException);
+            }
+            finally
+            {
+                directory.Delete(true);
+            }
+        }
+
+        /// <summary>
+        /// Generic host configuration after registration excludes <c>appsettings*</c> and <c>*.settings.json</c> paths.
+        /// </summary>
+        [Fact]
+        public void Generic_host_builder_does_not_keep_appsettings_sources()
+        {
+            var directory = Directory.CreateTempSubdirectory("bf-host-json-");
+            try
+            {
+                var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+                {
+                    Args = [],
+                    ContentRootPath = directory.FullName,
+                });
+                ApplicationJsonConfiguration.UseEntryAssemblyJsonFiles(
+                    builder.Configuration,
+                    builder.Environment.EnvironmentName);
+                ApplicationJsonConfiguration.AddSharedRabbitMqJsonFile(
+                    builder.Configuration,
+                    builder.Environment.EnvironmentName);
+
+                var paths = FileSources(builder.Configuration).Select(static source => source.Path).ToArray();
+                Assert.DoesNotContain(
+                    paths,
+                    static path => string.Equals(path, "appsettings.json", StringComparison.OrdinalIgnoreCase)
+                        || (path?.StartsWith("appsettings.", StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (path?.EndsWith(".settings.json", StringComparison.OrdinalIgnoreCase) ?? false));
+                Assert.Contains(ApplicationJsonConfiguration.PrimaryJsonFileName(), paths);
+                Assert.Contains(
+                    ApplicationJsonConfiguration.EnvironmentJsonFileName(builder.Environment.EnvironmentName),
+                    paths);
+                Assert.Contains(ApplicationJsonConfiguration.SharedRabbitMqFileName, paths);
+            }
+            finally
+            {
+                directory.Delete(true);
+            }
+        }
+
+        /// <summary>Returns file-backed configuration sources in registration order.</summary>
+        /// <param name="configuration">Builder whose sources are filtered.</param>
+        private static IEnumerable<FileConfigurationSource> FileSources(IConfigurationBuilder configuration)
+            => configuration.Sources.OfType<FileConfigurationSource>();
+    }
+}

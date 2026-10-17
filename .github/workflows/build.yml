@@ -41,13 +41,13 @@ jobs:
           disk_list="$(mktemp)"
           sln_list="$(mktemp)"
           find src tests -name '*.csproj' | sed 's|\\|/|g' | sed 's|^\./||' | sort -u > "$disk_list"
-          dotnet sln BackFiller.slnx list | tr -d '\r' | sed 's|\\|/|g' | sed 's|^\./||' | grep '\.csproj$' | sort -u > "$sln_list"
+          dotnet sln VectorNNTPD.slnx list | tr -d '\r' | sed 's|\\|/|g' | sed 's|^\./||' | grep '\.csproj$' | sort -u > "$sln_list"
 
           if ! cmp -s "$disk_list" "$sln_list"; then
             echo "Solution membership does not match every project under src/ and tests/."
-            echo "On disk but not in BackFiller.slnx:"
+            echo "On disk but not in VectorNNTPD.slnx:"
             comm -23 "$disk_list" "$sln_list"
-            echo "In BackFiller.slnx but missing on disk:"
+            echo "In VectorNNTPD.slnx but missing on disk:"
             comm -13 "$disk_list" "$sln_list"
             exit 1
           fi
@@ -95,13 +95,13 @@ jobs:
           echo "Production projects: $prod_count"
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx -p:Platform=x64
+        run: dotnet restore VectorNNTPD.slnx -p:Platform=x64
 
       - name: Build solution
         # Platform x64 writes bin/x64/Release. The test step uses the same
         # property with --no-build so VSTest reads that output.
         # Native AOT publishing is a later runtime-identifier step.
-        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
+        run: dotnet build VectorNNTPD.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Test solution
         timeout-minutes: 25
@@ -236,7 +236,7 @@ jobs:
         # x64 platform contract. Publish restores the ILCompiler pack and the
         # StuDev.AotAnywhere Zig toolchain for this runtime identifier.
         run: |
-          dotnet publish src/BackFiller/BackFiller.csproj \
+          dotnet publish src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj \
             --configuration Release \
             -p:Platform=x64 \
             --runtime linux-x64 \
@@ -256,7 +256,7 @@ jobs:
           cp deploy/systemd/vectornntp-backfiller.service "$dir/vectornntp-backfiller.service"
           cp deploy/systemd/backfiller.env.example "$dir/backfiller.env.example"
           cp README.md "$dir/README.md"
-          test -f "$dir/VectorNNTP.BackFiller.json"
+          test -f "$dir/VectorNNTPD.BackFillerService.json"
           test -f "$dir/VectorNNTP.RabbitMQ.json"
           test ! -e "$dir/appsettings.json"
           test ! -e "$dir/RabbitMq.json"
@@ -266,13 +266,13 @@ jobs:
         run: |
           set -euo pipefail
           dir=./.artifacts/linux-x64
-          exe="$dir/VectorNNTP.BackFiller"
+          exe="$dir/VectorNNTPD.BackFillerService"
           test -f "$exe"
           test -x "$exe"
           test -f "$dir/vectornntp-backfiller.service"
           test -f "$dir/backfiller.env.example"
           test -f "$dir/README.md"
-          test -f "$dir/VectorNNTP.BackFiller.json"
+          test -f "$dir/VectorNNTPD.BackFillerService.json"
           test -f "$dir/VectorNNTP.RabbitMQ.json"
           test ! -e "$dir/appsettings.json"
           test ! -e "$dir/RabbitMq.json"
@@ -286,7 +286,7 @@ jobs:
           readelf -h "$exe" | grep -q "Machine:[[:space:]]*Advanced Micro Devices X86-64"
           readelf -h "$exe" | grep -E -q "Type:[[:space:]]*(EXEC|DYN)"
           objdump -f "$exe" | grep -q "elf64-x86-64"
-          for forbidden in VectorNNTP.BackFiller.dll libcoreclr.so libhostfxr.so coreclr.dll hostfxr.dll; do
+          for forbidden in VectorNNTPD.BackFillerService.dll libcoreclr.so libhostfxr.so coreclr.dll hostfxr.dll; do
             if [ -e "$dir/$forbidden" ]; then
               echo "Native AOT output contains $forbidden."
               exit 1
@@ -302,8 +302,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe=./.artifacts/linux-x64/VectorNNTP.BackFiller
-          config="$PWD/tests/BackFiller.tests/Fixtures/startup-smoke.json"
+          exe=./.artifacts/linux-x64/VectorNNTPD.BackFillerService
+          config="$PWD/tests/VectorNNTPD.BackFillerService.Tests/Fixtures/startup-smoke.json"
           test -f "$exe"
           test -f "$config"
           export VECTORNNTP_BACKFILLER_STARTUP_SMOKE=1
@@ -352,12 +352,12 @@ jobs:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx -p:Platform=x64
+        run: dotnet restore VectorNNTPD.slnx -p:Platform=x64
 
       - name: Build solution
         # Same x64 Release build as Linux. This job does not repeat tests.
-        # BackFiller.slnx is the canonical CI entrypoint for the production and test projects.
-        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
+        # VectorNNTPD.slnx is the canonical CI entrypoint for the production and test projects.
+        run: dotnet build VectorNNTPD.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Publish BackFiller win-x64
         # Native AOT. PublishAot is true only for this runtime identifier, and the
@@ -367,7 +367,7 @@ jobs:
         # managed app and the RequireNativeAotCompiler target would fail.
         shell: pwsh
         run: |
-          dotnet publish src/BackFiller/BackFiller.csproj `
+          dotnet publish src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj `
             --configuration Release `
             -p:Platform=x64 `
             --runtime win-x64 `
@@ -381,13 +381,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = './.artifacts/win-x64'
-          $exe = Join-Path $dir 'VectorNNTP.BackFiller.exe'
+          $exe = Join-Path $dir 'VectorNNTPD.BackFillerService.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw "Missing $exe" }
-          foreach ($required in @('VectorNNTP.BackFiller.json', 'VectorNNTP.RabbitMQ.json')) {
+          foreach ($required in @('VectorNNTPD.BackFillerService.json', 'VectorNNTP.RabbitMQ.json')) {
             $path = Join-Path $dir $required
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
           }
-          foreach ($forbidden in @('VectorNNTP.BackFiller.dll', 'coreclr.dll', 'hostfxr.dll', 'libcoreclr.so', 'libhostfxr.so', 'vectornntp-backfiller.service', 'backfiller.env.example', 'appsettings.json', 'RabbitMq.json')) {
+          foreach ($forbidden in @('VectorNNTPD.BackFillerService.dll', 'coreclr.dll', 'hostfxr.dll', 'libcoreclr.so', 'libhostfxr.so', 'vectornntp-backfiller.service', 'backfiller.env.example', 'appsettings.json', 'RabbitMq.json')) {
             $path = Join-Path $dir $forbidden
             if (Test-Path -LiteralPath $path) { throw "Native AOT output contains $forbidden." }
           }
@@ -407,8 +407,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path (Resolve-Path './.artifacts/win-x64') 'VectorNNTP.BackFiller.exe'
-          $config = (Resolve-Path './tests/BackFiller.tests/Fixtures/startup-smoke.json').Path
+          $exe = Join-Path (Resolve-Path './.artifacts/win-x64') 'VectorNNTPD.BackFillerService.exe'
+          $config = (Resolve-Path './tests/VectorNNTPD.BackFillerService.Tests/Fixtures/startup-smoke.json').Path
           $stdoutPath = Join-Path (Resolve-Path './.artifacts') 'win-x64-smoke-stdout.txt'
           $stderrPath = Join-Path (Resolve-Path './.artifacts') 'win-x64-smoke-stderr.txt'
           $process = [System.Diagnostics.Process]::new()

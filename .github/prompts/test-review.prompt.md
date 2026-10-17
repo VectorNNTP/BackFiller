@@ -1,15 +1,15 @@
 ---
 mode: agent
-description: Review VectorNNTP.BackFiller tests for meaningful, deterministic regression protection.
+description: Review VectorNNTPD.BackFillerService tests for meaningful, deterministic regression protection.
 ---
 
-# VectorNNTP.BackFiller Test Review
+# VectorNNTPD.BackFillerService Test Review
 
 Review the selected test file, test class, or test area as an engineering regression-protection review.
 
 The goal is not to maximize test count or coverage percentage.
 
-The goal is to determine whether the tests provide strong, deterministic protection for the actual production contracts, failure modes, lifecycle guarantees, concurrency invariants, protocol behavior, and operational requirements of VectorNNTP.BackFiller.
+The goal is to determine whether the tests provide strong, deterministic protection for the actual production contracts, failure modes, lifecycle guarantees, concurrency invariants, protocol behavior, and operational requirements of VectorNNTPD.BackFillerService.
 
 ## Execute the review continuously
 

@@ -1,4 +1,4 @@
-# VectorNNTP.BackFiller configuration
+# VectorNNTPD.BackFillerService configuration
 
 This document is the configuration contract for the standalone BackFiller host. Property names below match the current options types. Defaults and ranges below are the values those types and their validators enforce today.
 
@@ -12,8 +12,8 @@ The host content root is the application binary directory. `ApplicationJsonConfi
 
 | File | Contents |
 |---|---|
-| `VectorNNTP.BackFiller.json` | Primary application configuration. The name is `{entry assembly name}.json`. |
-| `VectorNNTP.BackFiller.{environment}.json` | Optional environment overlay. |
+| `VectorNNTPD.BackFillerService.json` | Primary application configuration. The name is `{entry assembly name}.json`. |
+| `VectorNNTPD.BackFillerService.{environment}.json` | Optional environment overlay. |
 | `VectorNNTP.RabbitMQ.json` | RabbitMQ connectivity. It is a separate file. Its section name remains `RabbitMQ`. |
 
 Environment variables and command-line arguments are applied after those files. A missing optional file does not fail configuration loading. Invalid JSON in a present file fails when that source is read. Mandatory option validation still runs at startup.
@@ -115,7 +115,7 @@ VECTOR__ACMECERTIFICATEPASSWORD
 
 After the connection string works, `ProviderAccountConfigurationService` copies the ACME account, ACME certificate password, Cloudflare API key, Cloudflare zone id, DNS suffix, and RabbitMQ username and password from `nntpsharedconfig`. Assigning the names above in the environment file does not override that row.
 
-`Environment=DOTNET_ENVIRONMENT=Production` in the unit selects the optional `VectorNNTP.BackFiller.Production.json` overlay. A missing overlay does not fail startup. `daemon-reload` is required after a unit-file change. An edit to the environment file is read on the next service start; `daemon-reload` does not reload the environment of a running process. `WatchdogSec` stays commented out.
+`Environment=DOTNET_ENVIRONMENT=Production` in the unit selects the optional `VectorNNTPD.BackFillerService.Production.json` overlay. A missing overlay does not fail startup. `daemon-reload` is required after a unit-file change. An edit to the environment file is read on the next service start; `daemon-reload` does not reload the environment of a running process. `WatchdogSec` stays commented out.
 
 ## Validation behavior that is easy to misread
 

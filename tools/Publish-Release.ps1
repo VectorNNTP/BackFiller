@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Publishes VectorNNTP.BackFiller as a self-contained x64 Native AOT binary.
+    Publishes VectorNNTPD.BackFillerService as a self-contained x64 Native AOT binary.
 
 .DESCRIPTION
     Resolves this standalone repository from the script file, not the caller's
-    working directory. Publishes src/BackFiller/BackFiller.csproj for win-x64,
+    working directory. Publishes src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj for win-x64,
     linux-x64, or both. Output is a flat directory: .artifacts/release/win-64 or
     .artifacts/release/linux-64. The linux-64 directory also contains
     deploy/systemd/vectornntp-backfiller.service, deploy/systemd/backfiller.env.example,
@@ -25,11 +25,11 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$Solution = Join-Path $RepoRoot 'BackFiller.slnx'
-$Project = Join-Path $RepoRoot 'src\BackFiller\BackFiller.csproj'
-$ExeName = 'VectorNNTP.BackFiller'
+$Solution = Join-Path $RepoRoot 'VectorNNTPD.slnx'
+$Project = Join-Path $RepoRoot 'src\VectorNNTPD.BackFillerService\VectorNNTPD.BackFillerService.csproj'
+$ExeName = 'VectorNNTPD.BackFillerService'
 $RequiredPublishFiles = @(
-    'VectorNNTP.BackFiller.json',
+    'VectorNNTPD.BackFillerService.json',
     'VectorNNTP.RabbitMQ.json'
 )
 $SystemdServiceFileName = 'vectornntp-backfiller.service'
@@ -233,10 +233,10 @@ function Publish-Platform {
     $stage = Join-Path $stagingRoot 'publish'
     $replacedRelease = $false
     try {
-        Write-Host "dotnet publish VectorNNTP.BackFiller -c Release -p:Platform=x64 -r $Rid --self-contained true -p:PublishAot=true -o <staging>"
+        Write-Host "dotnet publish VectorNNTPD.BackFillerService -c Release -p:Platform=x64 -r $Rid --self-contained true -p:PublishAot=true -o <staging>"
         & dotnet publish $Project -c Release -p:Platform=x64 -r $Rid --self-contained true -p:PublishAot=true -p:SelfContained=true -o $stage --nologo
         if ($LASTEXITCODE -ne 0) {
-            Fail "dotnet publish failed for VectorNNTP.BackFiller ($Rid) with exit code $LASTEXITCODE."
+            Fail "dotnet publish failed for VectorNNTPD.BackFillerService ($Rid) with exit code $LASTEXITCODE."
         }
 
         $publishedExe = Join-Path $stage ($ExeName + $ExeSuffix)
