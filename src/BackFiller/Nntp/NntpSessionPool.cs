@@ -595,7 +595,7 @@ namespace VectorNNTP.BackFiller.Nntp
         /// The new session did not become <see cref="NntpSessionState.Ready"/>. It is retired without replenish.
         /// </exception>
         /// <remarks>
-        /// Each idle candidate dequeued before the fill gate is held, if it is <see cref="NntpSessionState.Busy"/>, is waited on until it leaves that state, then kept only when <see cref="NntpProviderSession.IsReusable"/>.
+        /// Each idle candidate dequeued before the fill gate is held, if it is <see cref="NntpSessionState.Busy"/>, waits on that session's command gate until the in-flight DATE or ARTICLE releases it, then is kept only when <see cref="NntpProviderSession.IsReusable"/>.
         /// An idle candidate taken later, while the fill gate is held, is retired as soon as it is not reusable, including when it is still busy.
         /// A failed acquire releases its reservation. A successful acquire holds that reservation until <see cref="ReturnAsync"/>.
         /// When the current max cannot accept another issued lease, the session is returned or retired and the reservation is released before this method waits again.
@@ -2502,17 +2502,25 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Yields until <paramref name="session"/> leaves <see cref="NntpSessionState.Busy"/>.</summary>
+        /// <summary>
+        /// Waits until the DATE or ARTICLE command that made <paramref name="session"/> busy releases the command gate.
+        /// </summary>
         /// <param name="session">Session just taken from the idle queue.</param>
-        /// <param name="cancellationToken">Checked on each yield. There is no separate timeout.</param>
-        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
-        private static async Task WaitUntilNotBusyAsync(NntpProviderSession session, CancellationToken cancellationToken)
+        /// <param name="cancellationToken">Cancels the wait. It does not cancel the command.</param>
+        /// <returns>A completed task when <paramref name="session"/> is not busy. Otherwise the command-gate wait.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled while the gate is still held.</exception>
+        /// <remarks>
+        /// The caller has already detached the idle keepalive registration. The in-flight DATE still runs on the pool shutdown token and holds <see cref="NntpProviderSession"/>'s command gate until its response is consumed or the attempt fails.
+        /// This method does not poll <see cref="NntpSessionState"/>. A later acquire attempt reads <see cref="NntpProviderSession.IsReusable"/> after the wait.
+        /// </remarks>
+        private static Task WaitUntilNotBusyAsync(NntpProviderSession session, CancellationToken cancellationToken)
         {
-            while (session.State == NntpSessionState.Busy)
+            if (session.State != NntpSessionState.Busy)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
+                return Task.CompletedTask;
             }
+
+            return session.WaitForCurrentCommandAsync(cancellationToken);
         }
 
         /// <summary>Cancellation and task for one idle session's DATE loop.</summary>
