@@ -14,6 +14,7 @@ namespace VectorNNTP.BackFiller.Nntp
     /// A session remains in <see cref="_idle"/> only while it is also in <see cref="_live"/> and waiting to be leased.
     /// When DATE keepalive is enabled, that idle entry and its registration are published under the same lock.
     /// Retirement, dequeue, and lease return move that membership under <see cref="_idleGate"/> before any await, so a retired session is not kept until a later acquire.
+    /// A drain generation completes only when the lease count that belongs to that generation reaches zero. A return captures that generation under <see cref="_permitGate"/> and completes it after the lock is released, so a later zero-to-one transition is a different source.
     /// </remarks>
     internal sealed class NntpSessionPool : IAsyncDisposable
     {
@@ -52,7 +53,7 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>
         /// Synchronizes <see cref="_availablePermits"/>, <see cref="_permitReservations"/>, <see cref="_permitWaiters"/>,
-        /// and the issue-slot check on <see cref="_activeLeases"/>.
+        /// the issue-slot check on <see cref="_activeLeases"/>, and replacement or capture of <see cref="_drained"/>.
         /// Not held across await. Callers do not take <see cref="_idleGate"/> or <see cref="_fillGate"/> while holding it.
         /// </summary>
         private readonly Lock _permitGate = new();
@@ -146,6 +147,12 @@ namespace VectorNNTP.BackFiller.Nntp
         private Func<Task, Task>? _beforeKeepAliveRetirement;
 
         /// <summary>
+        /// Test gate invoked after dispose has snapshotted <see cref="_drained"/> and before that task is awaited.
+        /// The argument is the snapshotted generation. Null in production. The delegate runs outside <see cref="_permitGate"/>.
+        /// </summary>
+        private Func<Task, Task>? _beforeLeaseDrainWait;
+
+        /// <summary>
         /// Test gate invoked after the lease drain wait returns and before remaining sessions are retired.
         /// Null in production. The delegate runs outside <see cref="_idleGate"/>.
         /// </summary>
@@ -201,11 +208,14 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </summary>
         private int _created;
 
-        /// <summary>Leases issued by <see cref="Issue"/> and not yet finished by <see cref="ReturnAsync"/>.</summary>
+        /// <summary>
+        /// Leases whose issue slot <see cref="TryReserveIssueSlot"/> has reserved and <see cref="CompleteIssuedLeaseAsync"/> has not released.
+        /// Transitions are made under <see cref="_permitGate"/> together with <see cref="_drained"/>.
+        /// </summary>
         private int _activeLeases;
 
         /// <summary>
-        /// Zero until dispose begins. The first dispose sets this under <see cref="_idleGate"/> before it observes <see cref="_drained"/>.
+        /// Zero until dispose begins. The first dispose sets this under <see cref="_idleGate"/> before it snapshots <see cref="_drained"/> under <see cref="_permitGate"/>.
         /// </summary>
         private int _disposed;
 
@@ -238,9 +248,18 @@ namespace VectorNNTP.BackFiller.Nntp
         private int _capacityNotification;
 
         /// <summary>
-        /// Completes when no lease is outstanding. Replaced with a new incomplete source when <see cref="Issue"/> raises the count from zero.
+        /// Completion of the current lease generation. Starts completed because the pool has no leases.
+        /// <see cref="TryReserveIssueSlot"/> replaces it when the count moves from zero to one.
+        /// <see cref="CompleteIssuedLeaseAsync"/> captures this reference when the count moves to zero and completes that instance after releasing <see cref="_permitGate"/>.
+        /// A later generation is a different instance and is not completed by the return that ended the previous one.
         /// </summary>
         private TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Test gate invoked after a return has captured the drain generation that reached zero leases and before that generation is completed.
+        /// Null in production. The delegate runs outside <see cref="_permitGate"/>.
+        /// </summary>
+        private Func<Task>? _beforeDrainGenerationCompleted;
 
         /// <summary>Delay between periodic deficit fills toward <see cref="BackFillerProviderDefinition.MaxSessions"/>.</summary>
         private static readonly TimeSpan ReplenishInterval = TimeSpan.FromSeconds(15);
@@ -430,6 +449,28 @@ namespace VectorNNTP.BackFiller.Nntp
             set => _beforePermitIssuance = value;
         }
 
+        /// <summary>
+        /// Pauses a return after it has selected the drain generation that reached zero leases and before that generation is completed.
+        /// Null unless a test is holding that window. The delegate runs outside <see cref="_permitGate"/>.
+        /// </summary>
+        internal Func<Task>? BeforeDrainGenerationCompleted
+        {
+            get => _beforeDrainGenerationCompleted;
+            set => _beforeDrainGenerationCompleted = value;
+        }
+
+        /// <summary>The drain task for the lease generation that is current. Read under <see cref="_permitGate"/>.</summary>
+        internal Task CurrentDrain
+        {
+            get
+            {
+                lock (_permitGate)
+                {
+                    return _drained.Task;
+                }
+            }
+        }
+
         /// <summary>Permits that can be granted immediately. Read under <see cref="_permitGate"/>.</summary>
         internal int AvailablePermitCount
         {
@@ -461,6 +502,16 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             get => _beforeKeepAliveRetirement;
             set => _beforeKeepAliveRetirement = value;
+        }
+
+        /// <summary>
+        /// Pauses dispose after it has selected the lease generation to wait for and before that wait.
+        /// The argument is that generation. Null unless a test is holding that window. The delegate runs outside <see cref="_permitGate"/>.
+        /// </summary>
+        internal Func<Task, Task>? BeforeLeaseDrainWait
+        {
+            get => _beforeLeaseDrainWait;
+            set => _beforeLeaseDrainWait = value;
         }
 
         /// <summary>
@@ -726,8 +777,14 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             finally
             {
-                CompleteIssuedLease();
-                ReleasePermit();
+                try
+                {
+                    await CompleteIssuedLeaseAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    ReleasePermit();
+                }
             }
         }
 
@@ -837,8 +894,9 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </param>
         /// <param name="cancellationToken">Drain budget when <paramref name="forceAfterGrace"/> is false. Ignored for the lease wait when it is true.</param>
         /// <remarks>
-        /// The disposed flag is published under <see cref="_idleGate"/> before <see cref="_drained"/> is observed,
-        /// so <see cref="TryIssueReusable"/> cannot open a lease after that wait has been decided.
+        /// The disposed flag is published under <see cref="_idleGate"/> before <see cref="_drained"/> is snapshotted under <see cref="_permitGate"/>.
+        /// <see cref="TryReserveIssueSlot"/> cannot open a later generation after that snapshot, and the wait uses the captured generation.
+        /// <see cref="BeforeLeaseDrainWait"/> observes that captured task and runs outside the lock. A second dispose returns before the first wait finishes.
         /// Timeout and cancellation of the lease wait are swallowed, and retirement still runs.
         /// <see cref="SuperviseReplenishAsync"/> logs an unexpected fill failure and keeps the replenish task alive until shutdown.
         /// A failure of that supervisor task itself is logged here and does not skip retirement.
@@ -847,12 +905,18 @@ namespace VectorNNTP.BackFiller.Nntp
         /// </remarks>
         private async Task DisposeCoreAsync(bool forceAfterGrace, CancellationToken cancellationToken)
         {
+            TaskCompletionSource drained;
             lock (_idleGate)
             {
                 if (Interlocked.Exchange(ref _disposed, 1) == 1)
                 {
                     return;
                 }
+            }
+
+            lock (_permitGate)
+            {
+                drained = _drained;
             }
 
             await _shutdown.CancelAsync().ConfigureAwait(false);
@@ -875,15 +939,20 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             await AwaitKeepAlivesAsync().ConfigureAwait(false);
+            if (_beforeLeaseDrainWait is { } beforeDrain)
+            {
+                await beforeDrain(drained.Task).ConfigureAwait(false);
+            }
+
             try
             {
                 if (forceAfterGrace)
                 {
-                    await _drained.Task.WaitAsync(_shutdownGrace, CancellationToken.None).ConfigureAwait(false);
+                    await drained.Task.WaitAsync(_shutdownGrace, CancellationToken.None).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    await drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (TimeoutException)
@@ -1071,10 +1140,14 @@ namespace VectorNNTP.BackFiller.Nntp
 
         /// <summary>
         /// Reserves an issued-lease slot when <see cref="_activeLeases"/> is still below the current max.
-        /// The first slot of a generation replaces <see cref="_drained"/>.
+        /// The zero-to-one transition replaces <see cref="_drained"/> before the lock is released.
         /// </summary>
         /// <returns><see langword="false"/> when another issuance would exceed the current max or the pool is disposed.</returns>
-        /// <remarks>Holds <see cref="_permitGate"/> only for the check and increment. Does not take <see cref="_idleGate"/>.</remarks>
+        /// <remarks>
+        /// The disposed check, the count change, and any replacement of <see cref="_drained"/> share <see cref="_permitGate"/>.
+        /// A return that captured the previous generation cannot complete the source installed here.
+        /// This method does not take <see cref="_idleGate"/>.
+        /// </remarks>
         private bool TryReserveIssueSlot()
         {
             lock (_permitGate)
@@ -1093,15 +1166,57 @@ namespace VectorNNTP.BackFiller.Nntp
             }
         }
 
-        /// <summary>Reverses <see cref="TryReserveIssueSlot"/>. Completes <see cref="_drained"/> when no issued lease remains.</summary>
-        private void CompleteIssuedLease()
+        /// <summary>
+        /// Releases one issue slot. When the count reaches zero, completes the generation captured under <see cref="_permitGate"/>, not a generation installed later.
+        /// </summary>
+        /// <remarks>
+        /// The count change and the capture share the lock. <see cref="TaskCompletionSource.TrySetResult"/> runs after the lock is released.
+        /// Continuations use <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/> and do not re-enter <see cref="_permitGate"/> on this stack.
+        /// <see cref="BeforeDrainGenerationCompleted"/> is null in production and also runs outside the lock.
+        /// </remarks>
+        private Task CompleteIssuedLeaseAsync()
         {
+            TaskCompletionSource? completed;
             lock (_permitGate)
             {
-                if (Interlocked.Decrement(ref _activeLeases) <= 0)
-                {
-                    _drained.TrySetResult();
-                }
+                completed = Interlocked.Decrement(ref _activeLeases) <= 0
+                    ? _drained
+                    : null;
+            }
+
+            if (completed is null)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (_beforeDrainGenerationCompleted is { } gate)
+            {
+                return CompleteCapturedDrainAsync(completed, gate);
+            }
+
+            completed.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Runs <paramref name="gate"/> and then completes <paramref name="completed"/>, which was captured for the generation that reached zero leases.
+        /// </summary>
+        /// <param name="completed">Drain source selected under <see cref="_permitGate"/> before this method runs.</param>
+        /// <param name="gate">Test pause. It must not be the production path.</param>
+        /// <returns>A task that completes after <paramref name="completed"/> has been signaled.</returns>
+        /// <remarks>
+        /// The signal is in a finally block so a fault from the gate still completes the captured generation.
+        /// The caller does not hold <see cref="_permitGate"/>.
+        /// </remarks>
+        private static async Task CompleteCapturedDrainAsync(TaskCompletionSource completed, Func<Task> gate)
+        {
+            try
+            {
+                await gate().ConfigureAwait(false);
+            }
+            finally
+            {
+                completed.TrySetResult();
             }
         }
 
@@ -1134,7 +1249,7 @@ namespace VectorNNTP.BackFiller.Nntp
                 return new HeldIssue(lease, false);
             }
 
-            CompleteIssuedLease();
+            await CompleteIssuedLeaseAsync().ConfigureAwait(false);
             return new HeldIssue(null, false);
         }
 
