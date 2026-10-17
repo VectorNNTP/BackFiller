@@ -30,7 +30,11 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <summary>Stable Debug prefix built by <see cref="FormatWireIdentity"/>.</summary>
         private readonly string _wireIdentity;
 
-        /// <summary>Serializes <see cref="DownloadArticleAsync"/> and <see cref="SendDateKeepAliveAsync"/>. Not held during connect or dispose.</summary>
+        /// <summary>
+        /// Serializes <see cref="DownloadArticleAsync"/> and <see cref="SendDateKeepAliveAsync"/>.
+        /// Held from the start of the command until its response has been consumed or the attempt has failed.
+        /// Not held during connect or dispose. <see cref="WaitForCurrentCommandAsync"/> waits for the current holder and does not keep the gate.
+        /// </summary>
         private readonly SemaphoreSlim _busy = new(1, 1);
 
         /// <summary>Owned transport. Null until connect assigns it, and null again if a TLS upgrade fails after closing it.</summary>
@@ -576,6 +580,32 @@ namespace VectorNNTP.BackFiller.Nntp
             }
 
             throw new InvalidOperationException("ARTICLE download ended without a result.");
+        }
+
+        /// <summary>
+        /// Waits until the command that currently holds <see cref="_busy"/> releases it, then releases the gate again.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels this wait. It does not cancel DATE or ARTICLE.</param>
+        /// <returns>A task that completes when the gate was observed free and released.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled before the gate is acquired.</exception>
+        /// <remarks>
+        /// <see cref="SendDateKeepAliveAsync"/> and <see cref="DownloadArticleAsync"/> hold <see cref="_busy"/> until the response is consumed or the attempt fails, and they update <see cref="State"/> before releasing it.
+        /// A caller that only observed <see cref="NntpSessionState.Busy"/> uses this wait instead of polling that state.
+        /// The wait takes the gate and drops it immediately, so the caller does not own the command and a later ARTICLE can acquire the gate.
+        /// Completing some other keepalive task does not release this gate. After the wait, the caller must read <see cref="IsReusable"/> again.
+        /// Disposal of the gate while this method drops it is ignored because the session is already shutting down.
+        /// </remarks>
+        internal async Task WaitForCurrentCommandAsync(CancellationToken cancellationToken)
+        {
+            await _busy.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _busy.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // DisposeAsync disposes the gate after this wait observed the current command release it.
+            }
         }
 
         /// <summary>

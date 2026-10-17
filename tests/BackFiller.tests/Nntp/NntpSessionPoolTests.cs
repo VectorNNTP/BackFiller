@@ -2138,6 +2138,7 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await acquire)
                     .WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(blockDate.Task.IsCompleted);
             }
             finally
             {
@@ -2152,6 +2153,293 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
                 && factory.ConnectAttempts.Count == 2
                 && CreatedSessionCount(pool) == 1
                 && ReservedConnectionCount(pool) == 1);
+        }
+
+        /// <summary>
+        /// An acquire that takes a session during DATE waits for that command's response before ARTICLE is written.
+        /// A task that is already complete does not release the wait.
+        /// </summary>
+        [Fact]
+        public async Task Acquire_waits_for_the_date_response_before_article()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var articleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            var server = CreateDateAwareServer(
+                dateStarted: dateStarted,
+                blockDate: blockDate,
+                articleStarted: articleStarted);
+            factory.Enqueue(server);
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            NntpSessionLease? lease = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+                var acquire = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() =>
+                    pool.IdleSessionCount == 0
+                    && pool.ActiveLeaseCount == 0
+                    && !acquire.IsCompleted);
+                await Task.CompletedTask;
+                Assert.False(acquire.IsCompleted);
+                Assert.False(articleStarted.Task.IsCompleted);
+                Assert.DoesNotContain(
+                    server.Commands,
+                    static command => command.StartsWith("ARTICLE", StringComparison.OrdinalIgnoreCase));
+
+                blockDate.TrySetResult();
+                lease = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                var download = lease.Session.DownloadArticleAsync("<a@b>", CancellationToken.None);
+                await articleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var articleIndex = CommandIndex(server, "ARTICLE");
+                var dateIndex = CommandIndex(server, "DATE");
+                Assert.True(dateIndex >= 0 && articleIndex > dateIndex);
+                using var result = await download.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(result);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// DATE that closes without a response releases the command gate, and the waiting acquire does not stay parked.
+        /// </summary>
+        [Fact]
+        public async Task Date_eof_while_acquire_waits_does_not_leave_the_acquire_pending()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            var server = CreateDateAwareServer(dateStarted: dateStarted, blockDate: blockDate);
+            factory.Enqueue(server);
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            NntpSessionLease? lease = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var acquire = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() => pool.IdleSessionCount == 0 && pool.ActiveLeaseCount == 0 && !acquire.IsCompleted);
+
+                server.CompleteAfterDateWithoutResponse = true;
+                blockDate.TrySetResult();
+                lease = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(2, factory.ConnectAttempts.Count);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// A rejected DATE status releases the command gate, and the waiting acquire takes a replacement session.
+        /// </summary>
+        [Fact]
+        public async Task Date_rejection_while_acquire_waits_does_not_leave_the_acquire_pending()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            var server = CreateDateAwareServer(
+                dateResponse: "400 date rejected\r\n",
+                dateStarted: dateStarted,
+                blockDate: blockDate);
+            factory.Enqueue(server);
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            NntpSessionLease? lease = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var acquire = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() => pool.IdleSessionCount == 0 && pool.ActiveLeaseCount == 0 && !acquire.IsCompleted);
+
+                blockDate.TrySetResult();
+                lease = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(2, factory.ConnectAttempts.Count);
+                Assert.Equal(1, server.ClientStreamDisposeCount);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// A DATE read that hits the command timeout releases the gate, and the waiting acquire takes a replacement.
+        /// </summary>
+        [Fact]
+        public async Task Date_timeout_while_acquire_waits_does_not_leave_the_acquire_pending()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            var server = CreateDateAwareServer(dateStarted: dateStarted, blockDate: blockDate);
+            factory.Enqueue(server);
+            factory.Enqueue(ReadyServer());
+            await using var pool = CreatePool(
+                factory,
+                max: 1,
+                keepAliveSeconds: 30,
+                time: clock,
+                commandTimeout: TimeSpan.FromSeconds(1));
+            NntpSessionLease? lease = null;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var acquire = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() => pool.IdleSessionCount == 0 && pool.ActiveLeaseCount == 0 && !acquire.IsCompleted);
+
+                lease = await acquire.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(blockDate.Task.IsCompleted);
+                Assert.Equal(2, factory.ConnectAttempts.Count);
+                Assert.Equal(1, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (lease is not null)
+                {
+                    await lease.DisposeAsync();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pool disposal while an acquire is waiting for DATE completes that acquire and clears the pool.
+        /// </summary>
+        [Fact]
+        public async Task Dispose_while_acquire_waits_for_date_completes_the_acquire()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(dateStarted: dateStarted, blockDate: blockDate));
+            var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            Task<NntpSessionLease>? pending = null;
+            var observed = false;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                pending = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() => pool.IdleSessionCount == 0 && pool.ActiveLeaseCount == 0 && !pending.IsCompleted);
+
+                await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(async () => await pending);
+                observed = true;
+                Assert.IsNotType<NullReferenceException>(thrown);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (!observed && pending is not null)
+                {
+                    try
+                    {
+                        await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException or TimeoutException)
+                    {
+                        // Disposal wins the race with the acquire that was waiting on DATE.
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                await pool.DisposeAsync();
+            }
+        }
+
+        /// <summary>
+        /// Configuration replacement drains the pool through <see cref="NntpSessionPool.DrainAndDisposeAsync"/> while acquire is waiting for DATE.
+        /// That acquire completes, and the pool does not keep the session leased.
+        /// </summary>
+        [Fact]
+        public async Task Drain_while_acquire_waits_for_date_completes_the_acquire()
+        {
+            var clock = new KeepAliveDelaySource();
+            var dateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var blockDate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factory = new ScriptedNntpTransportFactory();
+            factory.Enqueue(CreateDateAwareServer(dateStarted: dateStarted, blockDate: blockDate));
+            var pool = CreatePool(factory, max: 1, keepAliveSeconds: 30, time: clock);
+            Task<NntpSessionLease>? pending = null;
+            var observed = false;
+            try
+            {
+                await pool.EnsureDesiredSessionsAsync(CancellationToken.None);
+                var releaseKeepAlive = await clock.WaitForKeepAliveAsync();
+                releaseKeepAlive();
+                await dateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                pending = pool.AcquireAsync(CancellationToken.None);
+                await WaitUntilAsync(() => pool.IdleSessionCount == 0 && pool.ActiveLeaseCount == 0 && !pending.IsCompleted);
+
+                await pool.DrainAndDisposeAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+                var thrown = await Assert.ThrowsAnyAsync<Exception>(async () => await pending);
+                observed = true;
+                Assert.IsNotType<NullReferenceException>(thrown);
+                Assert.Equal(0, pool.LiveSessionCount);
+                Assert.Equal(0, pool.ActiveLeaseCount);
+            }
+            finally
+            {
+                blockDate.TrySetResult();
+                if (!observed && pending is not null)
+                {
+                    try
+                    {
+                        await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException or TimeoutException)
+                    {
+                        // The replacement drain wins the race with the acquire that was waiting on DATE.
+                        ObserveExpectedCleanup(ex);
+                    }
+                }
+
+                await pool.DisposeAsync();
+            }
         }
 
         /// <summary>
@@ -2288,6 +2576,23 @@ namespace VectorNNTP.BackFiller.Tests.Nntp
             var task = field.GetValue(pool) as Task;
             Assert.NotNull(task);
             return task!;
+        }
+
+        /// <summary>Returns the first command index whose text starts with <paramref name="prefix"/>, or -1.</summary>
+        /// <param name="server">Scripted peer that recorded the commands.</param>
+        /// <param name="prefix">Command prefix, compared without case sensitivity.</param>
+        private static int CommandIndex(ScriptedNntpServer server, string prefix)
+        {
+            var commands = server.Commands;
+            for (var i = 0; i < commands.Count; i++)
+            {
+                if (commands[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         /// <summary>Polls <paramref name="predicate"/> with yields until true or a two-second timeout.</summary>
