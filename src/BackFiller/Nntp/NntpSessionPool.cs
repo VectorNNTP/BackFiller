@@ -99,6 +99,12 @@ namespace VectorNNTP.BackFiller.Nntp
         private Func<IReadOnlyList<Task>, Task>? _keepAliveDrainSnapshot;
 
         /// <summary>
+        /// Test gate invoked after admission has armed the first DATE delay and the loop has observed publication,
+        /// before that loop waits. Null in production. The delegate runs outside <see cref="_idleGate"/>.
+        /// </summary>
+        private Func<Task>? _beforeFirstKeepAliveDelay;
+
+        /// <summary>
         /// Test gate invoked after <see cref="CreateReadySessionAsync"/> returns and before <see cref="TryIssueReusable"/>.
         /// Null in production. The delegate runs outside <see cref="_idleGate"/> and outside <see cref="_fillGate"/>'s release.
         /// </summary>
@@ -370,6 +376,16 @@ namespace VectorNNTP.BackFiller.Nntp
         {
             get => _keepAliveDrainSnapshot;
             set => _keepAliveDrainSnapshot = value;
+        }
+
+        /// <summary>
+        /// Pauses a DATE loop after its first delay was armed on the admission thread and before the loop waits for that delay.
+        /// Null unless a test is holding that window. The delegate runs outside <see cref="_idleGate"/>.
+        /// </summary>
+        internal Func<Task>? BeforeFirstKeepAliveDelay
+        {
+            get => _beforeFirstKeepAliveDelay;
+            set => _beforeFirstKeepAliveDelay = value;
         }
 
         /// <summary>
@@ -1121,7 +1137,10 @@ namespace VectorNNTP.BackFiller.Nntp
         /// cannot be undone by a late return. When DATE keepalive is enabled, the idle entry and that registration are
         /// published before the lock is released, so acquisition cannot observe one without the other.
         /// The DATE task is started before the lock and is cancelled if admission does not publish it.
-        /// The lock is not held across that task or any other await.
+        /// A published registration arms its first idle timer on this thread after the lock is released and before
+        /// <see cref="KeepAliveRegistration.Publication"/> is signaled, so the timer exists before this method returns.
+        /// A failure to arm that timer is stored for the loop and still releases the publication gate.
+        /// The lock is not held across that task, the timer, or any await.
         /// </remarks>
         private IdleAdmission TryAdmitIdle(NntpProviderSession session, bool enforceBound)
         {
@@ -1162,10 +1181,30 @@ namespace VectorNNTP.BackFiller.Nntp
             }
             finally
             {
-                registration?.Publication.TrySetResult();
-                if (registration is not null && !published)
+                try
                 {
-                    CancelKeepAliveRegistration(registration);
+                    if (registration is not null && published)
+                    {
+                        try
+                        {
+                            registration.ArmedDelay = Task.Delay(
+                                TimeSpan.FromSeconds(_provider.KeepAliveSeconds),
+                                _time,
+                                registration.Cts.Token);
+                        }
+                        catch (Exception ex) when (!IsProcessIntegrityFailure(ex))
+                        {
+                            registration.DelayStartFailure = ex;
+                        }
+                    }
+                }
+                finally
+                {
+                    registration?.Publication.TrySetResult();
+                    if (registration is not null && !published)
+                    {
+                        CancelKeepAliveRegistration(registration);
+                    }
                 }
             }
 
@@ -1226,8 +1265,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// <returns>
         /// The unpublished registration, or <see langword="null"/> when no loop should run.
         /// <see cref="TryAdmitIdle"/> publishes it only with the idle entry, and cancels it otherwise.
-        /// The loop waits on <see cref="KeepAliveRegistration.Publication"/> before its first delay, so a failure there
-        /// sees the admission decision.
+        /// The loop waits on <see cref="KeepAliveRegistration.Publication"/> before it waits or retires.
+        /// A timer failure stored by <see cref="TryAdmitIdle"/> is thrown after that decision, so retirement still sees whether this registration was published.
         /// </returns>
         /// <remarks>
         /// The loop task is stored and recorded in <see cref="_keepAliveLifetimes"/> before <see cref="TryAdmitIdle"/> takes <see cref="_idleGate"/>.
@@ -1272,6 +1311,32 @@ namespace VectorNNTP.BackFiller.Nntp
         }
 
         /// <summary>
+        /// Returns the idle delay armed by <see cref="TryAdmitIdle"/> the first time, and a new delay for each later interval.
+        /// </summary>
+        /// <param name="registration">Published registration whose <see cref="KeepAliveRegistration.ArmedDelay"/> is consumed once.</param>
+        /// <param name="interval">Configured idle interval used when <paramref name="registration"/> has no armed delay left.</param>
+        /// <param name="cancellationToken">Cancels a delay created here. The armed delay already carries the registration token.</param>
+        /// <returns>The delay the DATE loop waits on before the next DATE.</returns>
+        /// <remarks>
+        /// The first timer is created on the admission thread so a caller that advances a manual clock after admission observes that timer.
+        /// This method does not take <see cref="_idleGate"/>.
+        /// </remarks>
+        private Task NextKeepAliveDelay(
+            KeepAliveRegistration registration,
+            TimeSpan interval,
+            CancellationToken cancellationToken)
+        {
+            var armed = registration.ArmedDelay;
+            if (armed is not null)
+            {
+                registration.ArmedDelay = null;
+                return armed;
+            }
+
+            return Task.Delay(interval, _time, cancellationToken);
+        }
+
+        /// <summary>
         /// Waits <see cref="BackFillerProviderDefinition.KeepAliveSeconds"/>, then sends DATE without waiting for a busy article command.
         /// </summary>
         /// <param name="session">Idle session this loop owns.</param>
@@ -1281,7 +1346,8 @@ namespace VectorNNTP.BackFiller.Nntp
         /// A replacement published after this loop decided to retire is left running. A dequeue that already removed the session keeps it and retires it itself when it is not reusable.
         /// <see cref="NntpProviderSession.SendDateKeepAliveAsync"/> is called with <see cref="_shutdown"/> and without waiting for the busy lock, so an in-use session skips DATE and stays leased.
         /// Cancellation of <paramref name="registration"/> ends the loop without retirement. Any other exception retires the session.
-        /// The loop waits until <see cref="TryAdmitIdle"/> has decided publication, then removes <paramref name="registration"/> only when the dictionary still maps the session to that instance, and then disposes its source.
+        /// The loop waits until <see cref="TryAdmitIdle"/> has decided publication. Its first wait is the timer armed on that admission thread.
+        /// Exit removes <paramref name="registration"/> only when the dictionary still maps the session to that instance, and then disposes its source.
         /// A replacement published after this loop was superseded stays in the dictionary.
         /// <see cref="KeepAliveLoopExitGate"/> runs before that removal and outside <see cref="_idleGate"/>. It is null in production.
         /// </remarks>
@@ -1299,9 +1365,19 @@ namespace VectorNNTP.BackFiller.Nntp
                         return;
                     }
 
+                    if (registration.DelayStartFailure is not null)
+                    {
+                        throw registration.DelayStartFailure;
+                    }
+
+                    if (_beforeFirstKeepAliveDelay is { } beforeDelay)
+                    {
+                        await beforeDelay().ConfigureAwait(false);
+                    }
+
                     while (!token.IsCancellationRequested)
                     {
-                        await Task.Delay(interval, _time, token).ConfigureAwait(false);
+                        await NextKeepAliveDelay(registration, interval, token).ConfigureAwait(false);
                         if (token.IsCancellationRequested)
                         {
                             return;
@@ -2001,6 +2077,19 @@ namespace VectorNNTP.BackFiller.Nntp
             /// A loop that fails before publication leaves this false and may still retire an idle session.
             /// </summary>
             internal bool WasPublished { get; set; }
+
+            /// <summary>
+            /// First idle interval, created on the admission thread after this registration is published and before
+            /// <see cref="Publication"/> is signaled. Null when admission did not publish this registration.
+            /// The loop consumes it once so a later interval is not this same task.
+            /// </summary>
+            internal Task? ArmedDelay { get; set; }
+
+            /// <summary>
+            /// Failure from creating <see cref="ArmedDelay"/> on the admission thread.
+            /// The loop throws it after publication so the session is retired without leaving this task blocked.
+            /// </summary>
+            internal Exception? DelayStartFailure { get; set; }
         }
     }
 
