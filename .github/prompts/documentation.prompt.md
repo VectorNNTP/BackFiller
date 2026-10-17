@@ -1,9 +1,9 @@
 ---
 mode: agent
-description: Perform the canonical, additive, single-file XML documentation pass for VectorNNTP.BackFiller.
+description: Perform the canonical, additive, single-file XML documentation pass for VectorNNTPD.BackFillerService.
 ---
 
-# Canonical VectorNNTP.BackFiller documentation-only pass
+# Canonical VectorNNTPD.BackFillerService documentation-only pass
 
 Documentation-only pass for:
 

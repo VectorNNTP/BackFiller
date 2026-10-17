@@ -79,9 +79,9 @@ if (-not (Test-Path -LiteralPath $config)) {
 
 @(
     "@echo off"
-    "dotnet restore BackFiller.slnx -p:Platform=x64"
+    "dotnet restore VectorNNTPD.slnx -p:Platform=x64"
     "if errorlevel 1 exit /b %errorlevel%"
-    "dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore"
+    "dotnet build VectorNNTPD.slnx --configuration Release -p:Platform=x64 --no-restore"
     "if errorlevel 1 exit /b %errorlevel%"
 ) | Set-Content -LiteralPath $buildCommand -Encoding ascii
 

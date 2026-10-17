@@ -35,10 +35,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore BackFiller.slnx -p:Platform=x64
+        run: dotnet restore VectorNNTPD.slnx -p:Platform=x64
 
       - name: Build solution
-        run: dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore
+        run: dotnet build VectorNNTPD.slnx --configuration Release -p:Platform=x64 --no-restore
 
       - name: Test solution with coverage where the collector is already referenced
         timeout-minutes: 25

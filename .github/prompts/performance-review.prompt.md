@@ -1,9 +1,9 @@
 ---
 mode: agent
-description: Review VectorNNTP.BackFiller changes as high-throughput article recovery and network infrastructure.
+description: Review VectorNNTPD.BackFillerService changes as high-throughput article recovery and network infrastructure.
 ---
 
-# VectorNNTP.BackFiller Performance Review
+# VectorNNTPD.BackFillerService Performance Review
 
 Review the selected production code, benchmark, test, configuration, or performance-related change as high-throughput NNTP/network infrastructure.
 

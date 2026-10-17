@@ -27,7 +27,7 @@ This task itself is NOT restricted to one file.
 
 The project-wide scope is:
 
-src/BackFiller/
+src/VectorNNTPD.BackFillerService/
 
 You must enumerate, audit, and remediate the entire production project.
 
@@ -43,11 +43,11 @@ Treat those resources as the canonical methodology for each individual file.
 
 The ONLY files that may be modified are C# source files under:
 
-src/BackFiller/
+src/VectorNNTPD.BackFillerService/
 
 Do NOT modify:
 
-- tests/BackFiller.tests/
+- tests/VectorNNTPD.BackFillerService.Tests/
 - tools/
 - `.github/`
 - `.artifacts/`
@@ -109,7 +109,7 @@ Do not stop after a convenient number of files.
 
 First enumerate every C# source file belonging to:
 
-src/BackFiller/
+src/VectorNNTPD.BackFillerService/
 
 Establish the exact current number of production C# files.
 
@@ -582,13 +582,13 @@ After remediation:
 7. Verify no logging contract changed.
 8. Verify no configuration changed.
 9. Verify no analyzer configuration changed.
-10. Verify no files outside src/BackFiller/ changed.
+10. Verify no files outside src/VectorNNTPD.BackFillerService/ changed.
 11. Validate XML documentation.
 12. Build ONLY:
 
-src/BackFiller/BackFiller.csproj
+src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj
 
-with `dotnet build src/BackFiller/BackFiller.csproj --configuration Release -p:Platform=x64`.
+with `dotnet build src/VectorNNTPD.BackFillerService/VectorNNTPD.BackFillerService.csproj --configuration Release -p:Platform=x64`.
 
 Do NOT build the entire solution unless a genuine blocking issue requires it.
 
@@ -684,7 +684,7 @@ Report:
 - build result;
 - tests not run;
 - exact files modified;
-- confirmation that only src/BackFiller/ was modified;
+- confirmation that only src/VectorNNTPD.BackFillerService/ was modified;
 - confirmation that only XML documentation changed;
 - confirmation that no executable behavior changed;
 - confirmation that no API/signature changed;

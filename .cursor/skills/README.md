@@ -28,7 +28,7 @@ Project skills **may not** appear in Rider ACP’s injected skill list.
 4. Follow each skill’s mandatory workflow and validation checklist.
 5. **Combine** skills when needed (e.g. protocol feature → `nntp-protocol` + `testing` + `implementation-and-verification`). Do not default to a single skill when several apply.
 
-These skills apply to standalone **VectorNNTP.BackFiller**. Article Work RabbitMQ settlement is in scope. Do not invent NNTPD server, transit-publisher, or benchmark behavior that this tree does not contain. Shared NNTPD context that the code still documents (for example `nntpsharedconfig` and `ConnectionStrings__NntpDB`) stays shared-domain context.
+These skills apply to standalone **VectorNNTPD.BackFillerService**. Article Work RabbitMQ settlement is in scope. Do not invent NNTPD server, transit-publisher, or benchmark behavior that this tree does not contain. Shared NNTPD context that the code still documents (for example `nntpsharedconfig` and `ConnectionStrings__NntpDB`) stays shared-domain context.
 
 ## Skills
 

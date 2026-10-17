@@ -4,7 +4,7 @@ applyTo: "**/*.{cs,csproj,json,md}"
 
 # Performance engineering
 
-VectorNNTP.BackFiller is a high-throughput article-recovery worker. Treat hot paths, network I/O, queueing, parsing, buffering, connection management, and high-frequency logging as performance-sensitive while preserving correctness, resource ownership, cancellation, Article Work settlement, lifecycle, and shutdown semantics. There is no in-repo benchmark project.
+VectorNNTPD.BackFillerService is a high-throughput article-recovery worker. Treat hot paths, network I/O, queueing, parsing, buffering, connection management, and high-frequency logging as performance-sensitive while preserving correctness, resource ownership, cancellation, Article Work settlement, lifecycle, and shutdown semantics. There is no in-repo benchmark project.
 
 - Avoid unnecessary allocations, copies, boxing, closures, LINQ, temporary collections, task creation, synchronization, lock contention, and retained large objects or buffers on hot paths.
 - Pay particular attention to Gen 0/1/2 pressure, LOH allocations, pinned memory, buffer retention, pooled-resource lifetime, and unbounded growth.

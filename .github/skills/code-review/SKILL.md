@@ -1,10 +1,10 @@
-# VectorNNTP.BackFiller Code Review Skill
+# VectorNNTPD.BackFillerService Code Review Skill
 
 ## Purpose
 
-Review changes to the VectorNNTP.BackFiller codebase for correctness, reliability, performance, concurrency safety, resource safety, maintainability, and consistency with the established architecture.
+Review changes to the VectorNNTPD.BackFillerService codebase for correctness, reliability, performance, concurrency safety, resource safety, maintainability, and consistency with the established architecture.
 
-VectorNNTP.BackFiller is a standalone worker, extracted from VectorNNTP.NNTPD, that retrieves unavailable Usenet articles from external NNTP providers and settles Article Work on RabbitMQ.
+VectorNNTPD.BackFillerService is a standalone worker, extracted from VectorNNTP.NNTPD, that retrieves unavailable Usenet articles from external NNTP providers and settles Article Work on RabbitMQ.
 
 The service is designed for very high throughput and high concurrency. Code review must therefore consider both functional correctness and behaviour under sustained load, failure, cancellation, and shutdown.
 
@@ -91,7 +91,7 @@ Do not recommend unrelated refactoring merely because it could make the code "cl
 
 ## Concurrency
 
-Concurrency is a critical concern in VectorNNTP.BackFiller.
+Concurrency is a critical concern in VectorNNTPD.BackFillerService.
 
 For every change involving shared state, queues, consumers, producers, workers, providers, or asynchronous operations, explicitly consider:
 

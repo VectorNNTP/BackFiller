@@ -7,8 +7,10 @@ alwaysApply: true
 
 | Kind | Location |
 |------|----------|
-| Production code | `src/BackFiller/` |
-| Production tests | `tests/BackFiller.tests/` |
+| Service production code | `src/VectorNNTPD.BackFillerService/` |
+| Shared library production code | `src/VectorNNTPD.Common/` |
+| Service tests | `tests/VectorNNTPD.BackFillerService.Tests/` |
+| Shared library tests | `tests/VectorNNTPD.Common.Tests/` |
 | Permanent docs (explicitly accepted only) | `docs/` |
 | Local experiments, benches, audits, generated reports, prototypes | `.artifacts/` |
 | Local release staging | `.artifacts/release/win-64` and `.artifacts/release/linux-64` |

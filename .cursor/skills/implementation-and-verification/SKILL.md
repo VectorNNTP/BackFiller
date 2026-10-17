@@ -25,13 +25,14 @@ Execute a complete engineering task continuously, safely, and with verified resu
 3. Identify affected components and dependencies; choose other skills as needed.
 4. Inspect applicable RFCs (`nntp-protocol`) and accepted `docs/` when relevant. `.artifacts/` is gitignored local evidence, not current architecture.
 5. Plan a **focused** implementation (smallest correct change). Command work implements only the requested command.
-6. Implement production changes under `src/BackFiller/`. Put experiments, benches, and generated reports under `.artifacts/` (not `docs/` or `tools/` unless explicitly promoted).
-7. Add or update meaningful production tests under `tests/BackFiller.tests/` (`testing`).
+6. Implement service changes under `src/VectorNNTPD.BackFillerService/` and shared-library changes under `src/VectorNNTPD.Common/`. Put experiments, benches, and generated reports under `.artifacts/` (not `docs/` or `tools/` unless explicitly promoted).
+7. Add or update meaningful tests under `tests/VectorNNTPD.BackFillerService.Tests/` or `tests/VectorNNTPD.Common.Tests/` (`testing`).
 8. Run relevant verification for this repo. Platform is x64 only. An unset platform defaults to x64 in `Directory.Build.props`, and any other platform fails the build. Output is `bin/x64/<Configuration>/`. Pass the same `-p:Platform=x64` on build and on `--no-build` test. Typical local commands:
-   - `dotnet restore BackFiller.slnx -p:Platform=x64`
-   - `dotnet build BackFiller.slnx --configuration Release -p:Platform=x64 --no-restore`
-   - `dotnet test tests/BackFiller.tests/BackFiller.Tests.csproj --configuration Release -p:Platform=x64 --no-build`
-   - `dotnet format BackFiller.slnx --verify-no-changes` (local check; CI does not run it)
+   - `dotnet restore VectorNNTPD.slnx -p:Platform=x64`
+   - `dotnet build VectorNNTPD.slnx --configuration Release -p:Platform=x64 --no-restore`
+   - `dotnet test tests/VectorNNTPD.BackFillerService.Tests/VectorNNTPD.BackFillerService.Tests.csproj --configuration Release -p:Platform=x64 --no-build`
+   - `dotnet test tests/VectorNNTPD.Common.Tests/VectorNNTPD.Common.Tests.csproj --configuration Release -p:Platform=x64 --no-build`
+   - `dotnet format VectorNNTPD.slnx --verify-no-changes` (local check; CI does not run it)
    - Treat warnings as errors / analyzers already enforced by `Directory.Build.props`
 9. Inspect the final diff for unintended changes.
 10. Report actual commands, results, and remaining limitations.
